@@ -1,0 +1,112 @@
+from django.contrib.auth.models import Group, User
+from django.core.management.base import BaseCommand
+
+from supply_chain.models import Branch, Farmer, Supplier
+
+
+class Command(BaseCommand):
+    help = "Seed demo users, groups, and farmers."
+
+    def handle(self, *args, **options):
+        groups = {
+            "Supplier": Group.objects.get_or_create(name="Supplier")[0],
+            "Retailer": Group.objects.get_or_create(name="Retailer")[0],
+            "Cooperative": Group.objects.get_or_create(name="Cooperative")[0],
+            "Regulator": Group.objects.get_or_create(name="Regulator")[0],
+        }
+
+        admin_user, _ = User.objects.get_or_create(
+            username="admin",
+            defaults={"email": "admin@coffeechain.go.tz", "is_staff": True, "is_superuser": True},
+        )
+        admin_user.set_password("demo123")
+        admin_user.save()
+
+        supplier1 = User.objects.get_or_create(username="supplier1")[0]
+        supplier1.set_password("demo123")
+        supplier1.save()
+        supplier1.groups.add(groups["Supplier"])
+
+        supplier2 = User.objects.get_or_create(username="supplier2")[0]
+        supplier2.set_password("demo123")
+        supplier2.save()
+        supplier2.groups.add(groups["Supplier"])
+
+        retailer1 = User.objects.get_or_create(username="retailer1")[0]
+        retailer1.set_password("demo123")
+        retailer1.save()
+        retailer1.groups.add(groups["Retailer"])
+
+        retailer2 = User.objects.get_or_create(username="retailer2")[0]
+        retailer2.set_password("demo123")
+        retailer2.save()
+        retailer2.groups.add(groups["Retailer"])
+
+        coop1 = User.objects.get_or_create(username="cooperative1")[0]
+        coop1.set_password("demo123")
+        coop1.save()
+        coop1.groups.add(groups["Cooperative"])
+
+        coop2 = User.objects.get_or_create(username="cooperative2")[0]
+        coop2.set_password("demo123")
+        coop2.save()
+        coop2.groups.add(groups["Cooperative"])
+
+        coop3 = User.objects.get_or_create(username="cooperative3")[0]
+        coop3.set_password("demo123")
+        coop3.save()
+        coop3.groups.add(groups["Cooperative"])
+
+        regulator = User.objects.get_or_create(username="regulator1")[0]
+        regulator.set_password("demo123")
+        regulator.save()
+        regulator.groups.add(groups["Regulator"])
+
+        supplier_a, _ = Supplier.objects.get_or_create(
+            name="Mbeya Fertilizers Ltd", defaults={"user": supplier1, "region": "Mbeya"}
+        )
+        Supplier.objects.get_or_create(
+            name="Tanzania Agricultural Inputs", defaults={"user": supplier2, "region": "Dar es Salaam"}
+        )
+
+        retailer_a, _ = Branch.objects.get_or_create(
+            name="Bukoba Agro Shop",
+            branch_type=Branch.RETAILER,
+            defaults={"district": "Bukoba", "region": "Kagera", "user": retailer1},
+        )
+        Branch.objects.get_or_create(
+            name="Kagera Farm Supplies",
+            branch_type=Branch.RETAILER,
+            defaults={"district": "Bukoba", "region": "Kagera", "user": retailer2},
+        )
+        coop_a, _ = Branch.objects.get_or_create(
+            name="Bukoba Coffee Farmers AMCOS",
+            branch_type=Branch.COOPERATIVE,
+            defaults={"district": "Bukoba", "region": "Kagera", "user": coop1},
+        )
+        Branch.objects.get_or_create(
+            name="Karagwe Coffee Union",
+            branch_type=Branch.COOPERATIVE,
+            defaults={"district": "Karagwe", "region": "Kagera", "user": coop2},
+        )
+        Branch.objects.get_or_create(
+            name="Muleba Growers Society",
+            branch_type=Branch.COOPERATIVE,
+            defaults={"district": "Muleba", "region": "Kagera", "user": coop3},
+        )
+
+        farmers = [
+            ("MOA-KAG-001", "Juma Kyando", "0711000001", coop_a),
+            ("MOA-KAG-002", "Zuwena Joseph", "0711000002", coop_a),
+            ("MOA-KAG-003", "Musa Shine", "0711000003", coop_a),
+            ("MOA-KAG-004", "Rehema Lema", "0711000004", coop_a),
+            ("MOA-KAG-005", "Saidi Mallya", "0711000005", coop_a),
+        ]
+
+        for ministry_id, name, phone, coop in farmers:
+            Farmer.objects.get_or_create(
+                ministry_id=ministry_id,
+                defaults={"name": name, "phone_number": phone, "district": "Bukoba", "cooperative": coop},
+            )
+
+        self.stdout.write(self.style.SUCCESS("Demo data seeded."))

@@ -1,0 +1,41 @@
+{
+  "_format": "hh-sol-cache-2",
+  "files": {
+    "C:\\Users\\PAVILION AERO\\Desktop\\PROJECTS\\CoffeeChain Web Application\\smart-contracts\\contracts\\CoffeeChainAudit.sol": {
+      "lastModificationDate": 1779098091767,
+      "contentHash": "a0eb0e90fa45fc04add766992c5abfe7",
+      "sourceName": "contracts/CoffeeChainAudit.sol",
+      "solcConfig": {
+        "version": "0.8.20",
+        "settings": {
+          "evmVersion": "paris",
+          "optimizer": {
+            "enabled": false,
+            "runs": 200
+          },
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "^0.8.20"
+      ],
+      "artifacts": [
+        "CoffeeChainAudit"
+      ]
+    }
+  }
+}

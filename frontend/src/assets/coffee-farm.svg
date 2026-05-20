@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800" fill="none">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="800" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ecfdf5"/>
+      <stop offset="1" stop-color="#bbf7d0"/>
+    </linearGradient>
+    <linearGradient id="hill" x1="0" y1="0" x2="1200" y2="0" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#166534"/>
+      <stop offset="1" stop-color="#052e16"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="800" fill="url(#sky)"/>
+  <path d="M0 520c160-90 310-120 450-90 120 26 210 82 360 110 140 26 260 0 390-70v330H0V520z" fill="url(#hill)" opacity="0.95"/>
+  <path d="M0 610c190-70 330-70 470-10 170 70 320 70 520 0 90-30 150-50 210-60v260H0V610z" fill="#14532d" opacity="0.9"/>
+  <g opacity="0.85">
+    <circle cx="210" cy="240" r="54" fill="#86efac"/>
+    <circle cx="270" cy="260" r="36" fill="#4ade80"/>
+    <circle cx="980" cy="210" r="66" fill="#86efac"/>
+    <circle cx="1040" cy="250" r="40" fill="#4ade80"/>
+  </g>
+  <g opacity="0.55">
+    <path d="M120 360c80-70 170-70 250 0" stroke="#16a34a" stroke-width="16" stroke-linecap="round"/>
+    <path d="M800 330c90-80 190-80 280 0" stroke="#16a34a" stroke-width="16" stroke-linecap="round"/>
+  </g>
+</svg>
