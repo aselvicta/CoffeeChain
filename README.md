@@ -4,7 +4,7 @@
 
 ## Overview
 
-CoffeeChain is a comprehensive digital platform for managing fertilizer distribution and coffee collection in Tanzania's Kagera region. The system provides transparent and secure tracking of agricultural inputs and outputs through a trust-based verification system.
+CoffeeChain is a comprehensive digital platform for managing fertilizer distribution and coffee collection across Tanzania's coffee-producing regions. The system provides transparent and secure tracking of agricultural inputs and outputs through a trust-based verification system.
 
 ## System Architecture
 
@@ -21,163 +21,9 @@ The system operates on a hierarchical structure with four distinct user roles:
 
 Farmers do not have login accounts. They are identified by their Ministry of Agriculture IDs and their data is seeded in the system for tracking fertilizer purchases and coffee collection.
 
-## Demo Credentials
+## Access & Account Setup
 
-All demo accounts use the same password: **demo123**
-
-### Admin Account
-
-| Field | Value |
-|-------|-------|
-| Username | `admin` |
-| Password | `demo123` |
-| Role | System Administrator |
-| Organization | Tanzania Coffee Board (TCB) |
-| Name | Dr. Joseph Mwamba |
-| Email | admin@coffeechain.go.tz |
-| Phone | +255 28 222 1234 |
-
-**Features:**
-- Full system overview dashboard with metrics
-- Manage suppliers, retailers, and cooperatives
-- View system-wide analytics and reports
-- Monitor all transactions across the platform
-
----
-
-### Supplier Accounts
-
-#### Supplier 1
-| Field | Value |
-|-------|-------|
-| Username | `supplier1` |
-| Password | `demo123` |
-| Organization | Mbeya Fertilizers Ltd |
-| Supplier ID | SUP-001 |
-| Email | contact@mbeyafert.co.tz |
-| Phone | +255 25 250 3456 |
-
-#### Supplier 2
-| Field | Value |
-|-------|-------|
-| Username | `supplier2` |
-| Password | `demo123` |
-| Organization | Tanzania Agricultural Inputs |
-| Supplier ID | SUP-002 |
-| Email | info@tainputs.co.tz |
-| Phone | +255 22 211 5678 |
-
-**Features:**
-- Dispatch fertilizer batches to retailers and cooperatives
-- View inventory and stock levels
-- Track delivery status
-- View dispatch history and reports
-
----
-
-### Retailer/Shop Accounts
-
-#### Retailer 1
-| Field | Value |
-|-------|-------|
-| Username | `retailer1` |
-| Password | `demo123` |
-| Organization | Bukoba Agro Shop |
-| Retailer ID | RET-001 |
-| Location | Jamhuri Street, Bukoba |
-| Region | Kagera |
-| District | Bukoba Urban |
-| Email | bukobaagro@gmail.com |
-| Phone | +255 784 123 456 |
-
-#### Retailer 2
-| Field | Value |
-|-------|-------|
-| Username | `retailer2` |
-| Password | `demo123` |
-| Organization | Kagera Farm Supplies |
-| Retailer ID | RET-002 |
-| Location | Market Area, Bukoba |
-| Region | Kagera |
-| District | Bukoba Rural |
-| Email | kagerafarms@yahoo.com |
-| Phone | +255 785 234 567 |
-
-**Features:**
-- Receive fertilizer batches from suppliers
-- Distribute fertilizer to farmers with OTP verification
-- View registered farmers
-- Track stock and transactions
-
----
-
-### Cooperative (AMCOS) Accounts
-
-#### Cooperative 1
-| Field | Value |
-|-------|-------|
-| Username | `cooperative1` |
-| Password | `demo123` |
-| Organization | Bukoba Coffee Farmers AMCOS |
-| AMCOS ID | AMCOS-001 |
-| Village | Maruku |
-| District | Bukoba Rural |
-| Region | Kagera |
-| Members | 250 farmers |
-| Email | bukobacoopamcos@gmail.com |
-| Phone | +255 786 345 678 |
-
-#### Cooperative 2
-| Field | Value |
-|-------|-------|
-| Username | `cooperative2` |
-| Password | `demo123` |
-| Organization | Karagwe Coffee Union |
-| AMCOS ID | AMCOS-002 |
-| Village | Kayanga |
-| District | Karagwe |
-| Region | Kagera |
-| Members | 180 farmers |
-| Email | karagweunion@gmail.com |
-| Phone | +255 787 456 789 |
-
-#### Cooperative 3
-| Field | Value |
-|-------|-------|
-| Username | `cooperative3` |
-| Password | `demo123` |
-| Organization | Muleba Growers Society |
-| AMCOS ID | AMCOS-003 |
-| Village | Nsherekela |
-| District | Muleba |
-| Region | Kagera |
-| Members | 320 farmers |
-| Email | mulebagrow@yahoo.com |
-| Phone | +255 788 567 890 |
-
-**Features:**
-- Manage farmer registry (member farmers)
-- Receive fertilizer from suppliers and retailers
-- Distribute fertilizer to farmers with OTP verification
-- Collect coffee from farmers
-- Track all farmer transactions
-
----
-
-## Seeded Farmer Data
-
-Farmers are identified by Ministry of Agriculture IDs. Sample farmers include:
-
-- **MOA-KAG-001** - Juma Abdallah (Maruku, AMCOS-001)
-- **MOA-KAG-002** - Asha Mwita (Maruku, AMCOS-001)
-- **MOA-KAG-003** - Hamisi Kassim (Maruku, AMCOS-001)
-- **MOA-KAG-006** - Emmanuel Rweyemamu (Kayanga, AMCOS-002)
-- **MOA-KAG-007** - Grace Nyamwiza (Kayanga, AMCOS-002)
-- **MOA-KAG-011** - Frank Birungi (Nsherekela, AMCOS-003)
-
-_Total: 15 seeded farmers across 3 cooperatives_
-
----
+Demo credentials are not listed in this repository. Create admin and role accounts through your deployment or via Django admin as part of your secure onboarding process.
 
 ## Key Features
 
@@ -195,7 +41,7 @@ _Total: 15 seeded farmers across 3 cooperatives_
 ### 3. Admin Dashboard
 - Comprehensive metrics and analytics
 - Real-time monitoring of suppliers, retailers, and cooperatives
-- Regional overview for Kagera
+- Regional overview across coffee-producing regions
 - Monthly trends visualization
 - Recent activity tracking
 
@@ -261,8 +107,7 @@ Primary buttons are designed with sufficient contrast for visibility.
 
 2. **Login:**
    - Select your role (Admin, Supplier, Retailer, or Cooperative)
-   - Enter credentials from the table above
-   - All passwords are: `demo123`
+   - Enter the credentials issued by your administrator
 
 3. **Explore:**
    - Each role has a different dashboard and feature set
@@ -291,11 +136,7 @@ Primary buttons are designed with sufficient contrast for visibility.
 **Tanzania Coffee Board**
 - Email: info@coffeechain.go.tz
 - Phone: +255 28 222 1234
-- Location: Ofisi ya Mkoa, Bukoba, Kagera
-
-**Regional Office (Kagera)**
-- Location: Bukoba, Kagera Region
-- Districts Covered: Bukoba Urban, Bukoba Rural, Karagwe, Muleba
+- Location: Tanzania
 
 ---
 
@@ -322,7 +163,7 @@ For technical support or questions about the platform, please contact:
 
 © 2026 Tanzania Coffee Board. All rights reserved.
 
-This system is developed for the exclusive use of Tanzania Coffee Board and its authorized partners in the Kagera region coffee value chain.
+This system is developed for the exclusive use of Tanzania Coffee Board and its authorized partners in Tanzania's coffee-producing regions.
 
 ---
 
