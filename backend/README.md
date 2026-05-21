@@ -68,3 +68,5 @@ POLYGON_RPC_URL=https://rpc-amoy.polygon.technology
 POLYGON_PRIVATE_KEY=your_private_key
 POLYGON_CONTRACT_ADDRESS=0x...
 ```
+
+i have updated here
