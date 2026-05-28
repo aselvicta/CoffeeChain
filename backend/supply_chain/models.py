@@ -59,11 +59,59 @@ class FertilizerBatch(models.Model):
     fertilizer_type = models.CharField(max_length=120)
     quantity_bags = models.PositiveIntegerField()
     unit_weight_kg = models.DecimalField(max_digits=6, decimal_places=2, default=50)
+    # Extended metadata fields
+    manufacturer = models.CharField(max_length=200, blank=True)
+    production_date = models.DateField(null=True, blank=True)
+    expiry_date = models.DateField(null=True, blank=True)
+    CERT_STATUS = [
+        ("Pending", "Pending"),
+        ("Certified", "Certified"),
+        ("Rejected", "Rejected"),
+    ]
+    certification_status = models.CharField(max_length=20, choices=CERT_STATUS, default="Pending")
+    # Warehouse relation (optional)
+    storage_location = models.ForeignKey(
+        'Warehouse', on_delete=models.SET_NULL, null=True, blank=True, related_name='batches'
+    )
+    # Lifecycle state
+    LIFECYCLE_STATES = [
+        ("MANUFACTURED", "Manufactured"),
+        ("RECEIVED", "Received"),
+        ("IN_STORAGE", "In Storage"),
+        ("DISPATCHED", "Dispatched"),
+        ("DELIVERED", "Delivered"),
+        ("VERIFIED", "Verified"),
+        ("RETURNED", "Returned"),
+        ("EXPIRED", "Expired"),
+    ]
+    lifecycle_state = models.CharField(max_length=20, choices=LIFECYCLE_STATES, default="IN_STORAGE")
+    # optional derived field for tons
+    quantity_tons = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     notes = models.TextField(blank=True)
 
     def __str__(self):
         return self.batch_code
+
+    def save(self, *args, **kwargs):
+        # compute approximate tons from bags and unit weight if not provided
+        try:
+            if self.quantity_bags is not None and (self.quantity_tons is None or self.quantity_tons == 0):
+                self.quantity_tons = (self.quantity_bags * float(self.unit_weight_kg)) / 1000.0
+        except Exception:
+            pass
+        super().save(*args, **kwargs)
+
+
+class Warehouse(models.Model):
+    name = models.CharField(max_length=200)
+    section = models.CharField(max_length=100, blank=True)
+    capacity_bags = models.PositiveIntegerField(default=0)
+    current_bags = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.section})" 
 
 
 class Transfer(models.Model):

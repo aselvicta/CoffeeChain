@@ -14,6 +14,7 @@ from .models import (
     DeliveryProof,
     Farmer,
     FertilizerBatch,
+    Warehouse,
     OTPVerification,
     Supplier,
     Transfer,
@@ -35,6 +36,7 @@ from .serializers import (
     DeliveryProofSerializer,
     FarmerSerializer,
     FertilizerBatchSerializer,
+    WarehouseSerializer,
     OTPVerificationSerializer,
     SupplierSerializer,
     TransferSerializer,
@@ -162,6 +164,18 @@ class BranchViewSet(viewsets.ModelViewSet):
         if self.action in ["list", "retrieve"]:
             return [IsAuthenticated()]
         return [IsAdmin()]
+
+
+class WarehouseViewSet(viewsets.ModelViewSet):
+    queryset = Warehouse.objects.all()
+    serializer_class = WarehouseSerializer
+
+    def get_permissions(self):
+        # allow any authenticated user to list and retrieve warehouses
+        if self.action in ["list", "retrieve"]:
+            return [IsAuthenticated()]
+        # creation and deletion restricted to suppliers or admins
+        return [IsAuthenticated(), SupplierOrAdmin()]
 
 
 class FarmerViewSet(viewsets.ModelViewSet):

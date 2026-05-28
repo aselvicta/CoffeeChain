@@ -86,10 +86,24 @@ class FarmerSerializer(serializers.ModelSerializer):
         ]
 
 
+class WarehouseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = __import__('supply_chain.models', fromlist=['Warehouse']).Warehouse
+        fields = ['id', 'name', 'section', 'capacity_bags', 'current_bags', 'created_at']
+
+
 class FertilizerBatchSerializer(serializers.ModelSerializer):
     supplier = SupplierSerializer(read_only=True)
     supplier_id = serializers.PrimaryKeyRelatedField(
         queryset=Supplier.objects.all(), source="supplier", write_only=True
+    )
+
+    storage_location = WarehouseSerializer(read_only=True)
+    storage_location_id = serializers.PrimaryKeyRelatedField(
+        queryset=__import__('supply_chain.models', fromlist=['Warehouse']).Warehouse.objects.all(),
+        source='storage_location',
+        write_only=True,
+        required=False,
     )
 
     class Meta:
@@ -102,6 +116,14 @@ class FertilizerBatchSerializer(serializers.ModelSerializer):
             "fertilizer_type",
             "quantity_bags",
             "unit_weight_kg",
+            "quantity_tons",
+            "manufacturer",
+            "production_date",
+            "expiry_date",
+            "certification_status",
+            "storage_location",
+            "storage_location_id",
+            "lifecycle_state",
             "notes",
             "created_at",
         ]
