@@ -53,6 +53,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
   const [isSaving, setIsSaving] = useState(false);
   const [dispatchSearch, setDispatchSearch] = useState('');
   const [selectedDispatch, setSelectedDispatch] = useState(null);
+  const [readNotificationIds, setReadNotificationIds] = useState([]);
   const [dispatchItems, setDispatchItems] = useState([createDispatchLineItem()]);
 
   const getDispatchStatusMeta = (status) => {
@@ -233,6 +234,59 @@ export function SupplierDashboard({ userProfile, onLogout }) {
     return dispatches.filter((dispatch) => String(dispatch.id).toLowerCase().includes(query));
   }, [dispatches, dispatchSearch]);
 
+  const notifications = useMemo(() => {
+    const inventoryNotifications = inventory
+      .filter((item) => item.expiryRisk || item.available <= item.threshold)
+      .map((item) => {
+        const isExpiryRisk = Boolean(item.expiryRisk);
+        const notificationId = `inventory-${item.id}-${isExpiryRisk ? 'expiry' : 'stock'}`;
+        return {
+          id: notificationId,
+          type: isExpiryRisk ? 'expiry' : 'stock',
+          title: isExpiryRisk ? `Expiry risk: ${item.name}` : `Low stock: ${item.name}`,
+          message: isExpiryRisk
+            ? `Batch ${item.id} may expire soon.`
+            : `${item.available} bags remain before replenishment is needed.`,
+          details: `Location: ${formatWarehouseLocation(item.storageLocation)}`,
+          timeLabel: isExpiryRisk ? (item.expiryDate || 'Soon') : 'Stock review needed',
+          meta: item.manufacturer || item.certificationStatus,
+          priority: isExpiryRisk ? 'high' : 'medium',
+          badgeTone: isExpiryRisk ? 'bg-amber-500' : 'bg-sky-600',
+          unread: !readNotificationIds.includes(notificationId),
+          actionLabel: 'Open inventory',
+        };
+      });
+
+    const dispatchNotifications = dispatches.map((dispatch) => {
+      const isVerified = dispatch.rawStatus === 'VERIFIED';
+      const isReceived = dispatch.rawStatus === 'RECEIVED';
+      const notificationId = `dispatch-${dispatch.id}`;
+      return {
+        id: notificationId,
+        type: isVerified ? 'delivery' : 'dispatch',
+        title: isVerified ? `Delivery confirmed: ${dispatch.batchCode}` : `Dispatch update: ${dispatch.batchCode}`,
+        message: `${dispatch.bags} bags sent to ${dispatch.destination}.`,
+        details: `${dispatch.warehouse} • ${dispatch.date || 'Recent update'}`,
+        timeLabel: dispatch.date || 'Today',
+        meta: dispatch.status,
+        priority: isReceived ? 'low' : 'medium',
+        badgeTone: isVerified ? 'bg-emerald-600' : 'bg-blue-600',
+        unread: !readNotificationIds.includes(notificationId),
+        dispatchId: dispatch.id,
+        actionLabel: 'Open dispatch details',
+      };
+    });
+
+    return [...inventoryNotifications, ...dispatchNotifications].sort((left, right) => {
+      const leftScore = left.priority === 'high' ? 2 : left.priority === 'medium' ? 1 : 0;
+      const rightScore = right.priority === 'high' ? 2 : right.priority === 'medium' ? 1 : 0;
+      if (rightScore !== leftScore) return rightScore - leftScore;
+      return String(right.timeLabel || '').localeCompare(String(left.timeLabel || ''));
+    });
+  }, [dispatches, inventory, readNotificationIds]);
+
+  const unreadNotificationCount = notifications.filter((notification) => notification.unread).length;
+
   return (
     <div className="min-h-screen bg-gray-50 flex">
       {/* Sidebar */}
@@ -284,7 +338,11 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                 title="Notifications"
               >
                 <Bell className="h-5 w-5 text-gray-700" />
-                <span className="absolute -top-0.5 -right-0.5 inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-semibold leading-none text-white bg-red-600 rounded-full">3</span>
+                {unreadNotificationCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 inline-flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 py-0.5 text-xs font-semibold leading-none text-white">
+                    {unreadNotificationCount}
+                  </span>
+                )}
               </button>
               <div className="text-right">
                 <p className="text-sm font-medium text-gray-900">{userProfile.name}</p>
@@ -887,7 +945,30 @@ export function SupplierDashboard({ userProfile, onLogout }) {
         </main>
       </div>
       {isNotificationsOpen && (
-        <NotificationPanel isOpen={isNotificationsOpen} onClose={() => setIsNotificationsOpen(false)} />
+        <NotificationPanel
+          isOpen={isNotificationsOpen}
+          onClose={() => setIsNotificationsOpen(false)}
+          notifications={notifications}
+          unreadCount={unreadNotificationCount}
+          onMarkRead={(notificationId) => {
+            setReadNotificationIds((currentIds) =>
+              currentIds.includes(notificationId) ? currentIds : [...currentIds, notificationId]
+            );
+          }}
+          onMarkAllRead={() => setReadNotificationIds(notifications.map((notification) => notification.id))}
+          onOpenInventory={() => {
+            setActiveTab('inventory');
+            setIsNotificationsOpen(false);
+          }}
+          onOpenDispatch={(dispatchId) => {
+            const dispatch = dispatches.find((item) => String(item.id) === String(dispatchId));
+            if (dispatch) {
+              setSelectedDispatch(dispatch);
+              setActiveTab('history');
+            }
+            setIsNotificationsOpen(false);
+          }}
+        />
       )}
       {isTraceOpen && (
         <TraceBatchModal isOpen={isTraceOpen} onClose={() => setIsTraceOpen(false)} batchId={traceBatchId || ''} />
