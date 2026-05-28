@@ -96,6 +96,43 @@ export function createBatch(payload) {
   });
 }
 
+export function updateBatch(id, payload) {
+  return apiFetch(`/api/batches/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteBatch(id) {
+  return apiFetch(`/api/batches/${id}/`, {
+    method: 'DELETE',
+  });
+}
+
+export function fetchWarehouses() {
+  return apiFetch('/api/warehouses/');
+}
+
+export function createWarehouse(payload) {
+  return apiFetch('/api/warehouses/', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateWarehouse(id, payload) {
+  return apiFetch(`/api/warehouses/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteWarehouse(id) {
+  return apiFetch(`/api/warehouses/${id}/`, {
+    method: 'DELETE',
+  });
+}
+
 export function fetchTransfers() {
   return apiFetch('/api/transfers/');
 }

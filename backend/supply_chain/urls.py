@@ -14,6 +14,7 @@ from .views import (
     OTPVerificationViewSet,
     SupplierViewSet,
     TransferViewSet,
+    WarehouseViewSet,
 )
 
 
@@ -25,6 +26,7 @@ router.register("farmers", FarmerViewSet)
 router.register("batches", FertilizerBatchViewSet)
 router.register("transfers", TransferViewSet)
 router.register("proofs", DeliveryProofViewSet)
+router.register("warehouses", WarehouseViewSet)
 router.register("otps", OTPVerificationViewSet)
 router.register("anchors", BlockchainAnchorViewSet)
 router.register("audit-logs", AuditLogViewSet)
