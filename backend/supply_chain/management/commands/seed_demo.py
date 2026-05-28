@@ -2,6 +2,7 @@ from django.contrib.auth.models import Group, User
 from django.core.management.base import BaseCommand
 
 from supply_chain.models import Branch, Farmer, Supplier
+from supply_chain.services.ministry_of_agriculture import fetch_farmers
 
 
 class Command(BaseCommand):
@@ -95,18 +96,42 @@ class Command(BaseCommand):
             defaults={"district": "Muleba", "region": "Kagera", "user": coop3},
         )
 
-        farmers = [
-            ("MOA-KAG-001", "Juma Kyando", "0711000001", coop_a),
-            ("MOA-KAG-002", "Zuwena Joseph", "0711000002", coop_a),
-            ("MOA-KAG-003", "Musa Shine", "0711000003", coop_a),
-            ("MOA-KAG-004", "Rehema Lema", "0711000004", coop_a),
-            ("MOA-KAG-005", "Saidi Mallya", "0711000005", coop_a),
-        ]
+        farmer_records = fetch_farmers()
+        cooperative_cache: dict[str, Branch] = {}
+        created = 0
+        updated = 0
 
-        for ministry_id, name, phone, coop in farmers:
-            Farmer.objects.get_or_create(
-                ministry_id=ministry_id,
-                defaults={"name": name, "phone_number": phone, "district": "Bukoba", "cooperative": coop},
+        for record in farmer_records:
+            cooperative = None
+            coop_name = record.cooperative_name
+            if coop_name:
+                if coop_name not in cooperative_cache:
+                    cooperative_cache[coop_name], _ = Branch.objects.get_or_create(
+                        name=coop_name,
+                        branch_type=Branch.COOPERATIVE,
+                        defaults={
+                            "district": record.district,
+                            "region": record.region,
+                        },
+                    )
+                cooperative = cooperative_cache[coop_name]
+
+            _, was_created = Farmer.objects.update_or_create(
+                ministry_id=record.ministry_id,
+                defaults={
+                    "name": record.name,
+                    "phone_number": record.phone_number,
+                    "district": record.district,
+                    "cooperative": cooperative,
+                },
             )
+            if was_created:
+                created += 1
+            else:
+                updated += 1
 
-        self.stdout.write(self.style.SUCCESS("Demo data seeded."))
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"Demo data seeded. Farmers created: {created}, updated: {updated}."
+            )
+        )

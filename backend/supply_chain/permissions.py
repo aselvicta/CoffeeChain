@@ -38,3 +38,8 @@ class SupplierOrAdmin(BasePermission):
 class RegulatorOrAdmin(BasePermission):
     def has_permission(self, request, view):
         return IsRegulator().has_permission(request, view) or IsAdmin().has_permission(request, view)
+
+
+class CooperativeOrAdmin(BasePermission):
+    def has_permission(self, request, view):
+        return IsCooperative().has_permission(request, view) or IsAdmin().has_permission(request, view)

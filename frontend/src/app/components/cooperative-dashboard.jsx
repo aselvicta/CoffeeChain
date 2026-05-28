@@ -3,11 +3,14 @@ import { Package, Users, Send, History, LogOut, TrendingUp, ShieldCheck } from '
 import { LineChart, Line, PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import { Logo } from './logo';
 import { FarmerOTPModal } from './farmer-otp-modal';
+import { FarmerRegistryPanel } from './farmer-registry-panel';
+import { ReceiveFertilizerPanel } from './receive-fertilizer-panel';
+import { CooperativeHistoryPanel } from './cooperative-history-panel';
+import { VerificationTrustSeal } from './verification-trust-seal';
 import {
   createTransfer,
   fetchFarmers,
   fetchTransfers,
-  receiveTransfer,
   sendOtp,
   uploadProof,
   verifyOtp,
@@ -15,8 +18,7 @@ import {
 
 export function CooperativeDashboard({ userProfile, onLogout }) {
   const [activeTab, setActiveTab] = useState('overview');
-  const [receiveForm, setReceiveForm] = useState({ batchId: '' });
-  const [receivedBatches, setReceivedBatches] = useState([]);
+  const [inboundTransfers, setInboundTransfers] = useState([]);
   const [distributionForm, setDistributionForm] = useState({ batchId: '', farmer: '', bags: '', otp: '' });
   const [proofFile, setProofFile] = useState(null);
   const [distributions, setDistributions] = useState([]);
@@ -26,6 +28,8 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
   const [pendingFarmer, setPendingFarmer] = useState(null);
   const [isOtpOpen, setIsOtpOpen] = useState(false);
   const [otpMessage, setOtpMessage] = useState('');
+  const [smsInfo, setSmsInfo] = useState(null);
+  const [latestVerification, setLatestVerification] = useState(null);
   const [statusMessage, setStatusMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const verificationTrend = [
@@ -41,6 +45,18 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
       { name: 'Pending', value: pending, color: '#f59e0b' },
     ];
   }, [distributions]);
+
+  const receivedBatches = useMemo(
+    () =>
+      inboundTransfers.filter(
+        (transfer) => transfer.status === 'RECEIVED' || transfer.status === 'VERIFIED'
+      ),
+    [inboundTransfers]
+  );
+  const pendingReceiptCount = useMemo(
+    () => inboundTransfers.filter((transfer) => transfer.status === 'DISPATCHED').length,
+    [inboundTransfers]
+  );
 
   const refreshData = async () => {
     try {
@@ -67,11 +83,12 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
           transfer.transfer_type === 'SUPPLIER_TO_BRANCH' &&
           transfer.to_branch?.id === userProfile.branchId
       );
-      setReceivedBatches(
+      setInboundTransfers(
         inbound.map((transfer) => ({
           id: transfer.id,
           batchId: transfer.batch?.id,
           batchCode: transfer.batch?.batch_code,
+          fertilizerType: transfer.batch?.fertilizer_type,
           source: transfer.from_supplier?.name || transfer.from_branch?.name || 'Source',
           bags: transfer.quantity_bags,
           date: transfer.created_at?.slice(0, 10),
@@ -88,17 +105,27 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
         outbound.map((transfer) => ({
           id: transfer.id,
           farmer: transfer.farmer?.name || 'Farmer',
+          farmerMinistryId: transfer.farmer?.ministry_id,
+          farmerPhone: transfer.farmer?.phone_number,
           bags: transfer.quantity_bags,
           otp: transfer.status === 'VERIFIED' ? 'Verified' : 'Pending',
           date: transfer.created_at?.slice(0, 10),
+          batchCode: transfer.batch?.batch_code,
+          fertilizerType: transfer.batch?.fertilizer_type,
+          rawTransfer: transfer,
         }))
       );
       setVerificationList(
         outbound.map((transfer) => ({
           id: transfer.id,
           farmer: transfer.farmer?.name || 'Farmer',
+          farmerMinistryId: transfer.farmer?.ministry_id || '',
           bags: transfer.quantity_bags,
           status: transfer.status === 'VERIFIED' ? 'verified' : 'pending',
+          batchCode: transfer.batch?.batch_code,
+          fertilizerType: transfer.batch?.fertilizer_type,
+          date: transfer.created_at?.slice(0, 10),
+          rawTransfer: transfer,
         }))
       );
     } catch (error) {
@@ -172,15 +199,21 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
         </header>
 
         {/* Content */}
-        <main className="flex-1 overflow-y-auto p-8">
+        <main className="flex-1 overflow-y-auto p-8 space-y-6">
+          {latestVerification && (
+            <VerificationTrustSeal
+              verification={latestVerification}
+              onDismiss={() => setLatestVerification(null)}
+            />
+          )}
           {activeTab === 'overview' && (
             <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 {[
-                  { label: 'Member Farmers', value: `${farmers.length}`, change: 'Active members', icon: Users },
-                  { label: 'Fertilizer Stock', value: `${receivedBatches.reduce((sum, batch) => sum + batch.bags, 0)} bags`, change: 'Available', icon: Package },
-                  { label: 'Distributed Today', value: `${distributions.length}`, change: 'Farmer deliveries', icon: Send },
-                  { label: 'Distributions Verified', value: `${verificationList.filter((item) => item.status === 'verified').length}`, change: 'This week', icon: ShieldCheck },
+                  { label: 'Member Farmers', value: `${farmers.length}`, change: 'Registered with this AMCOS', icon: Users },
+                  { label: 'Fertilizer Stock', value: `${receivedBatches.reduce((sum, batch) => sum + batch.bags, 0)} bags`, change: 'Confirmed receipts', icon: Package },
+                  { label: 'Pending Receipts', value: `${pendingReceiptCount}`, change: 'Awaiting confirmation', icon: Package },
+                  { label: 'Distributions Verified', value: `${verificationList.filter((item) => item.status === 'verified').length}`, change: 'OTP confirmed', icon: ShieldCheck },
                 ].map((metric, index) => (
                   <div key={index} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                     <div className="flex items-center gap-3 mb-4">
@@ -198,25 +231,41 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                 <h3 className="text-lg font-bold text-gray-900 mb-4">Quick Actions</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <button className="flex items-center gap-3 p-4 bg-green-50 rounded-lg hover:bg-green-100 transition-colors">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('fertilizer-out')}
+                    className="flex items-center gap-3 p-4 bg-green-50 rounded-lg hover:bg-green-100 transition-colors text-left"
+                  >
                     <Send className="h-5 w-5 text-green-700" />
-                    <div className="text-left">
+                    <div>
                       <p className="font-semibold text-gray-900">Distribute Fertilizer</p>
                       <p className="text-sm text-gray-600">Give to farmers with OTP</p>
                     </div>
                   </button>
-                  <button className="flex items-center gap-3 p-4 bg-amber-50 rounded-lg hover:bg-amber-100 transition-colors">
-                    <ShieldCheck className="h-5 w-5 text-amber-700" />
-                    <div className="text-left">
-                      <p className="font-semibold text-gray-900">Verify Distribution</p>
-                      <p className="text-sm text-gray-600">Confirm issued fertilizer batches</p>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('fertilizer-in')}
+                    className="flex items-center gap-3 p-4 bg-amber-50 rounded-lg hover:bg-amber-100 transition-colors text-left"
+                  >
+                    <Package className="h-5 w-5 text-amber-700" />
+                    <div>
+                      <p className="font-semibold text-gray-900">Receive Fertilizer</p>
+                      <p className="text-sm text-gray-600">
+                        {pendingReceiptCount > 0
+                          ? `${pendingReceiptCount} pending receipt${pendingReceiptCount === 1 ? '' : 's'}`
+                          : 'Confirm incoming batches'}
+                      </p>
                     </div>
                   </button>
-                  <button className="flex items-center gap-3 p-4 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('farmers')}
+                    className="flex items-center gap-3 p-4 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors text-left"
+                  >
                     <Users className="h-5 w-5 text-blue-700" />
-                    <div className="text-left">
+                    <div>
                       <p className="font-semibold text-gray-900">Farmer Registry</p>
-                      <p className="text-sm text-gray-600">View member farmers</p>
+                      <p className="text-sm text-gray-600">Register and view farmers</p>
                     </div>
                   </button>
                 </div>
@@ -225,95 +274,68 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
           )}
 
           {activeTab === 'farmers' && (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <h2 className="text-xl font-bold text-gray-900 mb-4">Farmer Registry</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {farmers.map((farmer) => (
-                  <div key={farmer.id} className="border border-gray-200 rounded-lg p-4">
-                    <p className="font-semibold text-gray-900">{farmer.name}</p>
-                    <p className="text-sm text-gray-600">{farmer.village}</p>
-                    <p className="text-sm text-gray-500">{farmer.phone}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <FarmerRegistryPanel
+              farmers={farmers}
+              userProfile={userProfile}
+              onRegistered={refreshData}
+            />
           )}
 
           {activeTab === 'fertilizer-in' && (
-            <div className="space-y-6">
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                <h2 className="text-xl font-bold text-gray-900 mb-4">Receive Fertilizer</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <input
-                    type="text"
-                    placeholder="Transfer ID"
-                    value={receiveForm.batchId}
-                    onChange={(e) => setReceiveForm({ ...receiveForm, batchId: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  />
-                </div>
-                <button
-                  onClick={async () => {
-                    if (!receiveForm.batchId) return;
-                    setIsSaving(true);
-                    setStatusMessage('');
-                    try {
-                      await receiveTransfer(receiveForm.batchId);
-                      await refreshData();
-                      setReceiveForm({ batchId: '' });
-                    } catch (error) {
-                      setStatusMessage(error.message);
-                    } finally {
-                      setIsSaving(false);
-                    }
-                  }}
-                  className="mt-4 bg-green-600 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-green-700 transition-colors"
-                >
-                  {isSaving ? 'Recording...' : 'Record Receipt'}
-                </button>
-                {statusMessage && <p className="mt-3 text-sm text-red-600">{statusMessage}</p>}
-              </div>
-
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-4">Recent Receipts</h3>
-                <div className="space-y-3">
-                  {receivedBatches.map((batch) => (
-                    <div key={batch.id} className="flex items-center justify-between border border-gray-100 rounded-lg p-4">
-                      <div>
-                        <p className="font-semibold text-gray-900">{batch.id}</p>
-                        <p className="text-sm text-gray-600">{batch.source} • {batch.bags} bags</p>
-                      </div>
-                      <span className="text-sm text-gray-500">{batch.date}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
+            <ReceiveFertilizerPanel
+              inboundTransfers={inboundTransfers}
+              onRefresh={refreshData}
+            />
           )}
 
           {activeTab === 'fertilizer-out' && (
             <div className="space-y-6">
+              {receivedBatches.length === 0 && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                  <p className="text-sm font-medium text-amber-800">
+                    No confirmed fertilizer batches available.
+                  </p>
+                  <p className="text-xs text-amber-700">
+                    Go to <button type="button" onClick={() => setActiveTab('fertilizer-in')} className="font-semibold underline">Receive Fertilizer</button> to confirm incoming batches before distributing.
+                  </p>
+                </div>
+              )}
+              {farmers.length === 0 && (
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+                  <p className="text-sm font-medium text-blue-800">
+                    No farmers registered with this AMCOS.
+                  </p>
+                  <p className="text-xs text-blue-700">
+                    Go to <button type="button" onClick={() => setActiveTab('farmers')} className="font-semibold underline">Farmer Registry</button> to register farmers from the Ministry registry.
+                  </p>
+                </div>
+              )}
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                <h2 className="text-xl font-bold text-gray-900 mb-4">Distribute Fertilizer</h2>
+                <h2 className="text-xl font-bold text-gray-900 mb-1">Distribute Fertilizer</h2>
+                <p className="text-sm text-gray-600 mb-4">
+                  Select a confirmed batch, choose a registered farmer, then send an OTP to verify delivery.
+                </p>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <select
                     value={distributionForm.batchId}
                     onChange={(e) =>
                       setDistributionForm({ ...distributionForm, batchId: e.target.value })
                     }
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    disabled={receivedBatches.length === 0}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
                   >
                     <option value="">Select Batch</option>
                     {receivedBatches.map((batch) => (
                       <option key={batch.id} value={batch.batchId}>
-                        {batch.batchCode || `Batch ${batch.id}`} ({batch.bags} bags)
+                        {batch.batchCode || `Batch ${batch.id}`} ({batch.bags} bags{batch.fertilizerType ? ` • ${batch.fertilizerType}` : ''})
                       </option>
                     ))}
                   </select>
                   <select
                     value={distributionForm.farmer}
                     onChange={(e) => setDistributionForm({ ...distributionForm, farmer: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    disabled={farmers.length === 0}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
                   >
                     <option value="">Select Farmer</option>
                     {farmers.map((farmer) => (
@@ -324,6 +346,7 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                   </select>
                   <input
                     type="number"
+                    min="1"
                     placeholder="Bags"
                     value={distributionForm.bags}
                     onChange={(e) => setDistributionForm({ ...distributionForm, bags: e.target.value })}
@@ -365,6 +388,7 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                       setPendingTransfer(transfer);
                       setPendingFarmer(selectedFarmer || null);
                       setOtpMessage(otpResponse.sms?.message || '');
+                      setSmsInfo(otpResponse.sms || null);
                       setIsOtpOpen(true);
                       setDistributionForm({ batchId: '', farmer: '', bags: '', otp: '' });
                       await refreshData();
@@ -399,56 +423,115 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
           )}
 
           {activeTab === 'verification' && (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <h2 className="text-xl font-bold text-gray-900 mb-4">Verify Distribution</h2>
-              <div className="space-y-3">
-                {verificationList.map((record) => (
-                  <div key={record.id} className="flex items-center justify-between border border-gray-100 rounded-lg p-4">
-                    <div>
-                      <p className="font-semibold text-gray-900">{record.farmer}</p>
-                      <p className="text-sm text-gray-600">{record.bags} bags • {record.id}</p>
-                    </div>
-                    <span
-                      className={`px-3 py-1 rounded-full text-xs font-medium ${
-                        record.status === 'verified' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
-                      }`}
-                    >
-                      {record.status}
-                    </span>
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+                  <p className="text-sm text-gray-600">Total Distributions</p>
+                  <p className="text-2xl font-bold text-gray-900">{verificationList.length}</p>
+                </div>
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+                  <p className="text-sm text-gray-600">Verified</p>
+                  <p className="text-2xl font-bold text-green-700">
+                    {verificationList.filter((item) => item.status === 'verified').length}
+                  </p>
+                </div>
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+                  <p className="text-sm text-gray-600">Awaiting OTP</p>
+                  <p className="text-2xl font-bold text-amber-700">
+                    {verificationList.filter((item) => item.status === 'pending').length}
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <h2 className="text-xl font-bold text-gray-900 mb-1">Verify Distribution</h2>
+                <p className="text-sm text-gray-600 mb-4">
+                  Resume the OTP flow for any distribution that hasn't been verified yet.
+                </p>
+                {verificationList.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-8 text-center">
+                    <ShieldCheck className="mx-auto mb-2 h-8 w-8 text-gray-400" />
+                    <p className="text-sm font-medium text-gray-700">
+                      No distributions to verify yet
+                    </p>
                   </div>
-                ))}
+                ) : (
+                  <div className="space-y-3">
+                    {verificationList.map((record) => {
+                      const isVerified = record.status === 'verified';
+                      return (
+                        <div
+                          key={record.id}
+                          className="flex flex-col gap-4 rounded-lg border border-gray-200 p-4 sm:flex-row sm:items-center sm:justify-between"
+                        >
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="font-semibold text-gray-900">{record.farmer}</p>
+                              {record.farmerMinistryId && (
+                                <span className="text-xs text-gray-500">
+                                  ({record.farmerMinistryId})
+                                </span>
+                              )}
+                              <span
+                                className={`px-3 py-1 rounded-full text-xs font-medium ${
+                                  isVerified
+                                    ? 'bg-green-100 text-green-700'
+                                    : 'bg-yellow-100 text-yellow-700'
+                                }`}
+                              >
+                                {isVerified ? 'Verified' : 'Pending'}
+                              </span>
+                            </div>
+                            <p className="text-sm text-gray-600">
+                              {record.bags} bags
+                              {record.batchCode ? ` • ${record.batchCode}` : ''}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              Distribution #{record.id} • {record.date}
+                            </p>
+                          </div>
+                          {!isVerified && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  setStatusMessage('');
+                                  const otpResponse = await sendOtp(record.id);
+                                  setPendingTransfer(record.rawTransfer);
+                                  setPendingFarmer({
+                                    name: record.farmer,
+                                    ministryId: record.farmerMinistryId,
+                                  });
+                                  setOtpMessage(otpResponse.sms?.message || '');
+                                  setSmsInfo(otpResponse.sms || null);
+                                  setIsOtpOpen(true);
+                                } catch (error) {
+                                  setStatusMessage(error.message);
+                                }
+                              }}
+                              className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700"
+                            >
+                              <ShieldCheck className="h-4 w-4" />
+                              Resend &amp; Verify OTP
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {statusMessage && (
+                  <p className="mt-3 text-sm text-red-600">{statusMessage}</p>
+                )}
               </div>
             </div>
           )}
 
           {activeTab === 'history' && (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <h2 className="text-xl font-bold text-gray-900 mb-4">Transaction History</h2>
-              <div className="space-y-3">
-                {[
-                  ...receivedBatches.map((batch) => ({
-                    id: batch.id,
-                    type: 'Receipt',
-                    detail: `${batch.source} • ${batch.bags} bags`,
-                    date: batch.date,
-                  })),
-                  ...distributions.map((dist) => ({
-                    id: dist.id,
-                    type: 'Distribution',
-                    detail: `${dist.farmer} • ${dist.bags} bags • OTP ${dist.otp}`,
-                    date: dist.date,
-                  })),
-                ].map((record) => (
-                  <div key={record.id} className="flex items-center justify-between border border-gray-100 rounded-lg p-4">
-                    <div>
-                      <p className="font-semibold text-gray-900">{record.type}: {record.id}</p>
-                      <p className="text-sm text-gray-600">{record.detail}</p>
-                    </div>
-                    <span className="text-sm text-gray-500">{record.date}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <CooperativeHistoryPanel
+              receivedBatches={inboundTransfers}
+              distributions={distributions}
+            />
           )}
 
           {activeTab === 'analytics' && (
@@ -517,15 +600,20 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
             await refreshData();
           }}
           onVerify={async (code) => {
-            await verifyOtp(pendingTransfer.id, code);
+            const result = await verifyOtp(pendingTransfer.id, code);
+            if (result?.verification) {
+              setLatestVerification(result.verification);
+            }
           }}
           onResend={async () => {
             const response = await sendOtp(pendingTransfer.id);
             setOtpMessage(response.sms?.message || '');
+            setSmsInfo(response.sms || null);
           }}
           farmerName={pendingFarmer?.name || 'Farmer'}
           farmerId={pendingFarmer?.ministryId || ''}
           smsMessage={otpMessage}
+          smsInfo={smsInfo}
           distributionData={{
             bagsGiven: pendingTransfer.quantity_bags,
             fertilizerType: pendingTransfer.batch?.fertilizer_type || 'Fertilizer',

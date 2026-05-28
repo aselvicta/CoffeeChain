@@ -3,6 +3,15 @@ import { Lock, Shield, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react'
 import { InputOTP, InputOTPGroup, InputOTPSlot } from './ui/input-otp';
 import { useLanguage } from './language-context';
 
+interface SmsInfo {
+  provider?: string;
+  delivered?: boolean;
+  phone_number?: string;
+  message?: string;
+  code_preview?: string;
+  error?: string;
+}
+
 interface FarmerOTPModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -12,6 +21,7 @@ interface FarmerOTPModalProps {
   farmerName: string;
   farmerId: string;
   smsMessage?: string;
+  smsInfo?: SmsInfo | null;
   distributionData: {
     bagsGiven: number;
     fertilizerType: string;
@@ -27,6 +37,7 @@ export function FarmerOTPModal({
   farmerName,
   farmerId,
   smsMessage,
+  smsInfo,
   distributionData
 }: FarmerOTPModalProps) {
   const { t, language } = useLanguage();
@@ -130,16 +141,63 @@ export function FarmerOTPModal({
           </div>
 
           {/* OTP Sent Notification */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-start gap-2">
-            <Shield className="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0" />
-            <div>
-              <p className="text-sm text-blue-900 font-medium">{t('otpSentTo')}</p>
-              <p className="text-xs text-blue-700 mt-1">
-                {smsMessage ||
+          <div
+            className={`rounded-lg p-3 flex items-start gap-2 border ${
+              smsInfo?.delivered === false
+                ? 'bg-red-50 border-red-200'
+                : 'bg-blue-50 border-blue-200'
+            }`}
+          >
+            <Shield
+              className={`w-4 h-4 mt-0.5 flex-shrink-0 ${
+                smsInfo?.delivered === false ? 'text-red-600' : 'text-blue-600'
+              }`}
+            />
+            <div className="flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <p
+                  className={`text-sm font-medium ${
+                    smsInfo?.delivered === false ? 'text-red-900' : 'text-blue-900'
+                  }`}
+                >
+                  {t('otpSentTo')}
+                  {smsInfo?.phone_number ? ` ${smsInfo.phone_number}` : ''}
+                </p>
+                {smsInfo?.provider && (
+                  <span className="rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-gray-700 border border-gray-200">
+                    {smsInfo.provider}
+                  </span>
+                )}
+                {smsInfo?.delivered === true && (
+                  <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-green-700">
+                    delivered
+                  </span>
+                )}
+                {smsInfo?.delivered === false && (
+                  <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-red-700">
+                    not delivered
+                  </span>
+                )}
+              </div>
+              <p
+                className={`text-xs mt-1 ${
+                  smsInfo?.delivered === false ? 'text-red-700' : 'text-blue-700'
+                }`}
+              >
+                {smsInfo?.message || smsMessage ||
                   (language === 'en'
                     ? 'Ask the farmer for the SMS code they received.'
                     : 'Mwombe mkulima namba aliyotumiwa kwenye simu yake.')}
               </p>
+              {smsInfo?.code_preview && smsInfo.provider === 'simulated' && (
+                <p className="text-xs text-amber-700 mt-1">
+                  Simulated mode: code <strong>{smsInfo.code_preview}</strong>{' '}
+                  (configure SMS_PROVIDER for real delivery).
+                </p>
+              )}
+              {smsInfo?.error && (
+                <p className="text-xs text-red-700 mt-1">{smsInfo.error}</p>
+              )}
             </div>
           </div>
 

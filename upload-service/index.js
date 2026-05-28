@@ -34,13 +34,20 @@ app.post("/upload", upload.single("file"), async (req, res) => {
     if (!req.file) {
       return res.status(400).json({ error: "file is required" });
     }
+    console.log(
+      `[upload] file=${req.file.originalname} size=${req.file.size} type=${req.file.mimetype}`
+    );
     const file = new File([req.file.buffer], req.file.originalname, {
-      type: req.file.mimetype,
+      type: req.file.mimetype || "application/octet-stream",
     });
     const cid = await client.uploadFile(file);
+    console.log(`[upload] success cid=${cid.toString()}`);
     return res.json({ success: true, cid: cid.toString() });
   } catch (error) {
-    return res.status(500).json({ error: error.message || "upload failed" });
+    console.error("[upload] error:", error);
+    return res
+      .status(500)
+      .json({ error: error.message || "upload failed", stack: error.stack });
   }
 });
 

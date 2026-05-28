@@ -85,6 +85,18 @@ export function fetchFarmers() {
   return apiFetch('/api/farmers/');
 }
 
+export function lookupMinistryFarmer(ministryId) {
+  const params = new URLSearchParams({ ministry_id: ministryId });
+  return apiFetch(`/api/farmers/lookup/?${params.toString()}`);
+}
+
+export function registerFarmer(payload) {
+  return apiFetch('/api/farmers/register/', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 export function fetchBatches() {
   return apiFetch('/api/batches/');
 }

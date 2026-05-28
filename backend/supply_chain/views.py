@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib.auth.models import Group, User
 from django.db import transaction
 from django.utils import timezone
@@ -20,6 +21,7 @@ from .models import (
     Transfer,
 )
 from .permissions import (
+    CooperativeOrAdmin,
     IsAdmin,
     IsCooperative,
     IsRegulator,
@@ -43,8 +45,13 @@ from .serializers import (
     UserSerializer,
 )
 from .services.blockchain import anchor_to_polygon, build_hash
-from .services.ipfs import store_file
+from .services.ipfs import store_file, store_json
+from .services.ministry_of_agriculture import fetch_farmer
 from .services.otp import generate_code, is_expired, send_sms
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_role(user):
@@ -184,9 +191,167 @@ class FarmerViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAdmin]
 
     def get_permissions(self):
-        if self.action in ["list", "retrieve"]:
+        if self.action in ["list", "retrieve", "lookup"]:
             return [IsAuthenticated()]
+        if self.action == "register":
+            return [IsAuthenticated(), CooperativeOrAdmin()]
         return [IsAdmin()]
+
+    def get_queryset(self):
+        qs = Farmer.objects.select_related("cooperative").order_by("name")
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return qs.none()
+        role = resolve_role(user)
+        if role == "cooperative":
+            branch = Branch.objects.filter(user=user).first()
+            if branch:
+                return qs.filter(cooperative=branch)
+            return qs.none()
+        return qs
+
+    @action(detail=False, methods=["get"])
+    def lookup(self, request):
+        """Fetch farmer details from the Ministry of Agriculture registry.
+
+        Used by cooperatives to preview farmer information before registering
+        them. Does not write to the database.
+        """
+        ministry_id = (request.query_params.get("ministry_id") or "").strip()
+        if not ministry_id:
+            return Response(
+                {"detail": "ministry_id query parameter is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        record = fetch_farmer(ministry_id)
+        if not record:
+            return Response(
+                {
+                    "detail": f"No farmer found in the Ministry registry with ID {ministry_id}.",
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        existing = (
+            Farmer.objects.select_related("cooperative")
+            .filter(ministry_id=ministry_id)
+            .first()
+        )
+        return Response(
+            {
+                "ministry_id": record.ministry_id,
+                "name": record.name,
+                "phone_number": record.phone_number,
+                "region": record.region,
+                "district": record.district,
+                "cooperative_name": record.cooperative_name,
+                "is_registered": existing is not None
+                and existing.cooperative is not None,
+                "current_cooperative": (
+                    BranchSerializer(existing.cooperative).data
+                    if existing and existing.cooperative
+                    else None
+                ),
+            }
+        )
+
+    @action(detail=False, methods=["post"])
+    def register(self, request):
+        """Register a farmer to a cooperative using the Ministry registry as the
+        source of truth. Cooperatives can only register farmers to their own
+        branch; admins may specify ``cooperative_id`` to target any branch.
+        """
+        ministry_id = (request.data.get("ministry_id") or "").strip()
+        if not ministry_id:
+            return Response(
+                {"detail": "ministry_id is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        record = fetch_farmer(ministry_id)
+        if not record:
+            return Response(
+                {
+                    "detail": (
+                        f"No farmer found in the Ministry registry with ID "
+                        f"{ministry_id}. Verify the ID and try again."
+                    )
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        role = resolve_role(request.user)
+        branch = None
+        if role == "cooperative":
+            branch = Branch.objects.filter(user=request.user).first()
+            if not branch:
+                return Response(
+                    {"detail": "No cooperative branch is assigned to this account."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        else:
+            cooperative_id = request.data.get("cooperative_id")
+            if cooperative_id:
+                branch = Branch.objects.filter(
+                    id=cooperative_id, branch_type=Branch.COOPERATIVE
+                ).first()
+            if not branch and record.cooperative_name:
+                branch = Branch.objects.filter(
+                    name__iexact=record.cooperative_name,
+                    branch_type=Branch.COOPERATIVE,
+                ).first()
+            if not branch:
+                return Response(
+                    {
+                        "detail": (
+                            "Unable to determine target cooperative. Provide "
+                            "cooperative_id or ensure the Ministry record "
+                            "references a known cooperative."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        existing = Farmer.objects.filter(ministry_id=record.ministry_id).first()
+        if (
+            existing
+            and existing.cooperative
+            and existing.cooperative_id != branch.id
+            and role != "admin"
+        ):
+            return Response(
+                {
+                    "detail": (
+                        f"Farmer {record.ministry_id} is already registered with "
+                        f"{existing.cooperative.name}. Contact an administrator "
+                        "to transfer registration."
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        farmer, created = Farmer.objects.update_or_create(
+            ministry_id=record.ministry_id,
+            defaults={
+                "name": record.name,
+                "phone_number": record.phone_number,
+                "district": record.district,
+                "cooperative": branch,
+            },
+        )
+        AuditLog.objects.create(
+            action="farmer_registered" if created else "farmer_re_registered",
+            user=request.user,
+            details={
+                "ministry_id": farmer.ministry_id,
+                "cooperative": branch.name,
+                "branch_id": branch.id,
+            },
+        )
+        return Response(
+            FarmerSerializer(farmer).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
 
 
 class FertilizerBatchViewSet(viewsets.ModelViewSet):
@@ -303,27 +468,168 @@ class TransferViewSet(viewsets.ModelViewSet):
             transfer.status = Transfer.VERIFIED
             transfer.save(update_fields=["status"])
 
-            if not hasattr(transfer, "blockchain_anchor"):
-                cid = ""
-                latest_proof = transfer.proofs.order_by("-uploaded_at").first()
-                if latest_proof:
-                    cid = latest_proof.cid
-                payload = f"{transfer.batch.batch_code}|{transfer.quantity_bags}|{cid}|{transfer.id}"
-                data_hash = build_hash(payload)
-                tx_payload = anchor_to_polygon(str(transfer.id), data_hash)
-                BlockchainAnchor.objects.create(
-                    transfer=transfer,
-                    data_hash=data_hash,
-                    tx_hash=tx_payload["tx_hash"],
-                    payload={"cid": cid, "timestamp": tx_payload["timestamp"]},
-                )
+        anchor_summary = self._record_verification_proof(transfer, request.user)
 
         AuditLog.objects.create(
             action="otp_verified",
             user=request.user,
             transfer=transfer,
+            details=anchor_summary,
         )
-        return Response(TransferSerializer(transfer).data)
+
+        response_payload = TransferSerializer(transfer).data
+        response_payload["verification"] = anchor_summary
+        return Response(response_payload)
+
+    def _record_verification_proof(self, transfer, user):
+        """Upload the verification receipt to Storacha and anchor on Polygon.
+
+        Returns a summary dict that the caller can store in audit logs and
+        forward to the client. Failures in Storacha or the chain are logged
+        but do not roll back the OTP verification.
+        """
+        if hasattr(transfer, "blockchain_anchor"):
+            existing = transfer.blockchain_anchor
+            return {
+                "cid": existing.payload.get("cid", ""),
+                "tx_hash": existing.tx_hash,
+                "data_hash": existing.data_hash,
+                "network": existing.network,
+                "storage_url": existing.payload.get("storage_url"),
+                "storage_is_remote": existing.payload.get("storage_is_remote", False),
+                "storacha_ok": existing.payload.get(
+                    "storacha_ok", bool(existing.payload.get("cid"))
+                ),
+                "blockchain_ok": existing.payload.get(
+                    "blockchain_ok", bool(existing.tx_hash)
+                ),
+                "explorer_url": (
+                    f"https://amoy.polygonscan.com/tx/{existing.tx_hash}"
+                    if existing.tx_hash
+                    else None
+                ),
+                "anchored_at": existing.anchored_at.isoformat(),
+                "already_anchored": True,
+            }
+
+        latest_proof = transfer.proofs.order_by("-uploaded_at").first()
+        receipt = {
+            "transfer_id": transfer.id,
+            "transfer_type": transfer.transfer_type,
+            "batch": {
+                "id": transfer.batch_id,
+                "code": transfer.batch.batch_code if transfer.batch else None,
+                "fertilizer_type": (
+                    transfer.batch.fertilizer_type if transfer.batch else None
+                ),
+            },
+            "quantity_bags": transfer.quantity_bags,
+            "farmer": (
+                {
+                    "ministry_id": transfer.farmer.ministry_id,
+                    "name": transfer.farmer.name,
+                    "phone_number": transfer.farmer.phone_number,
+                    "district": transfer.farmer.district,
+                }
+                if transfer.farmer
+                else None
+            ),
+            "cooperative": (
+                {
+                    "id": transfer.from_branch.id,
+                    "name": transfer.from_branch.name,
+                    "district": transfer.from_branch.district,
+                    "region": transfer.from_branch.region,
+                }
+                if transfer.from_branch
+                else None
+            ),
+            "supplier": (
+                transfer.from_supplier.name if transfer.from_supplier else None
+            ),
+            "delivery_proof_file_cid": latest_proof.cid if latest_proof else None,
+            "verified_at": timezone.now().isoformat(),
+            "verified_by": user.username if user and user.is_authenticated else None,
+            "otp_attempts": (
+                transfer.otp_verification.attempts
+                if hasattr(transfer, "otp_verification")
+                else None
+            ),
+        }
+
+        storage_result = store_json(f"transfer-{transfer.id}-receipt", receipt)
+        cid = storage_result.cid
+        storacha_ok = storage_result.is_remote
+        storacha_error = storage_result.error
+
+        payload_signature = (
+            f"{receipt['batch'].get('code') or ''}|"
+            f"{transfer.quantity_bags}|"
+            f"{cid}|"
+            f"{transfer.id}|"
+            f"{receipt['verified_at']}"
+        )
+        data_hash = build_hash(payload_signature)
+
+        tx_hash = ""
+        blockchain_ok = False
+        chain_error = ""
+        chain_timestamp = ""
+        try:
+            tx_payload = anchor_to_polygon(str(transfer.id), data_hash)
+            tx_hash = tx_payload["tx_hash"]
+            chain_timestamp = tx_payload["timestamp"]
+            blockchain_ok = True
+        except Exception as exc:
+            chain_error = str(exc)
+            logger.exception("Polygon anchoring failed for transfer %s", transfer.id)
+
+        anchor_payload = {
+            "cid": cid,
+            "storage_url": storage_result.url,
+            "storage_is_remote": storage_result.is_remote,
+            "timestamp": chain_timestamp,
+            "receipt_summary": {
+                "batch_code": receipt["batch"].get("code"),
+                "farmer_ministry_id": (
+                    receipt["farmer"]["ministry_id"] if receipt["farmer"] else None
+                ),
+                "cooperative_name": (
+                    receipt["cooperative"]["name"] if receipt["cooperative"] else None
+                ),
+                "quantity_bags": transfer.quantity_bags,
+            },
+            "storacha_ok": storacha_ok,
+            "blockchain_ok": blockchain_ok,
+        }
+        if storacha_error:
+            anchor_payload["storacha_error"] = storacha_error
+        if chain_error:
+            anchor_payload["blockchain_error"] = chain_error
+
+        BlockchainAnchor.objects.create(
+            transfer=transfer,
+            data_hash=data_hash,
+            tx_hash=tx_hash,
+            network="polygon-amoy",
+            payload=anchor_payload,
+        )
+
+        return {
+            "cid": cid,
+            "tx_hash": tx_hash,
+            "data_hash": data_hash,
+            "network": "polygon-amoy",
+            "storacha_ok": storacha_ok,
+            "blockchain_ok": blockchain_ok,
+            "storacha_error": storacha_error or None,
+            "blockchain_error": chain_error or None,
+            "storage_url": storage_result.url,
+            "storage_is_remote": storage_result.is_remote,
+            "explorer_url": (
+                f"https://amoy.polygonscan.com/tx/{tx_hash}" if tx_hash else None
+            ),
+        }
 
     @action(detail=True, methods=["post"])
     def upload_proof(self, request, pk=None):
