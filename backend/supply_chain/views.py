@@ -1,8 +1,10 @@
 from django.contrib.auth.models import Group, User
 from django.db import transaction
+from django.db.models import Sum
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -72,6 +74,52 @@ def build_user_payload(user):
         "supplier": SupplierSerializer(supplier).data if supplier else None,
         "branch": BranchSerializer(branch).data if branch else None,
     }
+
+
+def get_batch_available_quantity(batch):
+    dispatched_total = (
+        batch.transfers.filter(transfer_type=Transfer.SUPPLIER_TO_BRANCH).aggregate(
+            total=Sum("quantity_bags")
+        )["total"]
+        or 0
+    )
+    return max(batch.quantity_bags - dispatched_total, 0)
+
+
+def build_warehouse_catalog(warehouses):
+    catalog = []
+    for warehouse in warehouses:
+        items = []
+        total_available = 0
+        for batch in warehouse.batches.all().select_related("supplier"):
+            available_bags = get_batch_available_quantity(batch)
+            total_available += available_bags
+            items.append(
+                {
+                    "batch_id": batch.id,
+                    "batch_code": batch.batch_code,
+                    "fertilizer_type": batch.fertilizer_type,
+                    "available_bags": available_bags,
+                    "total_bags": batch.quantity_bags,
+                    "manufacturer": batch.manufacturer,
+                    "production_date": batch.production_date,
+                    "expiry_date": batch.expiry_date,
+                    "certification_status": batch.certification_status,
+                    "storage_location": warehouse.id,
+                }
+            )
+        catalog.append(
+            {
+                "id": warehouse.id,
+                "name": warehouse.name,
+                "section": warehouse.section,
+                "capacity_bags": warehouse.capacity_bags,
+                "current_bags": warehouse.current_bags,
+                "available_bags": total_available,
+                "items": items,
+            }
+        )
+    return catalog
 
 
 class AdminUserViewSet(viewsets.ViewSet):
@@ -178,6 +226,16 @@ class WarehouseViewSet(viewsets.ModelViewSet):
         return [IsAuthenticated(), SupplierOrAdmin()]
 
 
+class WarehouseCatalogView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        warehouses = Warehouse.objects.all().order_by("name").prefetch_related(
+            "batches__transfers", "batches__supplier"
+        )
+        return Response(build_warehouse_catalog(warehouses))
+
+
 class FarmerViewSet(viewsets.ModelViewSet):
     queryset = Farmer.objects.all()
     serializer_class = FarmerSerializer
@@ -209,13 +267,28 @@ class FertilizerBatchViewSet(viewsets.ModelViewSet):
 
 class TransferViewSet(viewsets.ModelViewSet):
     queryset = Transfer.objects.all().select_related(
-        "batch", "from_supplier", "from_branch", "to_branch", "farmer"
+        "batch", "warehouse", "from_supplier", "from_branch", "to_branch", "farmer"
     )
     serializer_class = TransferSerializer
     permission_classes = [IsAuthenticated]
 
     def perform_create(self, serializer):
-        transfer = serializer.save(created_by=self.request.user)
+        batch = serializer.validated_data["batch"]
+        warehouse = serializer.validated_data.get("warehouse") or batch.storage_location
+        requested_bags = serializer.validated_data["quantity_bags"]
+
+        if not warehouse:
+            raise ValidationError({"warehouse_id": "Select a warehouse for this dispatch."})
+        if batch.storage_location and batch.storage_location_id != warehouse.id:
+            raise ValidationError({"warehouse_id": "This batch is not stored in the selected warehouse."})
+
+        available_bags = get_batch_available_quantity(batch)
+        if requested_bags > available_bags:
+            raise ValidationError(
+                {"quantity_bags": f"Only {available_bags} bags are available for dispatch from this warehouse."}
+            )
+
+        transfer = serializer.save(created_by=self.request.user, warehouse=warehouse)
         AuditLog.objects.create(
             action="transfer_created",
             user=self.request.user,

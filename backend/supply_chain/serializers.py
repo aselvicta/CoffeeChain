@@ -11,6 +11,7 @@ from .models import (
     OTPVerification,
     Supplier,
     Transfer,
+    Warehouse,
 )
 
 
@@ -88,8 +89,8 @@ class FarmerSerializer(serializers.ModelSerializer):
 
 class WarehouseSerializer(serializers.ModelSerializer):
     class Meta:
-        model = __import__('supply_chain.models', fromlist=['Warehouse']).Warehouse
-        fields = ['id', 'name', 'section', 'capacity_bags', 'current_bags', 'created_at']
+        model = Warehouse
+        fields = ["id", "name", "section", "capacity_bags", "current_bags", "created_at"]
 
 
 class FertilizerBatchSerializer(serializers.ModelSerializer):
@@ -134,6 +135,10 @@ class TransferSerializer(serializers.ModelSerializer):
     batch_id = serializers.PrimaryKeyRelatedField(
         queryset=FertilizerBatch.objects.all(), source="batch", write_only=True
     )
+    warehouse = WarehouseSerializer(read_only=True)
+    warehouse_id = serializers.PrimaryKeyRelatedField(
+        queryset=Warehouse.objects.all(), source="warehouse", write_only=True, required=False
+    )
     from_supplier = SupplierSerializer(read_only=True)
     from_supplier_id = serializers.PrimaryKeyRelatedField(
         queryset=Supplier.objects.all(),
@@ -160,6 +165,8 @@ class TransferSerializer(serializers.ModelSerializer):
             "id",
             "batch",
             "batch_id",
+            "warehouse",
+            "warehouse_id",
             "transfer_type",
             "from_supplier",
             "from_supplier_id",

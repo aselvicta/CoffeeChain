@@ -14,6 +14,7 @@ from .views import (
     OTPVerificationViewSet,
     SupplierViewSet,
     TransferViewSet,
+    WarehouseCatalogView,
     WarehouseViewSet,
 )
 
@@ -34,6 +35,7 @@ router.register("audit-logs", AuditLogViewSet)
 
 urlpatterns = [
     path("", include(router.urls)),
+    path("warehouse-catalog/", WarehouseCatalogView.as_view(), name="warehouse-catalog"),
     path("reports/audit/", AuditReportView.as_view(), name="audit-report"),
     path("me/", MeView.as_view(), name="me"),
 ]

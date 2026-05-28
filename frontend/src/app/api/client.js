@@ -113,6 +113,10 @@ export function fetchWarehouses() {
   return apiFetch('/api/warehouses/');
 }
 
+export function fetchWarehouseCatalog() {
+  return apiFetch('/api/warehouse-catalog/');
+}
+
 export function createWarehouse(payload) {
   return apiFetch('/api/warehouses/', {
     method: 'POST',
