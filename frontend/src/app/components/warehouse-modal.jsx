@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { X, Plus, Edit2, Trash, Save } from 'lucide-react';
 import { updateBatch, deleteBatch, createBatch } from '../api/client';
 
-export function WarehouseModal({ isOpen, onClose, warehouse, inventory, onRefresh }) {
+export function WarehouseModal({ isOpen, onClose, warehouse, inventory, supplierId, onRefresh }) {
   if (!isOpen || !warehouse) return null;
 
   const [editingId, setEditingId] = useState(null);
@@ -10,11 +10,7 @@ export function WarehouseModal({ isOpen, onClose, warehouse, inventory, onRefres
   const [adding, setAdding] = useState(false);
   const [newItem, setNewItem] = useState({ fertilizer_type: '', quantity_bags: '', unit_weight_kg: '' });
 
-  const batches = inventory.filter((item) => {
-    if (!item.storageLocation) return false;
-    const loc = String(item.storageLocation).toLowerCase();
-    return loc === String(warehouse.name).toLowerCase() || loc === String(warehouse.section).toLowerCase();
-  });
+  const batches = inventory.filter((item) => item.storageLocationId === warehouse.id);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -111,8 +107,14 @@ export function WarehouseModal({ isOpen, onClose, warehouse, inventory, onRefres
                 <div className="flex gap-2">
                   <button className="px-4 py-2 bg-green-600 text-white rounded" onClick={async () => {
                     try {
-                      const payload = { ...newItem, storage_location_id: warehouse.id };
-                      if (payload.quantity_bags) payload.quantity_bags = Number(payload.quantity_bags);
+                      const payload = {
+                        supplier_id: supplierId,
+                        batch_code: `WH-${warehouse.id}-${Date.now()}`,
+                        fertilizer_type: newItem.fertilizer_type,
+                        storage_location_id: warehouse.id,
+                      };
+                      if (newItem.quantity_bags) payload.quantity_bags = Number(newItem.quantity_bags);
+                      if (newItem.unit_weight_kg) payload.unit_weight_kg = Number(newItem.unit_weight_kg);
                       await createBatch(payload);
                           setNewItem({ fertilizer_type: '', quantity_bags: '', unit_weight_kg: '' });
                           setAdding(false);

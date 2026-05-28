@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.contrib.auth.models import Group, User
 from django.db import transaction
+from django.db.models import F
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -365,6 +366,10 @@ class FertilizerBatchViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         batch = serializer.save()
+        if batch.storage_location_id:
+            Warehouse.objects.filter(pk=batch.storage_location_id).update(
+                current_bags=F("current_bags") + batch.quantity_bags
+            )
         AuditLog.objects.create(
             action="batch_created",
             user=self.request.user,

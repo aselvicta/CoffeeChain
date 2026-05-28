@@ -1,7 +1,7 @@
 from django.contrib.auth.models import Group, User
 from django.core.management.base import BaseCommand
 
-from supply_chain.models import Branch, Farmer, Supplier
+from supply_chain.models import Branch, Farmer, Supplier, Warehouse
 from supply_chain.services.ministry_of_agriculture import fetch_farmers
 
 
@@ -68,6 +68,17 @@ class Command(BaseCommand):
         )
         Supplier.objects.get_or_create(
             name="Tanzania Agricultural Inputs", defaults={"user": supplier2, "region": "Dar es Salaam"}
+        )
+
+        Warehouse.objects.get_or_create(
+            name="Main Warehouse",
+            section="A1",
+            defaults={"capacity_bags": 5000, "current_bags": 0},
+        )
+        Warehouse.objects.get_or_create(
+            name="Cold Storage",
+            section="B2",
+            defaults={"capacity_bags": 2000, "current_bags": 0},
         )
 
         retailer_a, _ = Branch.objects.get_or_create(

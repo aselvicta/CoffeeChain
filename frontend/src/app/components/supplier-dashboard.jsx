@@ -5,7 +5,7 @@ import { Logo } from './logo';
 import { NotificationPanel } from './notification-panel';
 import { TraceBatchModal } from './trace-batch-modal';
 import { WarehouseModal } from './warehouse-modal';
-import { createBatch, createTransfer, fetchBatches, fetchBranches, fetchTransfers } from '../api/client';
+import { createBatch, createTransfer, createWarehouse, deleteWarehouse, fetchBatches, fetchBranches, fetchTransfers, fetchWarehouses } from '../api/client';
 
 export function SupplierDashboard({ userProfile, onLogout }) {
   const [activeTab, setActiveTab] = useState('overview');
@@ -36,13 +36,23 @@ export function SupplierDashboard({ userProfile, onLogout }) {
 
   const refreshData = async () => {
     try {
-      const [branchData, batchData, transferData] = await Promise.all([
+      const [branchData, batchData, transferData, warehouseData] = await Promise.all([
         fetchBranches(),
         fetchBatches(),
         fetchTransfers(),
+        fetchWarehouses(),
       ]);
       setBranches(branchData);
       setBatches(batchData);
+      setWarehouses(
+        warehouseData.map((warehouse) => ({
+          id: warehouse.id,
+          name: warehouse.name,
+          section: warehouse.section,
+          capacity: warehouse.capacity_bags,
+          current: warehouse.current_bags,
+        }))
+      );
 
       const supplierTransfers = transferData.filter(
         (transfer) =>
@@ -83,7 +93,8 @@ export function SupplierDashboard({ userProfile, onLogout }) {
           productionDate: batch.production_date || '',
           expiryDate: batch.expiry_date || '',
           certificationStatus: batch.certification_status || 'Pending',
-          storageLocation: batch.storage_location || '',
+          storageLocation: batch.storage_location?.name || '',
+          storageLocationId: batch.storage_location?.id || null,
           lifecycle,
           expiryRisk,
         };
@@ -96,11 +107,6 @@ export function SupplierDashboard({ userProfile, onLogout }) {
 
   useEffect(() => {
     refreshData();
-    // seed simple warehouse list for UI
-    setWarehouses([
-      { id: 1, name: 'Main Warehouse', section: 'A1', capacity: 5000, current: 1200 },
-      { id: 2, name: 'Cold Storage', section: 'B2', capacity: 2000, current: 450 },
-    ]);
   }, []);
 
   const productMix = useMemo(() => {
@@ -311,13 +317,18 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                     <option>Certified</option>
                     <option>Rejected</option>
                   </select>
-                  <input
-                    type="text"
-                    placeholder="Storage Location"
+                  <select
                     value={dispatchForm.storageLocation}
                     onChange={(e) => setDispatchForm({ ...dispatchForm, storageLocation: e.target.value })}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  />
+                  >
+                    <option value="">Storage location (optional)</option>
+                    {warehouses.map((warehouse) => (
+                      <option key={warehouse.id} value={warehouse.id}>
+                        {warehouse.name} • {warehouse.section}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div className="mt-4 flex items-center gap-3">
                   <button
@@ -339,6 +350,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                         const batchPayload = existingBatch
                           ? { id: existingBatch.id }
                           : await createBatch({
+                              supplier_id: userProfile.supplierRecordId,
                               batch_code: dispatchForm.batchId,
                               fertilizer_type: dispatchForm.product,
                               quantity_bags: Number(dispatchForm.bags),
@@ -346,7 +358,9 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                               production_date: dispatchForm.productionDate || null,
                               expiry_date: dispatchForm.expiryDate || null,
                               certification_status: dispatchForm.certificationStatus,
-                              storage_location: dispatchForm.storageLocation,
+                              ...(dispatchForm.storageLocation
+                                ? { storage_location_id: Number(dispatchForm.storageLocation) }
+                                : {}),
                             });
                         // create transfer (dispatch)
                         await createTransfer({
@@ -623,11 +637,24 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                     className="px-3 py-2 border rounded w-28"
                   />
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       if (!newWarehouse.name || !newWarehouse.section || !newWarehouse.capacity) return;
-                      const id = warehouses.length ? Math.max(...warehouses.map((w) => w.id)) + 1 : 1;
-                      setWarehouses([{ id, name: newWarehouse.name, section: newWarehouse.section, capacity: Number(newWarehouse.capacity), current: 0 }, ...warehouses]);
-                      setNewWarehouse({ name: '', section: '', capacity: '' });
+                      setIsSaving(true);
+                      setStatusMessage('');
+                      try {
+                        await createWarehouse({
+                          name: newWarehouse.name,
+                          section: newWarehouse.section,
+                          capacity_bags: Number(newWarehouse.capacity),
+                          current_bags: 0,
+                        });
+                        setNewWarehouse({ name: '', section: '', capacity: '' });
+                        await refreshData();
+                      } catch (error) {
+                        setStatusMessage(error.message);
+                      } finally {
+                        setIsSaving(false);
+                      }
                     }}
                     className="bg-green-600 text-white px-4 py-2 rounded"
                   >Add Warehouse</button>
@@ -644,7 +671,9 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                       <button onClick={() => { setSelectedWarehouse(w); setIsWarehouseModalOpen(true); }} className="px-4 py-2 bg-blue-600 text-white rounded">View</button>
                       <button onClick={() => {
                         if (!confirm(`Delete warehouse ${w.name}? This cannot be undone.`)) return;
-                        setWarehouses(warehouses.filter(x => x.id !== w.id));
+                        deleteWarehouse(w.id)
+                          .then(() => refreshData())
+                          .catch((error) => setStatusMessage(error.message));
                       }} className="px-4 py-2 border rounded text-red-600">Delete</button>
                     </div>
                   </div>
@@ -740,7 +769,14 @@ export function SupplierDashboard({ userProfile, onLogout }) {
         <TraceBatchModal isOpen={isTraceOpen} onClose={() => setIsTraceOpen(false)} batchId={traceBatchId || ''} />
       )}
       {isWarehouseModalOpen && (
-        <WarehouseModal isOpen={isWarehouseModalOpen} onClose={() => { setIsWarehouseModalOpen(false); setSelectedWarehouse(null); }} warehouse={selectedWarehouse} inventory={inventory} onRefresh={refreshData} />
+        <WarehouseModal
+          isOpen={isWarehouseModalOpen}
+          onClose={() => { setIsWarehouseModalOpen(false); setSelectedWarehouse(null); }}
+          warehouse={selectedWarehouse}
+          inventory={inventory}
+          supplierId={userProfile.supplierRecordId}
+          onRefresh={refreshData}
+        />
       )}
     </div>
   );
