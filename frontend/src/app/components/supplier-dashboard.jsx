@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Package, Send, History, BarChart3, LogOut, TrendingUp, Bell } from 'lucide-react';
+import { Package, Send, History, BarChart3, LogOut, TrendingUp, Bell, Search, X } from 'lucide-react';
 import { LineChart, Line, PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import { Logo } from './logo';
 import { NotificationPanel } from './notification-panel';
@@ -41,6 +41,31 @@ export function SupplierDashboard({ userProfile, onLogout }) {
   const [newWarehouse, setNewWarehouse] = useState({ name: '', section: '', capacity: '' });
   const [statusMessage, setStatusMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [dispatchSearch, setDispatchSearch] = useState('');
+  const [selectedDispatch, setSelectedDispatch] = useState(null);
+
+  const getDispatchStatusMeta = (status) => {
+    const normalizedStatus = String(status || '').toUpperCase();
+    if (normalizedStatus === 'RECEIVED') {
+      return {
+        label: 'Received',
+        tone: 'bg-green-100 text-green-700',
+        description: 'The receiver has confirmed the package was received.',
+      };
+    }
+    if (normalizedStatus === 'VERIFIED') {
+      return {
+        label: 'Verified',
+        tone: 'bg-emerald-100 text-emerald-700',
+        description: 'The transfer has been verified after receipt.',
+      };
+    }
+    return {
+      label: 'In Transit',
+      tone: 'bg-blue-100 text-blue-700',
+      description: 'The dispatch is on the way to the receiver.',
+    };
+  };
 
   const refreshData = async () => {
     try {
@@ -64,11 +89,18 @@ export function SupplierDashboard({ userProfile, onLogout }) {
       setDispatches(
         supplierTransfers.map((transfer) => ({
           id: transfer.id,
+          batchCode: transfer.batch?.batch_code || '—',
           product: transfer.batch?.fertilizer_type,
           bags: transfer.quantity_bags,
           destination: transfer.to_branch?.name || 'Unknown',
-          status: transfer.status.toLowerCase(),
+          rawStatus: transfer.status,
+          status: getDispatchStatusMeta(transfer.status).label,
+          statusTone: getDispatchStatusMeta(transfer.status).tone,
+          statusDescription: getDispatchStatusMeta(transfer.status).description,
+          warehouse: transfer.warehouse?.name || transfer.batch?.storage_location?.name || '—',
+          supplier: transfer.from_supplier?.name || '—',
           date: transfer.created_at?.slice(0, 10),
+          createdAt: transfer.created_at || '',
         }))
       );
 
@@ -148,6 +180,12 @@ export function SupplierDashboard({ userProfile, onLogout }) {
     });
     return Array.from(productMap.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, [selectedWarehouseCatalog]);
+
+  const filteredDispatches = useMemo(() => {
+    const query = dispatchSearch.trim().toLowerCase();
+    if (!query) return dispatches;
+    return dispatches.filter((dispatch) => String(dispatch.id).toLowerCase().includes(query));
+  }, [dispatches, dispatchSearch]);
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
@@ -448,6 +486,16 @@ export function SupplierDashboard({ userProfile, onLogout }) {
 
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                 <h3 className="text-lg font-bold text-gray-900 mb-4">Recent Dispatches</h3>
+                <div className="mb-4 relative max-w-md">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    value={dispatchSearch}
+                    onChange={(e) => setDispatchSearch(e.target.value)}
+                    placeholder="Search by dispatch ID"
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  />
+                </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left">
                     <thead>
@@ -460,23 +508,30 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {dispatches.map((dispatch) => (
-                        <tr key={dispatch.id} className="border-b border-gray-100 text-sm">
+                      {filteredDispatches.map((dispatch) => (
+                        <tr
+                          key={dispatch.id}
+                          className="border-b border-gray-100 text-sm hover:bg-green-50/60 cursor-pointer"
+                          onClick={() => setSelectedDispatch(dispatch)}
+                        >
                           <td className="py-3 px-2 font-semibold text-gray-900">{dispatch.id}</td>
                           <td className="py-3 px-2 text-gray-700">{dispatch.product}</td>
                           <td className="py-3 px-2 text-gray-700">{dispatch.bags}</td>
                           <td className="py-3 px-2 text-gray-700">{dispatch.destination}</td>
                           <td className="py-3 px-2">
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              dispatch.status === 'delivered' ? 'bg-green-100 text-green-700' :
-                              dispatch.status === 'in_transit' ? 'bg-blue-100 text-blue-700' :
-                              'bg-yellow-100 text-yellow-700'
-                            }`}>
+                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${dispatch.statusTone}`}>
                               {dispatch.status}
                             </span>
                           </td>
                         </tr>
                       ))}
+                      {filteredDispatches.length === 0 && (
+                        <tr>
+                          <td colSpan="5" className="py-6 text-center text-sm text-gray-500">
+                            No dispatches match that ID.
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -597,19 +652,19 @@ export function SupplierDashboard({ userProfile, onLogout }) {
               <h2 className="text-xl font-bold text-gray-900 mb-4">Dispatch History</h2>
               <div className="space-y-3">
                 {dispatches.map((dispatch) => (
-                  <div key={dispatch.id} className="flex items-center justify-between border border-gray-100 rounded-lg p-4">
+                  <button
+                    key={dispatch.id}
+                    onClick={() => setSelectedDispatch(dispatch)}
+                    className="w-full flex items-center justify-between border border-gray-100 rounded-lg p-4 text-left hover:bg-green-50/60 transition-colors"
+                  >
                     <div>
                       <p className="font-semibold text-gray-900">{dispatch.id} - {dispatch.product}</p>
                       <p className="text-sm text-gray-600">{dispatch.destination} • {dispatch.bags} bags • {dispatch.date}</p>
                     </div>
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                      dispatch.status === 'delivered' ? 'bg-green-100 text-green-700' :
-                      dispatch.status === 'in_transit' ? 'bg-blue-100 text-blue-700' :
-                      'bg-yellow-100 text-yellow-700'
-                    }`}>
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${dispatch.statusTone}`}>
                       {dispatch.status}
                     </span>
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>
@@ -680,6 +735,80 @@ export function SupplierDashboard({ userProfile, onLogout }) {
       )}
       {isWarehouseModalOpen && (
         <WarehouseModal isOpen={isWarehouseModalOpen} onClose={() => { setIsWarehouseModalOpen(false); setSelectedWarehouse(null); }} warehouse={selectedWarehouse} inventory={inventory} onRefresh={refreshData} />
+      )}
+      {selectedDispatch && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-2xl rounded-xl bg-white shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">Dispatch Details</h3>
+                <p className="text-sm text-gray-500">ID {selectedDispatch.id}</p>
+              </div>
+              <button
+                onClick={() => setSelectedDispatch(null)}
+                className="rounded-full p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                aria-label="Close dispatch details"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="grid gap-4 p-6 md:grid-cols-2">
+              <div>
+                <p className="text-sm text-gray-500">Batch</p>
+                <p className="font-semibold text-gray-900">{selectedDispatch.batchCode}</p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">Product</p>
+                <p className="font-semibold text-gray-900">{selectedDispatch.product}</p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">Destination</p>
+                <p className="font-semibold text-gray-900">{selectedDispatch.destination}</p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">Warehouse</p>
+                <p className="font-semibold text-gray-900">{selectedDispatch.warehouse}</p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">Bags</p>
+                <p className="font-semibold text-gray-900">{selectedDispatch.bags}</p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">Created</p>
+                <p className="font-semibold text-gray-900">{selectedDispatch.date || '—'}</p>
+              </div>
+            </div>
+            <div className="border-t border-gray-200 px-6 py-4">
+              <div className="flex items-center gap-3">
+                <span className={`px-3 py-1 rounded-full text-sm font-medium ${selectedDispatch.statusTone}`}>
+                  {selectedDispatch.status}
+                </span>
+                <p className="text-sm text-gray-600">{selectedDispatch.statusDescription}</p>
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                {['Dispatched', 'Delivered', 'Received'].map((step, index) => {
+                  const activeStep = selectedDispatch.rawStatus === 'RECEIVED' ? 3 : 0;
+                  const isActive = index <= activeStep;
+                  return (
+                    <div
+                      key={step}
+                      className={`rounded-lg border p-3 ${isActive ? 'border-green-200 bg-green-50' : 'border-gray-200 bg-gray-50'}`}
+                    >
+                      <p className={`text-sm font-semibold ${isActive ? 'text-green-800' : 'text-gray-600'}`}>
+                        {step}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {step === 'Dispatched' && 'Sent from the supplier warehouse.'}
+                        {step === 'Delivered' && 'Arrived at the receiver.'}
+                        {step === 'Received' && 'Receiver confirmed the package.'}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
