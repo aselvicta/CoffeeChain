@@ -491,9 +491,9 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                   <input
                     type="text"
                     value={dispatchSearch}
-                    onChange={(e) => setDispatchSearch(e.target.value)}
+                    onChange={(e) => setDispatchSearch(e.target.value.toUpperCase())}
                     placeholder="Search by dispatch ID"
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg uppercase focus:ring-2 focus:ring-green-500 focus:border-transparent"
                   />
                 </div>
                 <div className="overflow-x-auto">
