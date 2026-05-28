@@ -385,14 +385,24 @@ export function SupplierDashboard({ userProfile, onLogout }) {
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                 <h3 className="text-lg font-bold text-gray-900 mb-4">Quick Actions</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <button className="flex items-center gap-3 p-4 bg-green-50 rounded-lg hover:bg-green-100 transition-colors">
+                  <button
+                    onClick={() => {
+                      setActiveTab('dispatch');
+                    }}
+                    className="flex items-center gap-3 p-4 bg-green-50 rounded-lg hover:bg-green-100 transition-colors"
+                  >
                     <Send className="h-5 w-5 text-green-700" />
                     <div className="text-left">
                       <p className="font-semibold text-gray-900">Create New Dispatch</p>
                       <p className="text-sm text-gray-600">Send fertilizer to retailers/AMCOS</p>
                     </div>
                   </button>
-                  <button className="flex items-center gap-3 p-4 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors">
+                  <button
+                    onClick={() => {
+                      setActiveTab('inventory');
+                    }}
+                    className="flex items-center gap-3 p-4 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors"
+                  >
                     <Package className="h-5 w-5 text-blue-700" />
                     <div className="text-left">
                       <p className="font-semibold text-gray-900">Check Inventory</p>
