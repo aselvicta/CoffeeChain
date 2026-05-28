@@ -151,6 +151,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
           unit: 'bags',
           threshold: storageCapacity ? Math.max(1, Math.round(storageCapacity * 0.2)) : 200,
           manufacturer: batch.manufacturer || '—',
+          unitWeightKg: batch.unit_weight_kg || '',
           productionDate: batch.production_date || '',
           expiryDate: batch.expiry_date || '',
           certificationStatus: batch.certification_status || 'Pending',
