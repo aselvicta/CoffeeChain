@@ -340,20 +340,26 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                     onChange={(e) => setDispatchForm({ ...dispatchForm, manufacturer: e.target.value })}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
                   />
-                  <input
-                    type="date"
-                    placeholder="Production Date"
-                    value={dispatchForm.productionDate}
-                    onChange={(e) => setDispatchForm({ ...dispatchForm, productionDate: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  />
-                  <input
-                    type="date"
-                    placeholder="Expiry Date"
-                    value={dispatchForm.expiryDate}
-                    onChange={(e) => setDispatchForm({ ...dispatchForm, expiryDate: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  />
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700">Production Date</label>
+                    <input
+                      type="date"
+                      placeholder="Production Date"
+                      value={dispatchForm.productionDate}
+                      onChange={(e) => setDispatchForm({ ...dispatchForm, productionDate: e.target.value })}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700">Expiry Date</label>
+                    <input
+                      type="date"
+                      placeholder="Expiry Date"
+                      value={dispatchForm.expiryDate}
+                      onChange={(e) => setDispatchForm({ ...dispatchForm, expiryDate: e.target.value })}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    />
+                  </div>
                   <select
                     value={dispatchForm.certificationStatus}
                     onChange={(e) => setDispatchForm({ ...dispatchForm, certificationStatus: e.target.value })}
