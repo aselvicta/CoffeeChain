@@ -7,6 +7,8 @@ import { TraceBatchModal } from './trace-batch-modal';
 import { WarehouseModal } from './warehouse-modal';
 import {
   createTransfer,
+  createWarehouse,
+  deleteWarehouse,
   fetchBatches,
   fetchBranches,
   fetchTransfers,
@@ -15,6 +17,14 @@ import {
 } from '../api/client';
 
 export function SupplierDashboard({ userProfile, onLogout }) {
+  function createDispatchLineItem() {
+    return {
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      batchCode: '',
+      bags: '',
+    };
+  }
+
   const [activeTab, setActiveTab] = useState('overview');
   const [dispatchForm, setDispatchForm] = useState({
     batchId: '',
@@ -43,6 +53,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
   const [isSaving, setIsSaving] = useState(false);
   const [dispatchSearch, setDispatchSearch] = useState('');
   const [selectedDispatch, setSelectedDispatch] = useState(null);
+  const [dispatchItems, setDispatchItems] = useState([createDispatchLineItem()]);
 
   const getDispatchStatusMeta = (status) => {
     const normalizedStatus = String(status || '').toUpperCase();
@@ -67,6 +78,20 @@ export function SupplierDashboard({ userProfile, onLogout }) {
     };
   };
 
+  const normalizeWarehouse = (warehouse) => ({
+    ...warehouse,
+    capacity: warehouse.capacity_bags ?? warehouse.capacity ?? 0,
+    current: warehouse.current_bags ?? warehouse.current ?? 0,
+  });
+
+  const formatWarehouseLocation = (location) => {
+    if (!location) return '—';
+    if (typeof location === 'string') return location;
+    const name = location.name || '—';
+    const section = location.section ? ` - ${location.section}` : '';
+    return `${name}${section}`;
+  };
+
   const refreshData = async () => {
     try {
       const [branchData, batchData, transferData, warehouseData, warehouseCatalogData] = await Promise.all([
@@ -78,7 +103,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
       ]);
       setBranches(branchData);
       setBatches(batchData);
-      setWarehouses(warehouseData);
+      setWarehouses(warehouseData.map(normalizeWarehouse));
       setWarehouseCatalog(warehouseCatalogData);
 
       const supplierTransfers = transferData.filter(
@@ -105,6 +130,8 @@ export function SupplierDashboard({ userProfile, onLogout }) {
       );
 
       const batchInventory = batchData.map((batch) => {
+        const storageLocation = batch.storage_location || null;
+        const storageCapacity = Number(storageLocation?.capacity_bags) || 0;
         const dispatched = supplierTransfers
           .filter((transfer) => transfer.batch?.id === batch.id)
           .reduce((sum, transfer) => sum + transfer.quantity_bags, 0);
@@ -122,12 +149,13 @@ export function SupplierDashboard({ userProfile, onLogout }) {
           name: batch.fertilizer_type,
           available,
           unit: 'bags',
-          threshold: 200,
+          threshold: storageCapacity ? Math.max(1, Math.round(storageCapacity * 0.2)) : 200,
           manufacturer: batch.manufacturer || '—',
           productionDate: batch.production_date || '',
           expiryDate: batch.expiry_date || '',
           certificationStatus: batch.certification_status || 'Pending',
-          storageLocation: batch.storage_location || '',
+          storageLocation,
+          storageCapacity,
           lifecycle,
           expiryRisk,
         };
@@ -180,6 +208,23 @@ export function SupplierDashboard({ userProfile, onLogout }) {
     });
     return Array.from(productMap.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, [selectedWarehouseCatalog]);
+
+  const dispatchBatchOptions = useMemo(() => {
+    return [...(selectedWarehouseCatalog?.items || [])].sort((a, b) => {
+      const left = `${a.fertilizer_type} ${a.batch_code}`.toLowerCase();
+      const right = `${b.fertilizer_type} ${b.batch_code}`.toLowerCase();
+      return left.localeCompare(right);
+    });
+  }, [selectedWarehouseCatalog]);
+
+  const dispatchCartTotal = useMemo(
+    () =>
+      dispatchItems.reduce((sum, item) => {
+        const quantity = Number(item.bags) || 0;
+        return sum + quantity;
+      }, 0),
+    [dispatchItems]
+  );
 
   const filteredDispatches = useMemo(() => {
     const query = dispatchSearch.trim().toLowerCase();
@@ -337,6 +382,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                         warehouseId: e.target.value,
                         product: nextWarehouse?.items?.[0]?.fertilizer_type || '',
                       });
+                      setDispatchItems([createDispatchLineItem()]);
                     }}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
                   >
@@ -349,26 +395,104 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                       </option>
                     ))}
                   </select>
-                  <select
-                    value={dispatchForm.product}
-                    onChange={(e) => setDispatchForm({ ...dispatchForm, product: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                    disabled={!dispatchForm.warehouseId}
-                  >
-                    <option value="">{dispatchForm.warehouseId ? 'Select product' : 'Select a warehouse first'}</option>
-                    {warehouseProductOptions.map((product) => (
-                      <option key={product.name} value={product.name}>
-                        {product.name} ({product.available} bags available)
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="number"
-                    placeholder="Bags"
-                    value={dispatchForm.bags}
-                    onChange={(e) => setDispatchForm({ ...dispatchForm, bags: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  />
+                  <div className="md:col-span-2 space-y-3 rounded-xl border border-dashed border-green-200 bg-green-50/50 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-900">Dispatch Items</h3>
+                        <p className="text-xs text-gray-600">Select multiple products and bags, then dispatch them together as one batch.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setDispatchItems((prev) => [...prev, createDispatchLineItem()])}
+                        disabled={!dispatchForm.warehouseId}
+                        className="rounded-lg border border-green-200 bg-white px-3 py-2 text-sm font-medium text-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        + Add Item
+                      </button>
+                    </div>
+
+                    {dispatchItems.map((item) => {
+                      const selectedItem = dispatchBatchOptions.find((option) => option.batch_code === item.batchCode);
+                      return (
+                        <div key={item.id} className="grid grid-cols-1 gap-3 md:grid-cols-12">
+                          <div className="md:col-span-7">
+                            <select
+                              value={item.batchCode}
+                              onChange={(e) =>
+                                setDispatchItems((prev) =>
+                                  prev.map((currentItem) =>
+                                    currentItem.id === item.id
+                                      ? { ...currentItem, batchCode: e.target.value }
+                                      : currentItem
+                                  )
+                                )
+                              }
+                              disabled={!dispatchForm.warehouseId}
+                              className="w-full rounded-lg border border-gray-300 px-4 py-3 focus:border-transparent focus:ring-2 focus:ring-green-500 disabled:bg-gray-100"
+                            >
+                              <option value="">
+                                {dispatchForm.warehouseId ? 'Select product / batch' : 'Select a warehouse first'}
+                              </option>
+                              {dispatchBatchOptions.map((option) => (
+                                <option key={option.batch_code} value={option.batch_code}>
+                                  {option.batch_code} - {option.fertilizer_type} ({option.available_bags} bags available)
+                                </option>
+                              ))}
+                            </select>
+                            {selectedItem && (
+                              <p className="mt-1 text-xs text-gray-500">
+                                {selectedItem.fertilizer_type} | Manufacturer: {selectedItem.manufacturer || '—'}
+                              </p>
+                            )}
+                          </div>
+                          <div className="md:col-span-4">
+                            <input
+                              type="number"
+                              min="1"
+                              placeholder="Bags"
+                              value={item.bags}
+                              onChange={(e) =>
+                                setDispatchItems((prev) =>
+                                  prev.map((currentItem) =>
+                                    currentItem.id === item.id
+                                      ? { ...currentItem, bags: e.target.value }
+                                      : currentItem
+                                  )
+                                )
+                              }
+                              className="w-full rounded-lg border border-gray-300 px-4 py-3 focus:border-transparent focus:ring-2 focus:ring-green-500"
+                            />
+                          </div>
+                          <div className="md:col-span-1 flex items-center justify-end">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setDispatchItems((prev) =>
+                                  prev.length === 1 ? prev : prev.filter((currentItem) => currentItem.id !== item.id)
+                                )
+                              }
+                              className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-green-100 pt-3">
+                      <p className="text-sm text-gray-700">
+                        {dispatchItems.length} item line{dispatchItems.length === 1 ? '' : 's'} selected • Total bags: {dispatchCartTotal}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setTraceBatchId(dispatchItems[0]?.batchCode || dispatchForm.batchId || '')}
+                        className="rounded-lg border border-gray-200 px-4 py-2 text-sm"
+                      >
+                        Trace First Item
+                      </button>
+                    </div>
+                  </div>
 
                   {/* New batch metadata fields */}
                   <input
@@ -411,7 +535,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                 <div className="mt-4 flex items-center gap-3">
                   <button
                     onClick={async () => {
-                      if (!dispatchForm.batchId || !dispatchForm.bags || !dispatchForm.destination || !dispatchForm.warehouseId) return;
+                      if (!dispatchForm.destination || !dispatchForm.warehouseId || dispatchItems.length === 0) return;
                       setIsSaving(true);
                       setStatusMessage('');
                       try {
@@ -428,33 +552,40 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                         if (!warehouse) {
                           throw new Error('Select a valid warehouse.');
                         }
-                        const stockItem = (warehouse.items || []).find(
-                          (item) => item.batch_code === dispatchForm.batchId
-                        );
-                        if (!stockItem) {
-                          throw new Error('Selected batch is not available in the chosen warehouse.');
-                        }
-                        if (dispatchForm.product && stockItem.fertilizer_type !== dispatchForm.product) {
-                          throw new Error('Selected product does not match the chosen batch.');
-                        }
-                        if (Number(dispatchForm.bags) > Number(stockItem.available_bags)) {
-                          throw new Error(`Only ${stockItem.available_bags} bags are available in this warehouse.`);
-                        }
-                        const existingBatch = batches.find(
-                          (batch) => batch.batch_code === dispatchForm.batchId
-                        );
-                        if (!existingBatch) {
-                          throw new Error('Batch not found. Select an existing batch from the warehouse catalog.');
-                        }
-                        await createTransfer({
-                          batch_id: existingBatch.id,
-                          transfer_type: 'SUPPLIER_TO_BRANCH',
-                          from_supplier_id: userProfile.supplierRecordId,
-                          to_branch_id: destinationId,
-                          quantity_bags: Number(dispatchForm.bags),
-                          status: 'DISPATCHED',
-                          warehouse_id: Number(dispatchForm.warehouseId),
+                        const dispatchBatchId = `DISPATCH-${Date.now()}`;
+                        const lineItems = dispatchItems.map((item) => {
+                          const stockItem = (warehouse.items || []).find(
+                            (currentItem) => currentItem.batch_code === item.batchCode
+                          );
+                          if (!stockItem) {
+                            throw new Error(`Batch ${item.batchCode || 'unknown'} is not available in the chosen warehouse.`);
+                          }
+                          const requestedBags = Number(item.bags);
+                          if (!requestedBags || requestedBags <= 0) {
+                            throw new Error(`Enter a valid bag count for ${stockItem.batch_code}.`);
+                          }
+                          if (requestedBags > Number(stockItem.available_bags)) {
+                            throw new Error(`Only ${stockItem.available_bags} bags are available for ${stockItem.batch_code}.`);
+                          }
+                          const existingBatch = batches.find(
+                            (batch) => batch.batch_code === stockItem.batch_code
+                          );
+                          if (!existingBatch) {
+                            throw new Error(`Batch ${stockItem.batch_code} was not found.`);
+                          }
+                          return {
+                            batch_id: existingBatch.id,
+                            transfer_type: 'SUPPLIER_TO_BRANCH',
+                            from_supplier_id: userProfile.supplierRecordId,
+                            to_branch_id: destinationId,
+                            quantity_bags: requestedBags,
+                            status: 'DISPATCHED',
+                            warehouse_id: Number(dispatchForm.warehouseId),
+                            notes: `Dispatch batch ${dispatchBatchId}`,
+                          };
                         });
+
+                        await Promise.all(lineItems.map((payload) => createTransfer(payload)));
                         setDispatchForm({
                           batchId: '',
                           product: '',
@@ -466,6 +597,10 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                           expiryDate: '',
                           certificationStatus: 'Pending',
                         });
+                        setDispatchItems([createDispatchLineItem()]);
+                        setTraceBatchId('');
+                        setSelectedDispatch(null);
+                        setStatusMessage(`Dispatch batch ${dispatchBatchId} created successfully.`);
                         await refreshData();
                       } catch (error) {
                         setStatusMessage(error.message);
@@ -477,7 +612,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                   >
                     {isSaving ? 'Saving...' : 'Create Dispatch'}
                   </button>
-                  <button onClick={() => { setTraceBatchId(dispatchForm.batchId || ''); setIsTraceOpen(true); }} className="ml-2 px-4 py-2 rounded-lg border border-gray-200">Trace Batch</button>
+                  <button onClick={() => { setTraceBatchId(dispatchItems[0]?.batchCode || dispatchForm.batchId || ''); setIsTraceOpen(true); }} className="ml-2 px-4 py-2 rounded-lg border border-gray-200">Trace Batch</button>
                 </div>
                 {statusMessage && (
                   <p className="mt-3 text-sm text-red-600">{statusMessage}</p>
@@ -560,7 +695,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                       <div className="text-sm text-gray-600">
                         <div>Production: {item.productionDate || '—'}</div>
                         <div>Expiry: {item.expiryDate || '—'}</div>
-                        <div>Location: {item.storageLocation || '—'}</div>
+                        <div>Location: {formatWarehouseLocation(item.storageLocation)}</div>
                       </div>
                       <div className="text-sm text-gray-600">
                         <div>Certification: {item.certificationStatus}</div>
@@ -617,14 +752,27 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                     className="px-3 py-2 border rounded w-28"
                   />
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       if (!newWarehouse.name || !newWarehouse.section || !newWarehouse.capacity) return;
-                      const id = warehouses.length ? Math.max(...warehouses.map((w) => w.id)) + 1 : 1;
-                      setWarehouses([{ id, name: newWarehouse.name, section: newWarehouse.section, capacity: Number(newWarehouse.capacity), current: 0 }, ...warehouses]);
-                      setNewWarehouse({ name: '', section: '', capacity: '' });
+                      setIsSaving(true);
+                      setStatusMessage('');
+                      try {
+                        await createWarehouse({
+                          name: newWarehouse.name,
+                          section: newWarehouse.section,
+                          capacity_bags: Number(newWarehouse.capacity),
+                          current_bags: 0,
+                        });
+                        setNewWarehouse({ name: '', section: '', capacity: '' });
+                        await refreshData();
+                      } catch (error) {
+                        setStatusMessage(error.message);
+                      } finally {
+                        setIsSaving(false);
+                      }
                     }}
                     className="bg-green-600 text-white px-4 py-2 rounded"
-                  >Add Warehouse</button>
+                  >{isSaving ? 'Saving...' : 'Add Warehouse'}</button>
                 </div>
               </div>
               <div className="space-y-4">
@@ -636,10 +784,20 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                     </div>
                     <div className="flex items-center gap-3">
                       <button onClick={() => { setSelectedWarehouse(w); setIsWarehouseModalOpen(true); }} className="px-4 py-2 bg-blue-600 text-white rounded">View</button>
-                      <button onClick={() => {
-                        if (!confirm(`Delete warehouse ${w.name}? This cannot be undone.`)) return;
-                        setWarehouses(warehouses.filter(x => x.id !== w.id));
-                      }} className="px-4 py-2 border rounded text-red-600">Delete</button>
+                      <button
+                        onClick={async () => {
+                          if (!confirm(`Delete warehouse ${w.name}? This cannot be undone.`)) return;
+                          try {
+                            await deleteWarehouse(w.id);
+                            await refreshData();
+                          } catch (error) {
+                            setStatusMessage(error.message);
+                          }
+                        }}
+                        className="px-4 py-2 border rounded text-red-600"
+                      >
+                        Delete
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -734,7 +892,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
         <TraceBatchModal isOpen={isTraceOpen} onClose={() => setIsTraceOpen(false)} batchId={traceBatchId || ''} />
       )}
       {isWarehouseModalOpen && (
-        <WarehouseModal isOpen={isWarehouseModalOpen} onClose={() => { setIsWarehouseModalOpen(false); setSelectedWarehouse(null); }} warehouse={selectedWarehouse} inventory={inventory} onRefresh={refreshData} />
+        <WarehouseModal isOpen={isWarehouseModalOpen} onClose={() => { setIsWarehouseModalOpen(false); setSelectedWarehouse(null); }} warehouse={selectedWarehouse} inventory={inventory} onRefresh={refreshData} supplierId={userProfile.supplierRecordId} />
       )}
       {selectedDispatch && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">

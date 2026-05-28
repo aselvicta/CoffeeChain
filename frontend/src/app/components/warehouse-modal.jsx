@@ -2,7 +2,11 @@ import React, { useState } from 'react';
 import { X, Plus, Edit2, Trash, Save } from 'lucide-react';
 import { updateBatch, deleteBatch, createBatch } from '../api/client';
 
-export function WarehouseModal({ isOpen, onClose, warehouse, inventory, onRefresh }) {
+function generateBatchCode() {
+  return `BATCH-${Date.now()}-${Math.random().toString(16).slice(2, 6).toUpperCase()}`;
+}
+
+export function WarehouseModal({ isOpen, onClose, warehouse, inventory, onRefresh, supplierId }) {
   if (!isOpen || !warehouse) return null;
 
   const [editingId, setEditingId] = useState(null);
@@ -10,10 +14,25 @@ export function WarehouseModal({ isOpen, onClose, warehouse, inventory, onRefres
   const [adding, setAdding] = useState(false);
   const [newItem, setNewItem] = useState({ fertilizer_type: '', quantity_bags: '', unit_weight_kg: '' });
 
+  const matchesWarehouseLocation = (location) => {
+    if (!location) return false;
+    if (typeof location === 'string') {
+      const normalizedLocation = location.toLowerCase();
+      return (
+        normalizedLocation === String(warehouse.name).toLowerCase() ||
+        normalizedLocation === String(warehouse.section).toLowerCase()
+      );
+    }
+
+    return (
+      String(location.name || '').toLowerCase() === String(warehouse.name).toLowerCase() ||
+      String(location.section || '').toLowerCase() === String(warehouse.section).toLowerCase() ||
+      String(location.id || '') === String(warehouse.id)
+    );
+  };
+
   const batches = inventory.filter((item) => {
-    if (!item.storageLocation) return false;
-    const loc = String(item.storageLocation).toLowerCase();
-    return loc === String(warehouse.name).toLowerCase() || loc === String(warehouse.section).toLowerCase();
+    return matchesWarehouseLocation(item.storageLocation);
   });
 
   return (
@@ -111,8 +130,17 @@ export function WarehouseModal({ isOpen, onClose, warehouse, inventory, onRefres
                 <div className="flex gap-2">
                   <button className="px-4 py-2 bg-green-600 text-white rounded" onClick={async () => {
                     try {
-                      const payload = { ...newItem, storage_location_id: warehouse.id };
+                      if (!supplierId) {
+                        throw new Error('Supplier profile not available for batch creation.');
+                      }
+                      const payload = {
+                        ...newItem,
+                        batch_code: generateBatchCode(),
+                        supplier_id: supplierId,
+                        storage_location_id: warehouse.id,
+                      };
                       if (payload.quantity_bags) payload.quantity_bags = Number(payload.quantity_bags);
+                      if (payload.unit_weight_kg) payload.unit_weight_kg = Number(payload.unit_weight_kg);
                       await createBatch(payload);
                           setNewItem({ fertilizer_type: '', quantity_bags: '', unit_weight_kg: '' });
                           setAdding(false);

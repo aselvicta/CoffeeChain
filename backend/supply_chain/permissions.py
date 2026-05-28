@@ -2,7 +2,10 @@ from rest_framework.permissions import BasePermission
 
 
 def has_group(user, group_name):
-    return user and user.is_authenticated and user.groups.filter(name=group_name).exists()
+    if not user or not user.is_authenticated:
+        return False
+    normalized_group_name = group_name.casefold()
+    return any(existing_group.name.casefold() == normalized_group_name for existing_group in user.groups.all())
 
 
 class IsSupplier(BasePermission):

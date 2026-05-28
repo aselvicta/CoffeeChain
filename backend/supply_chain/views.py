@@ -122,6 +122,36 @@ def build_warehouse_catalog(warehouses):
     return catalog
 
 
+def recalculate_warehouse_current_bags(warehouse):
+    if not warehouse:
+        return
+    current_bags = (
+        warehouse.batches.aggregate(total=Sum("quantity_bags"))["total"]
+        or 0
+    )
+    warehouse.current_bags = current_bags
+    warehouse.save(update_fields=["current_bags"])
+
+
+def validate_warehouse_capacity(warehouse, bags, exclude_batch_id=None):
+    if not warehouse:
+        return
+
+    bags = int(bags or 0)
+    existing_total = warehouse.batches.exclude(id=exclude_batch_id).aggregate(total=Sum("quantity_bags"))["total"] or 0
+    projected_total = existing_total + bags
+    if projected_total > warehouse.capacity_bags:
+        remaining = max(warehouse.capacity_bags - existing_total, 0)
+        raise ValidationError(
+            {
+                "storage_location_id": (
+                    f"Adding {bags} bags would exceed the warehouse capacity of {warehouse.capacity_bags} bags. "
+                    f"Only {remaining} bags can still be added here."
+                )
+            }
+        )
+
+
 class AdminUserViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated, IsAdmin]
 
@@ -257,12 +287,31 @@ class FertilizerBatchViewSet(viewsets.ModelViewSet):
         return [IsAuthenticated()]
 
     def perform_create(self, serializer):
+        warehouse = serializer.validated_data.get("storage_location")
+        quantity_bags = serializer.validated_data.get("quantity_bags")
+        validate_warehouse_capacity(warehouse, quantity_bags)
         batch = serializer.save()
+        recalculate_warehouse_current_bags(batch.storage_location)
         AuditLog.objects.create(
             action="batch_created",
             user=self.request.user,
             details={"batch": batch.batch_code},
         )
+
+    def perform_update(self, serializer):
+        batch = serializer.instance
+        previous_warehouse = batch.storage_location
+        warehouse = serializer.validated_data.get("storage_location", previous_warehouse)
+        quantity_bags = serializer.validated_data.get("quantity_bags", batch.quantity_bags)
+        validate_warehouse_capacity(warehouse, quantity_bags, exclude_batch_id=batch.id)
+        batch = serializer.save()
+        recalculate_warehouse_current_bags(previous_warehouse)
+        recalculate_warehouse_current_bags(batch.storage_location)
+
+    def perform_destroy(self, instance):
+        previous_warehouse = instance.storage_location
+        instance.delete()
+        recalculate_warehouse_current_bags(previous_warehouse)
 
 
 class TransferViewSet(viewsets.ModelViewSet):
