@@ -192,9 +192,10 @@ export function SupplierDashboard({ userProfile, onLogout }) {
           </div>
         </header>
 
-        {/* Content */}
+        {/* CONTENTS */}
         <main className="flex-1 overflow-y-auto p-8">
           {activeTab === 'overview' && (
+           // Quick actions sections
             <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 {[
@@ -237,6 +238,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
             </div>
           )}
           {activeTab === 'dispatch' && (
+            // Dispatch creation form + recent dispatches
             <div className="space-y-6">
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                 <h2 className="text-xl font-bold text-gray-900 mb-4">Dispatch Batches</h2>
