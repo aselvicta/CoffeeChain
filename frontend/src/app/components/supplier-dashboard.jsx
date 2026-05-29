@@ -5,7 +5,7 @@ import { Logo } from './logo';
 import { NotificationPanel } from './notification-panel';
 import { TraceBatchModal } from './trace-batch-modal';
 import { WarehouseModal } from './warehouse-modal';
-import { createBatch, createTransfer, createWarehouse, deleteWarehouse, fetchBatches, fetchBranches, fetchTransfers, fetchWarehouses } from '../api/client';
+import { createBatch, createTransfer, createWarehouse, deleteWarehouse, fetchBatches, fetchBranches, fetchTransfers, fetchWarehouseCatalog, fetchWarehouses } from '../api/client';
 
 export function SupplierDashboard({ userProfile, onLogout }) {
   function createDispatchLineItem() {
@@ -86,14 +86,16 @@ export function SupplierDashboard({ userProfile, onLogout }) {
 
   const refreshData = async () => {
     try {
-      const [branchData, batchData, transferData, warehouseData] = await Promise.all([
+      const [branchData, batchData, transferData, warehouseData, catalogData] = await Promise.all([
         fetchBranches(),
         fetchBatches(),
         fetchTransfers(),
         fetchWarehouses(),
+        fetchWarehouseCatalog(),
       ]);
       setBranches(branchData);
       setBatches(batchData);
+      setWarehouseCatalog(catalogData);
       setWarehouses(
         warehouseData.map((warehouse) => ({
           id: warehouse.id,
@@ -365,7 +367,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                 {[
                   { label: 'Total Dispatched', value: `${dispatches.length} transfers`, change: 'Live from ledger', icon: Send },
                   { label: 'Active Batches', value: `${batches.length}`, change: 'Registered batches', icon: Package },
-                  { label: 'Delivery Rate', value: `${dispatches.length ? Math.round((dispatches.filter((d) => d.status === 'verified').length / dispatches.length) * 100) : 0}%`, change: 'OTP verified', icon: TrendingUp },
+                  { label: 'Delivery Rate', value: `${dispatches.length ? Math.round((dispatches.filter((d) => d.rawStatus === 'RECEIVED' || d.rawStatus === 'VERIFIED').length / dispatches.length) * 100) : 0}%`, change: 'Confirmed by receiver', icon: TrendingUp },
                 ].map((metric, index) => (
                   <div key={index} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                     <div className="flex items-center gap-3 mb-4">
@@ -626,33 +628,34 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                         if (!destinationId) {
                           throw new Error('Select a valid destination from the list.');
                         }
-                        const warehouse = warehouseCatalog.find(
-                          (item) => String(item.id) === String(dispatchForm.warehouseId)
-                        );
-                        const batchPayload = existingBatch
-                          ? { id: existingBatch.id }
-                          : await createBatch({
-                              supplier_id: userProfile.supplierRecordId,
-                              batch_code: dispatchForm.batchId,
-                              fertilizer_type: dispatchForm.product,
-                              quantity_bags: Number(dispatchForm.bags),
-                              manufacturer: dispatchForm.manufacturer,
-                              production_date: dispatchForm.productionDate || null,
-                              expiry_date: dispatchForm.expiryDate || null,
-                              certification_status: dispatchForm.certificationStatus,
-                              ...(dispatchForm.storageLocation
-                                ? { storage_location_id: Number(dispatchForm.storageLocation) }
-                                : {}),
-                            });
-                        // create transfer (dispatch)
-                        await createTransfer({
-                          batch_id: batchPayload.id || batchPayload,
-                          transfer_type: 'SUPPLIER_TO_BRANCH',
-                          from_supplier_id: userProfile.supplierRecordId,
-                          to_branch_id: destinationId,
-                          quantity_bags: Number(dispatchForm.bags),
-                          status: 'DISPATCHED',
-                        });
+                        const warehouseId = Number(dispatchForm.warehouseId);
+                        const lineItems = dispatchItems
+                          .map((item) => {
+                            const selected = dispatchBatchOptions.find(
+                              (option) => option.batch_code === item.batchCode
+                            );
+                            const bags = Number(item.bags);
+                            if (!selected || !bags || bags < 1) return null;
+                            if (bags > selected.available_bags) {
+                              throw new Error(
+                                `Only ${selected.available_bags} bags available for ${selected.batch_code}.`
+                              );
+                            }
+                            return {
+                              batch_id: selected.batch_id,
+                              warehouse_id: warehouseId,
+                              transfer_type: 'SUPPLIER_TO_BRANCH',
+                              from_supplier_id: userProfile.supplierRecordId,
+                              to_branch_id: destinationId,
+                              quantity_bags: bags,
+                              status: 'DISPATCHED',
+                            };
+                          })
+                          .filter(Boolean);
+
+                        if (lineItems.length === 0) {
+                          throw new Error('Add at least one product with a valid bag quantity.');
+                        }
 
                         await Promise.all(lineItems.map((payload) => createTransfer(payload)));
                         setDispatchForm({
@@ -669,7 +672,9 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                         setDispatchItems([createDispatchLineItem()]);
                         setTraceBatchId('');
                         setSelectedDispatch(null);
-                        setStatusMessage(`Dispatch batch ${dispatchBatchId} created successfully.`);
+                        setStatusMessage(
+                          `Dispatch created: ${lineItems.length} transfer(s), ${dispatchCartTotal} bags total.`
+                        );
                         await refreshData();
                       } catch (error) {
                         setStatusMessage(error.message);

@@ -1,0 +1,27 @@
+{
+  "transfer_id": 11,
+  "transfer_type": "BRANCH_TO_FARMER",
+  "batch": {
+    "id": 1,
+    "code": "TCB-TEST-001",
+    "fertilizer_type": "NPK"
+  },
+  "quantity_bags": 5,
+  "farmer": {
+    "ministry_id": "MOA-KAG-012",
+    "name": "Neema Rwegasira",
+    "phone_number": "0712000012",
+    "district": "Bukoba"
+  },
+  "cooperative": {
+    "id": 3,
+    "name": "Bukoba Coffee Farmers AMCOS",
+    "district": "Bukoba",
+    "region": "Kagera"
+  },
+  "supplier": null,
+  "delivery_proof_file_cid": null,
+  "verified_at": "2026-05-28T18:26:01.602731+00:00",
+  "verified_by": "cooperative1",
+  "otp_attempts": 1
+}

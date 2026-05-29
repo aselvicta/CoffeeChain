@@ -53,6 +53,27 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
       ),
     [inboundTransfers]
   );
+  const distributableStock = useMemo(() => {
+    const stock = new Map();
+    receivedBatches.forEach((transfer) => {
+      if (!transfer.batchId) return;
+      const current = stock.get(transfer.batchId) || {
+        batchId: transfer.batchId,
+        batchCode: transfer.batchCode,
+        fertilizerType: transfer.fertilizerType,
+        bagsAvailable: 0,
+      };
+      current.bagsAvailable += Number(transfer.bags) || 0;
+      stock.set(transfer.batchId, current);
+    });
+    distributions.forEach((dist) => {
+      const batchId = dist.rawTransfer?.batch?.id;
+      if (batchId && stock.has(batchId)) {
+        stock.get(batchId).bagsAvailable -= Number(dist.bags) || 0;
+      }
+    });
+    return Array.from(stock.values()).filter((item) => item.bagsAvailable > 0);
+  }, [receivedBatches, distributions]);
   const pendingReceiptCount = useMemo(
     () => inboundTransfers.filter((transfer) => transfer.status === 'DISPATCHED').length,
     [inboundTransfers]
@@ -321,13 +342,13 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                     onChange={(e) =>
                       setDistributionForm({ ...distributionForm, batchId: e.target.value })
                     }
-                    disabled={receivedBatches.length === 0}
+                    disabled={distributableStock.length === 0}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
                   >
                     <option value="">Select Batch</option>
-                    {receivedBatches.map((batch) => (
-                      <option key={batch.id} value={batch.batchId}>
-                        {batch.batchCode || `Batch ${batch.id}`} ({batch.bags} bags{batch.fertilizerType ? ` • ${batch.fertilizerType}` : ''})
+                    {distributableStock.map((batch) => (
+                      <option key={batch.batchId} value={batch.batchId}>
+                        {batch.batchCode || `Batch ${batch.batchId}`} ({batch.bagsAvailable} bags available{batch.fertilizerType ? ` • ${batch.fertilizerType}` : ''})
                       </option>
                     ))}
                   </select>

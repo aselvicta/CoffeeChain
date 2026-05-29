@@ -93,6 +93,28 @@ def get_batch_available_quantity(batch):
     return max(batch.quantity_bags - dispatched_total, 0)
 
 
+def get_branch_available_quantity(batch, branch):
+    """Bags a branch can still allocate to farmers for this batch."""
+    if not branch:
+        return 0
+    received_total = (
+        batch.transfers.filter(
+            transfer_type=Transfer.SUPPLIER_TO_BRANCH,
+            to_branch=branch,
+            status__in=[Transfer.RECEIVED, Transfer.VERIFIED],
+        ).aggregate(total=Sum("quantity_bags"))["total"]
+        or 0
+    )
+    distributed_total = (
+        batch.transfers.filter(
+            transfer_type=Transfer.BRANCH_TO_FARMER,
+            from_branch=branch,
+        ).aggregate(total=Sum("quantity_bags"))["total"]
+        or 0
+    )
+    return max(received_total - distributed_total, 0)
+
+
 def build_warehouse_catalog(warehouses):
     catalog = []
     for warehouse in warehouses:
@@ -488,21 +510,61 @@ class TransferViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         batch = serializer.validated_data["batch"]
-        warehouse = serializer.validated_data.get("warehouse") or batch.storage_location
+        transfer_type = serializer.validated_data.get("transfer_type")
         requested_bags = serializer.validated_data["quantity_bags"]
 
-        if not warehouse:
-            raise ValidationError({"warehouse_id": "Select a warehouse for this dispatch."})
-        if batch.storage_location and batch.storage_location_id != warehouse.id:
-            raise ValidationError({"warehouse_id": "This batch is not stored in the selected warehouse."})
-
-        available_bags = get_batch_available_quantity(batch)
-        if requested_bags > available_bags:
-            raise ValidationError(
-                {"quantity_bags": f"Only {available_bags} bags are available for dispatch from this warehouse."}
+        if transfer_type == Transfer.BRANCH_TO_FARMER:
+            from_branch = serializer.validated_data.get("from_branch")
+            farmer = serializer.validated_data.get("farmer")
+            if not from_branch:
+                raise ValidationError({"from_branch_id": "from_branch is required."})
+            if not farmer:
+                raise ValidationError({"farmer_id": "farmer is required."})
+            if farmer.cooperative_id and farmer.cooperative_id != from_branch.id:
+                raise ValidationError(
+                    {
+                        "farmer_id": (
+                            f"Farmer {farmer.ministry_id} is registered with "
+                            f"{farmer.cooperative.name}, not this branch."
+                        )
+                    }
+                )
+            available_bags = get_branch_available_quantity(batch, from_branch)
+            if requested_bags > available_bags:
+                raise ValidationError(
+                    {
+                        "quantity_bags": (
+                            f"Only {available_bags} bags remain for this batch at your branch. "
+                            "Confirm supplier receipts before distributing."
+                        )
+                    }
+                )
+            warehouse = serializer.validated_data.get("warehouse") or batch.storage_location
+            transfer = serializer.save(
+                created_by=self.request.user,
+                warehouse=warehouse,
             )
+        else:
+            warehouse = serializer.validated_data.get("warehouse") or batch.storage_location
+            if not warehouse:
+                raise ValidationError({"warehouse_id": "Select a warehouse for this dispatch."})
+            if batch.storage_location and batch.storage_location_id != warehouse.id:
+                raise ValidationError(
+                    {"warehouse_id": "This batch is not stored in the selected warehouse."}
+                )
 
-        transfer = serializer.save(created_by=self.request.user, warehouse=warehouse)
+            available_bags = get_batch_available_quantity(batch)
+            if requested_bags > available_bags:
+                raise ValidationError(
+                    {
+                        "quantity_bags": (
+                            f"Only {available_bags} bags are available for dispatch from this warehouse."
+                        )
+                    }
+                )
+
+            transfer = serializer.save(created_by=self.request.user, warehouse=warehouse)
+
         AuditLog.objects.create(
             action="transfer_created",
             user=self.request.user,

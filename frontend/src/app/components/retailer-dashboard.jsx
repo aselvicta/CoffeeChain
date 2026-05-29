@@ -48,6 +48,34 @@ export function RetailerDashboard({ userProfile, onLogout }) {
     ];
   }, [distributions]);
 
+  const distributableBatches = useMemo(
+    () =>
+      receivedBatches.filter(
+        (transfer) => transfer.status === 'RECEIVED' || transfer.status === 'VERIFIED'
+      ),
+    [receivedBatches]
+  );
+  const distributableStock = useMemo(() => {
+    const stock = new Map();
+    distributableBatches.forEach((transfer) => {
+      if (!transfer.batchId) return;
+      const current = stock.get(transfer.batchId) || {
+        batchId: transfer.batchId,
+        batchCode: transfer.batchCode,
+        bagsAvailable: 0,
+      };
+      current.bagsAvailable += Number(transfer.bags) || 0;
+      stock.set(transfer.batchId, current);
+    });
+    distributions.forEach((dist) => {
+      const batchId = dist.batchId;
+      if (batchId && stock.has(batchId)) {
+        stock.get(batchId).bagsAvailable -= Number(dist.bags) || 0;
+      }
+    });
+    return Array.from(stock.values()).filter((item) => item.bagsAvailable > 0);
+  }, [distributableBatches, distributions]);
+
   const refreshData = async () => {
     try {
       const [farmerData, transferData] = await Promise.all([
@@ -90,6 +118,7 @@ export function RetailerDashboard({ userProfile, onLogout }) {
       setDistributions(
         outbound.map((transfer) => ({
           id: transfer.id,
+          batchId: transfer.batch?.id,
           farmer: transfer.farmer?.name || 'Farmer',
           bags: transfer.quantity_bags,
           otp: transfer.status === 'VERIFIED' ? 'Verified' : 'Pending',
@@ -275,9 +304,9 @@ export function RetailerDashboard({ userProfile, onLogout }) {
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
                   >
                     <option value="">Select Batch</option>
-                    {receivedBatches.map((batch) => (
-                      <option key={batch.id} value={batch.batchId}>
-                        {batch.batchCode || `Batch ${batch.id}`} ({batch.bags} bags)
+                    {distributableStock.map((batch) => (
+                      <option key={batch.batchId} value={batch.batchId}>
+                        {batch.batchCode || `Batch ${batch.batchId}`} ({batch.bagsAvailable} bags available)
                       </option>
                     ))}
                   </select>

@@ -1,7 +1,8 @@
 from django.contrib.auth.models import Group, User
 from django.core.management.base import BaseCommand
+from django.db.models import Sum
 
-from supply_chain.models import Branch, Farmer, Supplier, Warehouse
+from supply_chain.models import Branch, Farmer, FertilizerBatch, Supplier, Transfer, Warehouse
 from supply_chain.services.ministry_of_agriculture import fetch_farmers
 
 
@@ -80,6 +81,36 @@ class Command(BaseCommand):
             section="B2",
             defaults={"capacity_bags": 2000, "current_bags": 0},
         )
+        warehouse_main = Warehouse.objects.get(name="Main Warehouse", section="A1")
+
+        batch_npk, _ = FertilizerBatch.objects.get_or_create(
+            batch_code="BATCH-2026-NPK-001",
+            defaults={
+                "supplier": supplier_a,
+                "fertilizer_type": "NPK",
+                "quantity_bags": 500,
+                "storage_location": warehouse_main,
+                "manufacturer": "Mbeya Fertilizers Ltd",
+                "certification_status": "Certified",
+                "lifecycle_state": "IN_STORAGE",
+            },
+        )
+        batch_urea, _ = FertilizerBatch.objects.get_or_create(
+            batch_code="BATCH-2026-UREA-002",
+            defaults={
+                "supplier": supplier_a,
+                "fertilizer_type": "Urea",
+                "quantity_bags": 300,
+                "storage_location": warehouse_main,
+                "manufacturer": "Mbeya Fertilizers Ltd",
+                "certification_status": "Certified",
+                "lifecycle_state": "IN_STORAGE",
+            },
+        )
+        warehouse_main.current_bags = (
+            warehouse_main.batches.aggregate(total=Sum("quantity_bags"))["total"] or 0
+        )
+        warehouse_main.save(update_fields=["current_bags"])
 
         retailer_a, _ = Branch.objects.get_or_create(
             name="Bukoba Agro Shop",
@@ -141,8 +172,43 @@ class Command(BaseCommand):
             else:
                 updated += 1
 
+        Transfer.objects.get_or_create(
+            batch=batch_npk,
+            to_branch=coop_a,
+            transfer_type=Transfer.SUPPLIER_TO_BRANCH,
+            quantity_bags=200,
+            defaults={
+                "from_supplier": supplier_a,
+                "warehouse": warehouse_main,
+                "status": Transfer.RECEIVED,
+            },
+        )
+        Transfer.objects.get_or_create(
+            batch=batch_npk,
+            to_branch=coop_a,
+            transfer_type=Transfer.SUPPLIER_TO_BRANCH,
+            quantity_bags=100,
+            defaults={
+                "from_supplier": supplier_a,
+                "warehouse": warehouse_main,
+                "status": Transfer.DISPATCHED,
+            },
+        )
+        Transfer.objects.get_or_create(
+            batch=batch_urea,
+            to_branch=retailer_a,
+            transfer_type=Transfer.SUPPLIER_TO_BRANCH,
+            quantity_bags=150,
+            defaults={
+                "from_supplier": supplier_a,
+                "warehouse": warehouse_main,
+                "status": Transfer.RECEIVED,
+            },
+        )
+
         self.stdout.write(
             self.style.SUCCESS(
-                f"Demo data seeded. Farmers created: {created}, updated: {updated}."
+                f"Demo data seeded. Farmers created: {created}, updated: {updated}. "
+                f"Batches: {batch_npk.batch_code}, {batch_urea.batch_code}."
             )
         )
