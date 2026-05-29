@@ -1,6 +1,7 @@
 const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
 let accessToken = null;
+let refreshToken = null;
 
 export function setAccessToken(token) {
   accessToken = token;
@@ -18,7 +19,42 @@ export function getAccessToken() {
   return accessToken;
 }
 
-async function apiFetch(path, options = {}) {
+export function setRefreshToken(token) {
+  refreshToken = token;
+  if (token) {
+    localStorage.setItem('coffeechain_refresh_token', token);
+  } else {
+    localStorage.removeItem('coffeechain_refresh_token');
+  }
+}
+
+function getRefreshToken() {
+  if (refreshToken) return refreshToken;
+  const stored = localStorage.getItem('coffeechain_refresh_token');
+  refreshToken = stored || null;
+  return refreshToken;
+}
+
+async function refreshAccessToken() {
+  const token = getRefreshToken();
+  if (!token) return null;
+  const response = await fetch(`${API_BASE}/api/token/refresh/`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ refresh: token }),
+  });
+  if (!response.ok) return null;
+  const result = await response.json();
+  if (result?.access) {
+    setAccessToken(result.access);
+    return result.access;
+  }
+  return null;
+}
+
+async function apiFetch(path, options = {}, retryOnUnauthorized = true) {
   const token = getAccessToken();
   const headers = {
     'Content-Type': 'application/json',
@@ -31,6 +67,12 @@ async function apiFetch(path, options = {}) {
     ...options,
     headers,
   });
+  if (response.status === 401 && retryOnUnauthorized) {
+    const refreshedToken = await refreshAccessToken();
+    if (refreshedToken) {
+      return apiFetch(path, options, false);
+    }
+  }
   if (!response.ok) {
     let message = 'Request failed';
     try {
@@ -51,11 +93,13 @@ export async function login(username, password) {
     body: JSON.stringify({ username, password }),
   });
   setAccessToken(result.access);
+  setRefreshToken(result.refresh);
   return result;
 }
 
 export function logout() {
   setAccessToken(null);
+  setRefreshToken(null);
 }
 
 export function fetchProfile() {
@@ -123,6 +167,10 @@ export function deleteBatch(id) {
 
 export function fetchWarehouses() {
   return apiFetch('/api/warehouses/');
+}
+
+export function fetchWarehouseCatalog() {
+  return apiFetch('/api/warehouse-catalog/');
 }
 
 export function createWarehouse(payload) {

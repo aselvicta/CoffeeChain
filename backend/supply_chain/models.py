@@ -134,6 +134,9 @@ class Transfer(models.Model):
     batch = models.ForeignKey(
         FertilizerBatch, on_delete=models.CASCADE, related_name="transfers"
     )
+    warehouse = models.ForeignKey(
+        'Warehouse', on_delete=models.SET_NULL, null=True, blank=True, related_name='dispatches'
+    )
     transfer_type = models.CharField(max_length=30, choices=TRANSFER_TYPES)
     from_supplier = models.ForeignKey(
         Supplier, on_delete=models.SET_NULL, null=True, blank=True, related_name="outgoing"

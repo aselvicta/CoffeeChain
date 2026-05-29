@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { X, Plus, Edit2, Trash, Save } from 'lucide-react';
 import { updateBatch, deleteBatch, createBatch } from '../api/client';
 
@@ -8,9 +8,38 @@ export function WarehouseModal({ isOpen, onClose, warehouse, inventory, supplier
   const [editingId, setEditingId] = useState(null);
   const [localEdits, setLocalEdits] = useState({});
   const [adding, setAdding] = useState(false);
+  const [isTypePickerOpen, setIsTypePickerOpen] = useState(false);
   const [newItem, setNewItem] = useState({ fertilizer_type: '', quantity_bags: '', unit_weight_kg: '' });
 
   const batches = inventory.filter((item) => item.storageLocationId === warehouse.id);
+
+  const fertilizerTypeOptions = useMemo(() => {
+    const options = new Map();
+    inventory.forEach((item) => {
+      const fertilizerType = String(item.name || '').trim();
+      if (!fertilizerType) return;
+      const existing = options.get(fertilizerType) || {
+        name: fertilizerType,
+        count: 0,
+        unitWeightKg: item.unitWeightKg || '',
+      };
+      existing.count += 1;
+      if (!existing.unitWeightKg && item.unitWeightKg) {
+        existing.unitWeightKg = item.unitWeightKg;
+      }
+      options.set(fertilizerType, existing);
+    });
+    return Array.from(options.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [inventory]);
+
+  const applyFertilizerType = (option) => {
+    setNewItem((current) => ({
+      ...current,
+      fertilizer_type: option.name,
+      unit_weight_kg: option.unitWeightKg || current.unit_weight_kg,
+    }));
+    setIsTypePickerOpen(false);
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -100,7 +129,15 @@ export function WarehouseModal({ isOpen, onClose, warehouse, inventory, supplier
             {adding ? (
               <div className="space-y-2">
                 <div className="flex gap-2">
-                  <input placeholder="Fertilizer type" value={newItem.fertilizer_type} onChange={(e) => setNewItem({ ...newItem, fertilizer_type: e.target.value })} className="px-2 py-1 border rounded flex-1" />
+                  <div className="flex-1 space-y-2">
+                    <div className="flex gap-2">
+                      <input placeholder="Fertilizer type" value={newItem.fertilizer_type} onChange={(e) => setNewItem({ ...newItem, fertilizer_type: e.target.value })} className="px-2 py-1 border rounded flex-1" />
+                      <button type="button" className="px-3 py-1 border rounded text-sm text-green-700" onClick={() => setIsTypePickerOpen(true)}>
+                        Pick Existing
+                      </button>
+                    </div>
+                    <p className="text-xs text-gray-500">Choose a type from existing products to reuse the same fertilizer name and unit weight.</p>
+                  </div>
                   <input placeholder="Quantity (bags)" type="number" value={newItem.quantity_bags} onChange={(e) => setNewItem({ ...newItem, quantity_bags: e.target.value })} className="px-2 py-1 border rounded w-32" />
                   <input placeholder="Unit weight (kg)" type="number" value={newItem.unit_weight_kg} onChange={(e) => setNewItem({ ...newItem, unit_weight_kg: e.target.value })} className="px-2 py-1 border rounded w-36" />
                 </div>
@@ -136,6 +173,56 @@ export function WarehouseModal({ isOpen, onClose, warehouse, inventory, supplier
           </div>
         </div>
       </div>
+
+      {isTypePickerOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 px-4">
+          <div className="w-full max-w-2xl rounded-xl bg-white shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">Choose Fertilizer Type</h3>
+                <p className="text-sm text-gray-500">Pick an existing product type to speed up adding a similar batch.</p>
+              </div>
+              <button
+                onClick={() => setIsTypePickerOpen(false)}
+                className="rounded-full p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                aria-label="Close fertilizer type picker"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="max-h-[60vh] overflow-y-auto p-6">
+              {fertilizerTypeOptions.length === 0 ? (
+                <p className="text-sm text-gray-600">No existing product types found yet.</p>
+              ) : (
+                <div className="grid gap-3 md:grid-cols-2">
+                  {fertilizerTypeOptions.map((option) => (
+                    <button
+                      key={option.name}
+                      type="button"
+                      onClick={() => applyFertilizerType(option)}
+                      className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-left hover:border-green-300 hover:bg-green-50 transition-colors"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold text-gray-900">{option.name}</p>
+                          <p className="text-sm text-gray-600">Used in {option.count} batch{option.count === 1 ? '' : 'es'}</p>
+                        </div>
+                        <span className="rounded-full bg-white px-2 py-1 text-xs font-medium text-green-700 ring-1 ring-green-200">
+                          Select
+                        </span>
+                      </div>
+                      <p className="mt-2 text-xs text-gray-500">
+                        {option.unitWeightKg ? `Suggested unit weight: ${option.unitWeightKg} kg` : 'No unit weight saved for this type yet.'}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
