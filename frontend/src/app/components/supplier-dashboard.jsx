@@ -801,21 +801,21 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                 <div className="flex items-center gap-3">
                   <input
                     type="text"
-                    placeholder="Name"
+                    placeholder="e.g. Dar es Salaam Central Warehouse"
                     value={newWarehouse.name}
                     onChange={(e) => setNewWarehouse({ ...newWarehouse, name: e.target.value })}
                     className="px-3 py-2 border rounded"
                   />
                   <input
                     type="text"
-                    placeholder="Section"
+                    placeholder="e.g. Section A / North Wing"
                     value={newWarehouse.section}
                     onChange={(e) => setNewWarehouse({ ...newWarehouse, section: e.target.value })}
                     className="px-3 py-2 border rounded"
                   />
                   <input
                     type="number"
-                    placeholder="Capacity"
+                    placeholder="e.g. 500 bags"
                     value={newWarehouse.capacity}
                     onChange={(e) => setNewWarehouse({ ...newWarehouse, capacity: e.target.value })}
                     className="px-3 py-2 border rounded w-28"
