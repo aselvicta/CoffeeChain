@@ -39,6 +39,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
   const [traceBatchId, setTraceBatchId] = useState('');
   const [isWarehouseModalOpen, setIsWarehouseModalOpen] = useState(false);
   const [selectedWarehouse, setSelectedWarehouse] = useState(null);
+  const [warehouseToDelete, setWarehouseToDelete] = useState(null);
   const [newWarehouse, setNewWarehouse] = useState({ name: '', section: '', capacity: '' });
   const [statusMessage, setStatusMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -853,12 +854,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                     </div>
                     <div className="flex items-center gap-3">
                       <button onClick={() => { setSelectedWarehouse(w); setIsWarehouseModalOpen(true); }} className="px-4 py-2 bg-blue-600 text-white rounded">View</button>
-                      <button onClick={() => {
-                        if (!confirm(`Delete warehouse ${w.name}? This cannot be undone.`)) return;
-                        deleteWarehouse(w.id)
-                          .then(() => refreshData())
-                          .catch((error) => setStatusMessage(error.message));
-                      }} className="px-4 py-2 border rounded text-red-600">Delete</button>
+                      <button onClick={() => setWarehouseToDelete(w)} className="px-4 py-2 border rounded text-red-600">Delete</button>
                     </div>
                   </div>
                 ))}
@@ -971,6 +967,61 @@ export function SupplierDashboard({ userProfile, onLogout }) {
             setIsNotificationsOpen(false);
           }}
         />
+      )}
+      {warehouseToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between border-b border-gray-200 px-6 py-4">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">Delete warehouse?</h3>
+                <p className="mt-1 text-sm text-gray-600">
+                  This action cannot be undone.
+                </p>
+              </div>
+              <button
+                onClick={() => setWarehouseToDelete(null)}
+                className="rounded-full p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                aria-label="Close delete confirmation"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 px-6 py-5">
+              <p className="text-sm text-gray-700">
+                Are you sure you want to delete <span className="font-semibold text-gray-900">{warehouseToDelete.name}</span>
+                {warehouseToDelete.section ? ` in ${warehouseToDelete.section}` : ''}?
+              </p>
+              <p className="text-sm text-gray-500">
+                Any warehouse batches linked to this location will remain in the system, but the location itself will be removed.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 border-t border-gray-200 px-6 py-4">
+              <button
+                onClick={() => setWarehouseToDelete(null)}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  if (!warehouseToDelete) return;
+                  try {
+                    await deleteWarehouse(warehouseToDelete.id);
+                    setWarehouseToDelete(null);
+                    await refreshData();
+                  } catch (error) {
+                    setStatusMessage(error.message);
+                  }
+                }}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+              >
+                Delete warehouse
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       {isTraceOpen && (
         <TraceBatchModal isOpen={isTraceOpen} onClose={() => setIsTraceOpen(false)} batchId={traceBatchId || ''} />

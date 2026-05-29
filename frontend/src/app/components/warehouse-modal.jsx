@@ -9,6 +9,7 @@ export function WarehouseModal({ isOpen, onClose, warehouse, inventory, supplier
   const [localEdits, setLocalEdits] = useState({});
   const [adding, setAdding] = useState(false);
   const [isTypePickerOpen, setIsTypePickerOpen] = useState(false);
+  const [batchToDelete, setBatchToDelete] = useState(null);
   const [newItem, setNewItem] = useState({ fertilizer_type: '', quantity_bags: '', unit_weight_kg: '' });
 
   const batches = inventory.filter((item) => item.storageLocationId === warehouse.id);
@@ -106,16 +107,7 @@ export function WarehouseModal({ isOpen, onClose, warehouse, inventory, supplier
                       ) : (
                         <div className="flex items-center gap-2">
                           <button className="px-2 py-1 border rounded" onClick={() => { setEditingId(b.id); setLocalEdits({ fertilizer_type: b.name, quantity_bags: b.available }); }}><Edit2 size={14} /></button>
-                          <button className="px-2 py-1 border rounded text-red-600" onClick={async () => {
-                            if (!confirm('Delete this batch?')) return;
-                            try {
-                              await deleteBatch(b.id);
-                              onClose();
-                              if (typeof onRefresh === 'function') onRefresh();
-                            } catch (err) {
-                              alert(err.message || 'Delete failed');
-                            }
-                          }}><Trash size={14} /></button>
+                          <button className="px-2 py-1 border rounded text-red-600" onClick={() => setBatchToDelete(b)}><Trash size={14} /></button>
                         </div>
                       )}
                     </td>
@@ -219,6 +211,61 @@ export function WarehouseModal({ isOpen, onClose, warehouse, inventory, supplier
                   ))}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {batchToDelete && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl overflow-hidden">
+            <div className="flex items-start justify-between border-b border-gray-200 px-6 py-4">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">Delete product batch?</h3>
+                <p className="mt-1 text-sm text-gray-500">This action cannot be undone.</p>
+              </div>
+              <button
+                onClick={() => setBatchToDelete(null)}
+                className="rounded-full p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                aria-label="Close delete confirmation"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 px-6 py-5">
+              <p className="text-sm text-gray-700">
+                Are you sure you want to delete <span className="font-semibold text-gray-900">{batchToDelete.name}</span>
+                {batchToDelete.expiryDate ? ` with expiry ${batchToDelete.expiryDate}` : ''}?
+              </p>
+              <p className="text-sm text-gray-500">
+                The batch will be removed from this warehouse and cannot be restored.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 border-t border-gray-200 px-6 py-4">
+              <button
+                onClick={() => setBatchToDelete(null)}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  if (!batchToDelete) return;
+                  try {
+                    await deleteBatch(batchToDelete.id);
+                    setBatchToDelete(null);
+                    onClose();
+                    if (typeof onRefresh === 'function') onRefresh();
+                  } catch (err) {
+                    alert(err.message || 'Delete failed');
+                  }
+                }}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+              >
+                Delete batch
+              </button>
             </div>
           </div>
         </div>
