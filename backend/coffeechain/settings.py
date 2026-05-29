@@ -97,6 +97,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "rest_framework.authentication.SessionAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
 }
@@ -121,3 +122,14 @@ STORACHA_UPLOAD_URL = os.getenv("STORACHA_UPLOAD_URL", "http://localhost:3001/up
 POLYGON_RPC_URL = os.getenv("POLYGON_RPC_URL", "")
 POLYGON_CONTRACT_ADDRESS = os.getenv("POLYGON_CONTRACT_ADDRESS", "")
 POLYGON_PRIVATE_KEY = os.getenv("POLYGON_PRIVATE_KEY", "")
+
+SMS_PROVIDER = os.getenv("SMS_PROVIDER", "simulated")
+AT_USERNAME = os.getenv("AT_USERNAME", "")
+AT_API_KEY = os.getenv("AT_API_KEY", "")
+AT_SENDER_ID = os.getenv("AT_SENDER_ID", "")
+AT_BASE_URL = os.getenv(
+    "AT_BASE_URL", "https://api.africastalking.com/version1/messaging"
+)
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER", "")

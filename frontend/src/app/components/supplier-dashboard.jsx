@@ -5,16 +5,7 @@ import { Logo } from './logo';
 import { NotificationPanel } from './notification-panel';
 import { TraceBatchModal } from './trace-batch-modal';
 import { WarehouseModal } from './warehouse-modal';
-import {
-  createTransfer,
-  createWarehouse,
-  deleteWarehouse,
-  fetchBatches,
-  fetchBranches,
-  fetchTransfers,
-  fetchWarehouseCatalog,
-  fetchWarehouses,
-} from '../api/client';
+import { createBatch, createTransfer, createWarehouse, deleteWarehouse, fetchBatches, fetchBranches, fetchTransfers, fetchWarehouses } from '../api/client';
 
 export function SupplierDashboard({ userProfile, onLogout }) {
   function createDispatchLineItem() {
@@ -95,17 +86,23 @@ export function SupplierDashboard({ userProfile, onLogout }) {
 
   const refreshData = async () => {
     try {
-      const [branchData, batchData, transferData, warehouseData, warehouseCatalogData] = await Promise.all([
+      const [branchData, batchData, transferData, warehouseData] = await Promise.all([
         fetchBranches(),
         fetchBatches(),
         fetchTransfers(),
         fetchWarehouses(),
-        fetchWarehouseCatalog(),
       ]);
       setBranches(branchData);
       setBatches(batchData);
-      setWarehouses(warehouseData.map(normalizeWarehouse));
-      setWarehouseCatalog(warehouseCatalogData);
+      setWarehouses(
+        warehouseData.map((warehouse) => ({
+          id: warehouse.id,
+          name: warehouse.name,
+          section: warehouse.section,
+          capacity: warehouse.capacity_bags,
+          current: warehouse.current_bags,
+        }))
+      );
 
       const supplierTransfers = transferData.filter(
         (transfer) =>
@@ -156,8 +153,8 @@ export function SupplierDashboard({ userProfile, onLogout }) {
           productionDate: batch.production_date || '',
           expiryDate: batch.expiry_date || '',
           certificationStatus: batch.certification_status || 'Pending',
-          storageLocation,
-          storageCapacity,
+          storageLocation: batch.storage_location?.name || '',
+          storageLocationId: batch.storage_location?.id || null,
           lifecycle,
           expiryRisk,
         };
@@ -359,9 +356,10 @@ export function SupplierDashboard({ userProfile, onLogout }) {
           </div>
         </header>
 
-        {/* Content */}
+        {/* CONTENTS */}
         <main className="flex-1 overflow-y-auto p-8">
           {activeTab === 'overview' && (
+           // Quick actions sections
             <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 {[
@@ -414,6 +412,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
             </div>
           )}
           {activeTab === 'dispatch' && (
+            // Dispatch creation form + recent dispatches
             <div className="space-y-6">
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                 <h2 className="text-xl font-bold text-gray-900 mb-4">Dispatch Batches</h2>
@@ -600,6 +599,18 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                     <option>Certified</option>
                     <option>Rejected</option>
                   </select>
+                  <select
+                    value={dispatchForm.storageLocation}
+                    onChange={(e) => setDispatchForm({ ...dispatchForm, storageLocation: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  >
+                    <option value="">Storage location (optional)</option>
+                    {warehouses.map((warehouse) => (
+                      <option key={warehouse.id} value={warehouse.id}>
+                        {warehouse.name} • {warehouse.section}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div className="mt-4 flex items-center gap-3">
                   <button
@@ -618,40 +629,29 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                         const warehouse = warehouseCatalog.find(
                           (item) => String(item.id) === String(dispatchForm.warehouseId)
                         );
-                        if (!warehouse) {
-                          throw new Error('Select a valid warehouse.');
-                        }
-                        const dispatchBatchId = `DISPATCH-${Date.now()}`;
-                        const lineItems = dispatchItems.map((item) => {
-                          const stockItem = (warehouse.items || []).find(
-                            (currentItem) => currentItem.batch_code === item.batchCode
-                          );
-                          if (!stockItem) {
-                            throw new Error(`Batch ${item.batchCode || 'unknown'} is not available in the chosen warehouse.`);
-                          }
-                          const requestedBags = Number(item.bags);
-                          if (!requestedBags || requestedBags <= 0) {
-                            throw new Error(`Enter a valid bag count for ${stockItem.batch_code}.`);
-                          }
-                          if (requestedBags > Number(stockItem.available_bags)) {
-                            throw new Error(`Only ${stockItem.available_bags} bags are available for ${stockItem.batch_code}.`);
-                          }
-                          const existingBatch = batches.find(
-                            (batch) => batch.batch_code === stockItem.batch_code
-                          );
-                          if (!existingBatch) {
-                            throw new Error(`Batch ${stockItem.batch_code} was not found.`);
-                          }
-                          return {
-                            batch_id: existingBatch.id,
-                            transfer_type: 'SUPPLIER_TO_BRANCH',
-                            from_supplier_id: userProfile.supplierRecordId,
-                            to_branch_id: destinationId,
-                            quantity_bags: requestedBags,
-                            status: 'DISPATCHED',
-                            warehouse_id: Number(dispatchForm.warehouseId),
-                            notes: `Dispatch batch ${dispatchBatchId}`,
-                          };
+                        const batchPayload = existingBatch
+                          ? { id: existingBatch.id }
+                          : await createBatch({
+                              supplier_id: userProfile.supplierRecordId,
+                              batch_code: dispatchForm.batchId,
+                              fertilizer_type: dispatchForm.product,
+                              quantity_bags: Number(dispatchForm.bags),
+                              manufacturer: dispatchForm.manufacturer,
+                              production_date: dispatchForm.productionDate || null,
+                              expiry_date: dispatchForm.expiryDate || null,
+                              certification_status: dispatchForm.certificationStatus,
+                              ...(dispatchForm.storageLocation
+                                ? { storage_location_id: Number(dispatchForm.storageLocation) }
+                                : {}),
+                            });
+                        // create transfer (dispatch)
+                        await createTransfer({
+                          batch_id: batchPayload.id || batchPayload,
+                          transfer_type: 'SUPPLIER_TO_BRANCH',
+                          from_supplier_id: userProfile.supplierRecordId,
+                          to_branch_id: destinationId,
+                          quantity_bags: Number(dispatchForm.bags),
+                          status: 'DISPATCHED',
                         });
 
                         await Promise.all(lineItems.map((payload) => createTransfer(payload)));
@@ -853,20 +853,12 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                     </div>
                     <div className="flex items-center gap-3">
                       <button onClick={() => { setSelectedWarehouse(w); setIsWarehouseModalOpen(true); }} className="px-4 py-2 bg-blue-600 text-white rounded">View</button>
-                      <button
-                        onClick={async () => {
-                          if (!confirm(`Delete warehouse ${w.name}? This cannot be undone.`)) return;
-                          try {
-                            await deleteWarehouse(w.id);
-                            await refreshData();
-                          } catch (error) {
-                            setStatusMessage(error.message);
-                          }
-                        }}
-                        className="px-4 py-2 border rounded text-red-600"
-                      >
-                        Delete
-                      </button>
+                      <button onClick={() => {
+                        if (!confirm(`Delete warehouse ${w.name}? This cannot be undone.`)) return;
+                        deleteWarehouse(w.id)
+                          .then(() => refreshData())
+                          .catch((error) => setStatusMessage(error.message));
+                      }} className="px-4 py-2 border rounded text-red-600">Delete</button>
                     </div>
                   </div>
                 ))}
@@ -984,81 +976,14 @@ export function SupplierDashboard({ userProfile, onLogout }) {
         <TraceBatchModal isOpen={isTraceOpen} onClose={() => setIsTraceOpen(false)} batchId={traceBatchId || ''} />
       )}
       {isWarehouseModalOpen && (
-        <WarehouseModal isOpen={isWarehouseModalOpen} onClose={() => { setIsWarehouseModalOpen(false); setSelectedWarehouse(null); }} warehouse={selectedWarehouse} inventory={inventory} onRefresh={refreshData} supplierId={userProfile.supplierRecordId} />
-      )}
-      {selectedDispatch && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="w-full max-w-2xl rounded-xl bg-white shadow-2xl overflow-hidden">
-            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
-              <div>
-                <h3 className="text-lg font-bold text-gray-900">Dispatch Details</h3>
-                <p className="text-sm text-gray-500">ID {selectedDispatch.id}</p>
-              </div>
-              <button
-                onClick={() => setSelectedDispatch(null)}
-                className="rounded-full p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
-                aria-label="Close dispatch details"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="grid gap-4 p-6 md:grid-cols-2">
-              <div>
-                <p className="text-sm text-gray-500">Batch</p>
-                <p className="font-semibold text-gray-900">{selectedDispatch.batchCode}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">Product</p>
-                <p className="font-semibold text-gray-900">{selectedDispatch.product}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">Destination</p>
-                <p className="font-semibold text-gray-900">{selectedDispatch.destination}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">Warehouse</p>
-                <p className="font-semibold text-gray-900">{selectedDispatch.warehouse}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">Bags</p>
-                <p className="font-semibold text-gray-900">{selectedDispatch.bags}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">Created</p>
-                <p className="font-semibold text-gray-900">{selectedDispatch.date || '—'}</p>
-              </div>
-            </div>
-            <div className="border-t border-gray-200 px-6 py-4">
-              <div className="flex items-center gap-3">
-                <span className={`px-3 py-1 rounded-full text-sm font-medium ${selectedDispatch.statusTone}`}>
-                  {selectedDispatch.status}
-                </span>
-                <p className="text-sm text-gray-600">{selectedDispatch.statusDescription}</p>
-              </div>
-              <div className="mt-4 grid gap-3 md:grid-cols-3">
-                {['Dispatched', 'Delivered', 'Received'].map((step, index) => {
-                  const activeStep = selectedDispatch.rawStatus === 'RECEIVED' ? 3 : 0;
-                  const isActive = index <= activeStep;
-                  return (
-                    <div
-                      key={step}
-                      className={`rounded-lg border p-3 ${isActive ? 'border-green-200 bg-green-50' : 'border-gray-200 bg-gray-50'}`}
-                    >
-                      <p className={`text-sm font-semibold ${isActive ? 'text-green-800' : 'text-gray-600'}`}>
-                        {step}
-                      </p>
-                      <p className="text-xs text-gray-500 mt-1">
-                        {step === 'Dispatched' && 'Sent from the supplier warehouse.'}
-                        {step === 'Delivered' && 'Arrived at the receiver.'}
-                        {step === 'Received' && 'Receiver confirmed the package.'}
-                      </p>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        </div>
+        <WarehouseModal
+          isOpen={isWarehouseModalOpen}
+          onClose={() => { setIsWarehouseModalOpen(false); setSelectedWarehouse(null); }}
+          warehouse={selectedWarehouse}
+          inventory={inventory}
+          supplierId={userProfile.supplierRecordId}
+          onRefresh={refreshData}
+        />
       )}
     </div>
   );

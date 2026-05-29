@@ -2,11 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { X, Plus, Edit2, Trash, Save } from 'lucide-react';
 import { updateBatch, deleteBatch, createBatch } from '../api/client';
 
-function generateBatchCode() {
-  return `BATCH-${Date.now()}-${Math.random().toString(16).slice(2, 6).toUpperCase()}`;
-}
-
-export function WarehouseModal({ isOpen, onClose, warehouse, inventory, onRefresh, supplierId }) {
+export function WarehouseModal({ isOpen, onClose, warehouse, inventory, supplierId, onRefresh }) {
   if (!isOpen || !warehouse) return null;
 
   const [editingId, setEditingId] = useState(null);
@@ -15,26 +11,7 @@ export function WarehouseModal({ isOpen, onClose, warehouse, inventory, onRefres
   const [isTypePickerOpen, setIsTypePickerOpen] = useState(false);
   const [newItem, setNewItem] = useState({ fertilizer_type: '', quantity_bags: '', unit_weight_kg: '' });
 
-  const matchesWarehouseLocation = (location) => {
-    if (!location) return false;
-    if (typeof location === 'string') {
-      const normalizedLocation = location.toLowerCase();
-      return (
-        normalizedLocation === String(warehouse.name).toLowerCase() ||
-        normalizedLocation === String(warehouse.section).toLowerCase()
-      );
-    }
-
-    return (
-      String(location.name || '').toLowerCase() === String(warehouse.name).toLowerCase() ||
-      String(location.section || '').toLowerCase() === String(warehouse.section).toLowerCase() ||
-      String(location.id || '') === String(warehouse.id)
-    );
-  };
-
-  const batches = inventory.filter((item) => {
-    return matchesWarehouseLocation(item.storageLocation);
-  });
+  const batches = inventory.filter((item) => item.storageLocationId === warehouse.id);
 
   const fertilizerTypeOptions = useMemo(() => {
     const options = new Map();
@@ -167,29 +144,14 @@ export function WarehouseModal({ isOpen, onClose, warehouse, inventory, onRefres
                 <div className="flex gap-2">
                   <button className="px-4 py-2 bg-green-600 text-white rounded" onClick={async () => {
                     try {
-                      if (!supplierId) {
-                        throw new Error('Supplier profile not available for batch creation.');
-                      }
-                      const requestedBags = Number(newItem.quantity_bags);
-                      const warehouseCapacity = Number(warehouse.capacity) || 0;
-                      const warehouseCurrent = Number(warehouse.current) || 0;
-                      const remainingSpace = Math.max(warehouseCapacity - warehouseCurrent, 0);
-                      if (!requestedBags || requestedBags <= 0) {
-                        throw new Error('Enter a valid quantity of bags.');
-                      }
-                      if (requestedBags > remainingSpace) {
-                        throw new Error(
-                          `Only ${remainingSpace} bags can be added before this warehouse reaches its capacity of ${warehouseCapacity} bags.`
-                        );
-                      }
                       const payload = {
-                        ...newItem,
-                        batch_code: generateBatchCode(),
                         supplier_id: supplierId,
+                        batch_code: `WH-${warehouse.id}-${Date.now()}`,
+                        fertilizer_type: newItem.fertilizer_type,
                         storage_location_id: warehouse.id,
                       };
-                      if (payload.quantity_bags) payload.quantity_bags = Number(payload.quantity_bags);
-                      if (payload.unit_weight_kg) payload.unit_weight_kg = Number(payload.unit_weight_kg);
+                      if (newItem.quantity_bags) payload.quantity_bags = Number(newItem.quantity_bags);
+                      if (newItem.unit_weight_kg) payload.unit_weight_kg = Number(newItem.unit_weight_kg);
                       await createBatch(payload);
                           setNewItem({ fertilizer_type: '', quantity_bags: '', unit_weight_kg: '' });
                           setAdding(false);

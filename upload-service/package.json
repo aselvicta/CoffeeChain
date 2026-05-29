@@ -4,7 +4,10 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "node index.js"
+    "dev": "node index.js",
+    "setup": "node setup-storacha.js",
+    "keygen": "node generate-key.js",
+    "diagnose": "node diagnose-storacha.js"
   },
   "dependencies": {
     "@storacha/client": "^1.3.0",
