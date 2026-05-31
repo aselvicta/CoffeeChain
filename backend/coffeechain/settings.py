@@ -123,7 +123,9 @@ POLYGON_RPC_URL = os.getenv("POLYGON_RPC_URL", "")
 POLYGON_CONTRACT_ADDRESS = os.getenv("POLYGON_CONTRACT_ADDRESS", "")
 POLYGON_PRIVATE_KEY = os.getenv("POLYGON_PRIVATE_KEY", "")
 
-SMS_PROVIDER = os.getenv("SMS_PROVIDER", "simulated")
+# africas_talking | twilio | simulated — see backend/.env.example
+SMS_PROVIDER = os.getenv("SMS_PROVIDER", "africas_talking")
+SMS_FALLBACK_PROVIDER = os.getenv("SMS_FALLBACK_PROVIDER", "")
 AT_USERNAME = os.getenv("AT_USERNAME", "")
 AT_API_KEY = os.getenv("AT_API_KEY", "")
 AT_SENDER_ID = os.getenv("AT_SENDER_ID", "")
@@ -133,3 +135,15 @@ AT_BASE_URL = os.getenv(
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
 TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER", "")
+# Trial quickstart: send OTP to Twilio Virtual Phone (+18777804236) when +255 is blocked
+TWILIO_VIRTUAL_PHONE = os.getenv("TWILIO_VIRTUAL_PHONE", "+18777804236")
+TWILIO_TRIAL_DESTINATION = os.getenv(
+    "TWILIO_TRIAL_DESTINATION", "virtual_phone"
+)  # virtual_phone | farmer
+TWILIO_VIRTUAL_PHONE_CONSOLE_URL = os.getenv(
+    "TWILIO_VIRTUAL_PHONE_CONSOLE_URL",
+    "https://console.twilio.com/us1/develop/sms/try-it-out/send",
+)
+
+# Retailer POS: discount for buyers verified against the Ministry registry
+RETAILER_MINISTRY_DISCOUNT_PERCENT = int(os.getenv("RETAILER_MINISTRY_DISCOUNT_PERCENT", "10"))

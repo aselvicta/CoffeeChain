@@ -152,6 +152,23 @@ class Transfer(models.Model):
     )
     quantity_bags = models.PositiveIntegerField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=DISPATCHED)
+    BUYER_MINISTRY = "MINISTRY"
+    BUYER_WALK_IN = "WALK_IN"
+    BUYER_TYPES = [
+        (BUYER_MINISTRY, "Ministry-registered buyer"),
+        (BUYER_WALK_IN, "Walk-in buyer"),
+    ]
+    buyer_type = models.CharField(
+        max_length=20, choices=BUYER_TYPES, default=BUYER_MINISTRY, blank=True
+    )
+    ministry_verified = models.BooleanField(
+        default=False,
+        help_text="True when the buyer was matched to the Ministry of Agriculture registry.",
+    )
+    discount_percent = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="Subsidy or discount applied for this sale (e.g. registered farmers).",
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True
     )
@@ -229,3 +246,60 @@ class AuditLog(models.Model):
     )
     details = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+class Notification(models.Model):
+    TYPE_DISPATCH = "dispatch"
+    TYPE_RECEIPT = "receipt"
+    TYPE_DELIVERY = "delivery"
+    TYPE_OTP = "otp"
+    TYPE_REGISTRY = "registry"
+    TYPE_STOCK = "stock"
+    TYPE_SYSTEM = "system"
+    TYPE_CHOICES = [
+        (TYPE_DISPATCH, "Dispatch"),
+        (TYPE_RECEIPT, "Receipt"),
+        (TYPE_DELIVERY, "Delivery"),
+        (TYPE_OTP, "OTP"),
+        (TYPE_REGISTRY, "Registry"),
+        (TYPE_STOCK, "Stock"),
+        (TYPE_SYSTEM, "System"),
+    ]
+
+    PRIORITY_LOW = "low"
+    PRIORITY_MEDIUM = "medium"
+    PRIORITY_HIGH = "high"
+    PRIORITY_CHOICES = [
+        (PRIORITY_LOW, "Low"),
+        (PRIORITY_MEDIUM, "Medium"),
+        (PRIORITY_HIGH, "High"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="notifications",
+    )
+    notification_type = models.CharField(max_length=20, choices=TYPE_CHOICES)
+    title = models.CharField(max_length=200)
+    message = models.TextField()
+    details = models.TextField(blank=True)
+    priority = models.CharField(
+        max_length=10, choices=PRIORITY_CHOICES, default=PRIORITY_MEDIUM
+    )
+    read_at = models.DateTimeField(null=True, blank=True)
+    transfer = models.ForeignKey(
+        Transfer,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="notifications",
+    )
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.title} → {self.user_id}"

@@ -205,6 +205,17 @@ class Command(BaseCommand):
                 "status": Transfer.RECEIVED,
             },
         )
+        Transfer.objects.get_or_create(
+            batch=batch_npk,
+            to_branch=retailer_a,
+            transfer_type=Transfer.SUPPLIER_TO_BRANCH,
+            quantity_bags=80,
+            defaults={
+                "from_supplier": supplier_a,
+                "warehouse": warehouse_main,
+                "status": Transfer.DISPATCHED,
+            },
+        )
 
         self.stdout.write(
             self.style.SUCCESS(

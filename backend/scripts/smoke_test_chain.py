@@ -154,12 +154,99 @@ def main():
         else:
             print("Stock guard OK:", r.status_code)
 
+    # 4. Retailer flow
+    retailer_token = login("retailer1")
+    me_r = api(retailer_token, "GET", "/api/me/").json()
+    retailer_branch_id = me_r["branch"]["id"]
+    transfers_r = api(retailer_token, "GET", "/api/transfers/").json()
+    inbound_r = [
+        t
+        for t in transfers_r
+        if t["transfer_type"] == "SUPPLIER_TO_BRANCH"
+        and t["to_branch"]["id"] == retailer_branch_id
+    ]
+    pending_r = [t for t in inbound_r if t["status"] == "DISPATCHED"]
+    print(f"Retailer inbound: {len(inbound_r)} pending={len(pending_r)}")
+    if pending_r:
+        r = api(retailer_token, "POST", f"/api/transfers/{pending_r[0]['id']}/receive/")
+        if r.status_code != 200:
+            errors.append(f"Retailer receive failed: {r.status_code}")
+        else:
+            print(f"Retailer received transfer #{pending_r[0]['id']}")
+
+    resolve_r = api(
+        retailer_token,
+        "POST",
+        "/api/farmers/resolve_buyer/",
+        json={"ministry_id": "MOA-KAG-031"},
+    )
+    if resolve_r.status_code not in (200, 201):
+        errors.append(f"Retailer resolve_buyer failed: {resolve_r.status_code}")
+    else:
+        body = resolve_r.json()
+        print(
+            f"Retailer buyer resolved: discount={body.get('discount_percent')}% "
+            f"verified={body.get('ministry_verified')}"
+        )
+    reg_block = api(
+        retailer_token,
+        "POST",
+        "/api/farmers/register/",
+        json={"ministry_id": "MOA-KAG-031"},
+    )
+    if reg_block.status_code != 403:
+        errors.append("Retailer register should be forbidden")
+    else:
+        print("Retailer cannot register farmers (OK)")
+
+    transfers_r = api(retailer_token, "GET", "/api/transfers/").json()
+    received_r = [
+        t
+        for t in transfers_r
+        if t["transfer_type"] == "SUPPLIER_TO_BRANCH"
+        and t["to_branch"]["id"] == retailer_branch_id
+        and t["status"] in ("RECEIVED", "VERIFIED")
+    ]
+    if received_r and resolve_r.status_code in (200, 201):
+        from supply_chain.models import Branch, FertilizerBatch
+        from supply_chain.views import get_branch_available_quantity
+
+        branch_r = Branch.objects.get(id=retailer_branch_id)
+        best_r = None
+        for t in received_r:
+            batch = FertilizerBatch.objects.get(id=t["batch"]["id"])
+            avail = get_branch_available_quantity(batch, branch_r)
+            if avail > 0 and (not best_r or avail > best_r[1]):
+                best_r = (t, avail)
+        if best_r:
+            buyer = resolve_r.json()
+            r = api(
+                retailer_token,
+                "POST",
+                "/api/transfers/",
+                json={
+                    "batch_id": best_r[0]["batch"]["id"],
+                    "transfer_type": "BRANCH_TO_FARMER",
+                    "from_branch_id": retailer_branch_id,
+                    "farmer_id": buyer["farmer_id"],
+                    "quantity_bags": min(3, best_r[1]),
+                    "status": "DISPATCHED",
+                    "buyer_type": buyer.get("buyer_type"),
+                    "ministry_verified": buyer.get("ministry_verified"),
+                    "discount_percent": buyer.get("discount_percent"),
+                },
+            )
+            if r.status_code not in (200, 201):
+                errors.append(f"Retailer distribute failed: {r.status_code} {r.text[:120]}")
+            else:
+                print(f"Retailer distribution #{r.json()['id']} OK")
+
     if errors:
         print("FAILURES:")
         for e in errors:
             print(" -", e)
         sys.exit(1)
-    print("All chain smoke tests passed.")
+    print("All chain smoke tests passed (supplier, cooperative, retailer).")
 
 
 if __name__ == "__main__":
