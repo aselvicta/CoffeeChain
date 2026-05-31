@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Package, X } from 'lucide-react';
 import { createBatch } from '../api/client';
+import { useFertilizerTypes } from '../hooks/use-fertilizer-types';
 
 function getTodayValue() {
   const d = new Date();
@@ -35,6 +36,7 @@ export function StockInModal({ isOpen, warehouse, supplierId, existingBatches = 
   const [successMessage, setSuccessMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const closeTimerRef = useRef(null);
+  const { fertilizerTypes } = useFertilizerTypes();
 
   useEffect(() => {
     if (isOpen) {
@@ -196,11 +198,11 @@ export function StockInModal({ isOpen, warehouse, supplierId, existingBatches = 
                   onChange={(e) => setFormData({ ...formData, fertilizerType: e.target.value, customFertilizerType: e.target.value === 'Other' ? formData.customFertilizerType : '' })}
                   className={field}
                 >
-                  <option value="DAP">DAP</option>
-                  <option value="CAN">CAN</option>
-                  <option value="Urea">Urea</option>
-                  <option value="NPK">NPK</option>
-                  <option value="CAN+B">CAN+B</option>
+                  {fertilizerTypes.map((type) => (
+                    <option key={type.value} value={type.value}>
+                      {type.label}
+                    </option>
+                  ))}
                   <option value="Other">Other</option>
                 </select>
               </label>

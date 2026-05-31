@@ -91,7 +91,19 @@ class FarmerSerializer(serializers.ModelSerializer):
 class WarehouseSerializer(serializers.ModelSerializer):
     class Meta:
         model = Warehouse
-        fields = ["id", "name", "section", "capacity_bags", "current_bags", "created_at"]
+        fields = [
+            "id",
+            "name",
+            "section",
+            "address",
+            "region",
+            "contact_name",
+            "contact_phone",
+            "notes",
+            "capacity_bags",
+            "current_bags",
+            "created_at",
+        ]
 
 
 class FertilizerBatchSerializer(serializers.ModelSerializer):
@@ -122,6 +134,8 @@ class FertilizerBatchSerializer(serializers.ModelSerializer):
             "manufacturer",
             "production_date",
             "expiry_date",
+            "date_received",
+            "source_reference",
             "certification_status",
             "storage_location",
             "storage_location_id",

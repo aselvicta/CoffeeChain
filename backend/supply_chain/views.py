@@ -58,6 +58,15 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_FERTILIZER_TYPES = [
+    "DAP",
+    "CAN",
+    "Urea",
+    "NPK",
+    "CAN+B",
+    "Organic Compost",
+]
+
 
 def resolve_role(user):
     if user.is_staff:
@@ -152,6 +161,29 @@ def build_warehouse_catalog(warehouses):
             }
         )
     return catalog
+
+
+def build_fertilizer_type_catalog():
+    known_types = []
+    seen = set()
+
+    for fertilizer_type in DEFAULT_FERTILIZER_TYPES:
+        normalized = fertilizer_type.strip()
+        if normalized and normalized.lower() not in seen:
+            seen.add(normalized.lower())
+            known_types.append({"value": normalized, "label": normalized})
+
+    for fertilizer_type in (
+        FertilizerBatch.objects.order_by("fertilizer_type")
+        .values_list("fertilizer_type", flat=True)
+        .distinct()
+    ):
+        normalized = (fertilizer_type or "").strip()
+        if normalized and normalized.lower() not in seen:
+            seen.add(normalized.lower())
+            known_types.append({"value": normalized, "label": normalized})
+
+    return known_types
 
 
 def recalculate_warehouse_current_bags(warehouse):
@@ -296,6 +328,13 @@ class WarehouseCatalogView(APIView):
             "batches__transfers", "batches__supplier"
         )
         return Response(build_warehouse_catalog(warehouses))
+
+
+class FertilizerTypeCatalogView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(build_fertilizer_type_catalog())
 
 
 class FarmerViewSet(viewsets.ModelViewSet):

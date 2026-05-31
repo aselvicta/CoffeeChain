@@ -63,6 +63,8 @@ class FertilizerBatch(models.Model):
     manufacturer = models.CharField(max_length=200, blank=True)
     production_date = models.DateField(null=True, blank=True)
     expiry_date = models.DateField(null=True, blank=True)
+    date_received = models.DateField(null=True, blank=True)
+    source_reference = models.CharField(max_length=255, blank=True, default="")
     CERT_STATUS = [
         ("Pending", "Pending"),
         ("Certified", "Certified"),
@@ -106,6 +108,11 @@ class FertilizerBatch(models.Model):
 class Warehouse(models.Model):
     name = models.CharField(max_length=200)
     section = models.CharField(max_length=100, blank=True)
+    address = models.CharField(max_length=255, blank=True, default="")
+    region = models.CharField(max_length=100, blank=True, default="")
+    contact_name = models.CharField(max_length=150, blank=True, default="")
+    contact_phone = models.CharField(max_length=50, blank=True, default="")
+    notes = models.TextField(blank=True, default="")
     capacity_bags = models.PositiveIntegerField(default=0)
     current_bags = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)

@@ -10,6 +10,7 @@ from .views import (
     DeliveryProofViewSet,
     FarmerViewSet,
     FertilizerBatchViewSet,
+    FertilizerTypeCatalogView,
     MeView,
     NotificationViewSet,
     OTPVerificationViewSet,
@@ -38,6 +39,7 @@ router.register("audit-logs", AuditLogViewSet)
 urlpatterns = [
     path("", include(router.urls)),
     path("warehouse-catalog/", WarehouseCatalogView.as_view(), name="warehouse-catalog"),
+    path("fertilizer-types/", FertilizerTypeCatalogView.as_view(), name="fertilizer-types"),
     path("reports/audit/", AuditReportView.as_view(), name="audit-report"),
     path("me/", MeView.as_view(), name="me"),
 ]
