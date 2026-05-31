@@ -3,6 +3,7 @@ import { Package, ArrowRight, Calendar, User } from 'lucide-react';
 import { useLanguage } from './language-context';
 import { TrustSeal } from './trust-seal';
 import { FarmerOTPModal } from './farmer-otp-modal';
+import { useFertilizerTypes } from '../hooks/use-fertilizer-types';
 
 interface Distribution {
   id: string;
@@ -38,6 +39,7 @@ interface FormData {
 
 export function FertilizerOut() {
   const { t, language } = useLanguage();
+  const { fertilizerTypes } = useFertilizerTypes();
   const [formData, setFormData] = useState<FormData>({
     farmerId: '',
     farmerName: '',
@@ -81,13 +83,6 @@ export function FertilizerOut() {
     { id: 'F-2403', name: 'Peter Ochieng' },
     { id: 'F-2404', name: 'Grace Akinyi' },
     { id: 'F-2405', name: 'Daniel Mwangi' }
-  ];
-
-  const fertilizerTypes: FertilizerType[] = [
-    { value: 'npk', label: 'NPK 20-10-10' },
-    { value: 'dap', label: 'DAP (Diammonium Phosphate)' },
-    { value: 'urea', label: 'Urea (46% N)' },
-    { value: 'organic', label: language === 'en' ? 'Organic Compost' : 'Mbolea ya Asili' }
   ];
 
   const handleFarmerSelect = (farmerId: string) => {

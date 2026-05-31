@@ -8,6 +8,7 @@ from .models import (
     DeliveryProof,
     Farmer,
     FertilizerBatch,
+    Notification,
     OTPVerification,
     Supplier,
     Transfer,
@@ -90,7 +91,19 @@ class FarmerSerializer(serializers.ModelSerializer):
 class WarehouseSerializer(serializers.ModelSerializer):
     class Meta:
         model = Warehouse
-        fields = ["id", "name", "section", "capacity_bags", "current_bags", "created_at"]
+        fields = [
+            "id",
+            "name",
+            "section",
+            "address",
+            "region",
+            "contact_name",
+            "contact_phone",
+            "notes",
+            "capacity_bags",
+            "current_bags",
+            "created_at",
+        ]
 
 
 class FertilizerBatchSerializer(serializers.ModelSerializer):
@@ -121,6 +134,8 @@ class FertilizerBatchSerializer(serializers.ModelSerializer):
             "manufacturer",
             "production_date",
             "expiry_date",
+            "date_received",
+            "source_reference",
             "certification_status",
             "storage_location",
             "storage_location_id",
@@ -165,6 +180,11 @@ class TransferSerializer(serializers.ModelSerializer):
             "id",
             "batch",
             "batch_id",
+            "delivery_address",
+            "receiver_name",
+            "receiver_email",
+            "receiver_phone",
+            "receiver_organisation",
             "warehouse",
             "warehouse_id",
             "transfer_type",
@@ -181,6 +201,22 @@ class TransferSerializer(serializers.ModelSerializer):
             "notes",
             "created_at",
         ]
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Notification
+        fields = [
+            "id",
+            "user",
+            "title",
+            "body",
+            "type",
+            "transfer_ids",
+            "is_read",
+            "created_at",
+        ]
+        read_only_fields = ["user", "created_at"]
 
 
 class DeliveryProofSerializer(serializers.ModelSerializer):

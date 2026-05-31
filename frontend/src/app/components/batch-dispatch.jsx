@@ -2,9 +2,11 @@ import { useState } from 'react';
 import { Truck, Package, MapPin, Calendar, Lock } from 'lucide-react';
 import { useLanguage } from './language-context';
 import { TrustSeal } from './trust-seal';
+import { useFertilizerTypes } from '../hooks/use-fertilizer-types';
 
 export function BatchDispatch() {
   const { t, language } = useLanguage();
+  const { fertilizerTypes } = useFertilizerTypes();
   const [formData, setFormData] = useState({
     fertilizerType: '',
     totalBags: '',
@@ -41,14 +43,6 @@ export function BatchDispatch() {
   
   const [showSuccess, setShowSuccess] = useState(false);
 
-  const fertilizerTypes = [
-    { value: 'npk', label: 'NPK 20-10-10' },
-    { value: 'dap', label: 'DAP (Diammonium Phosphate)' },
-    { value: 'urea', label: 'Urea (46% N)' },
-    { value: 'organic', label: language === 'en' ? 'Organic Compost' : 'Mbolea ya Asili' },
-    { value: 'can', label: 'CAN (Calcium Ammonium Nitrate)' }
-  ];
-
   const regions = [
     'Kagera', 'Kilimanjaro', 'Mbeya', 'Mwanza', 'Arusha', 'Ruvuma'
   ];
@@ -65,7 +59,7 @@ export function BatchDispatch() {
     
     const newBatch = {
       id: batchId,
-      fertilizerType: fertilizerTypes.find(f => f.value === formData.fertilizerType)?.label || formData.fertilizerType,
+      fertilizerType: fertilizerTypes.find((f) => f.value === formData.fertilizerType)?.label || formData.fertilizerType,
       totalBags: parseInt(formData.totalBags),
       region: formData.region,
       district: formData.district,
@@ -151,7 +145,7 @@ export function BatchDispatch() {
                 <option value="">
                   {language === 'en' ? 'Select fertilizer type...' : 'Chagua aina ya mbolea...'}
                 </option>
-                {fertilizerTypes.map(type => (
+                {fertilizerTypes.map((type) => (
                   <option key={type.value} value={type.value}>{type.label}</option>
                 ))}
               </select>

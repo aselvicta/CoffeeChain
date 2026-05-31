@@ -1,5 +1,14 @@
 const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
+export const DEFAULT_FERTILIZER_TYPES = [
+  'DAP',
+  'CAN',
+  'Urea',
+  'NPK',
+  'CAN+B',
+  'Organic Compost',
+];
+
 let accessToken = null;
 let refreshToken = null;
 
@@ -173,6 +182,10 @@ export function fetchWarehouseCatalog() {
   return apiFetch('/api/warehouse-catalog/');
 }
 
+export function fetchFertilizerTypes() {
+  return apiFetch('/api/fertilizer-types/');
+}
+
 export function createWarehouse(payload) {
   return apiFetch('/api/warehouses/', {
     method: 'POST',
@@ -202,6 +215,18 @@ export function createTransfer(payload) {
     method: 'POST',
     body: JSON.stringify(payload),
   });
+}
+
+export function fetchNotifications() {
+  return apiFetch('/api/notifications/');
+}
+
+export async function notifyDispatchReceiver(payload) {
+  const response = await apiFetch('/api/transfers/notify-receiver/', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return response;
 }
 
 export function receiveTransfer(id) {

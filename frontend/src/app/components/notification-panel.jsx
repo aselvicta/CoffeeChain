@@ -43,7 +43,7 @@ export function NotificationPanel({
       onOpenInventory?.();
     }
     if (notification.type === 'dispatch' || notification.type === 'delivery') {
-      onOpenDispatch?.(notification.dispatchId || notification.id);
+      onOpenDispatch?.(notification.transfer_ids?.[0] || notification.dispatchId || notification.id);
     }
   };
 

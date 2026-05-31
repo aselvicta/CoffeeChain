@@ -1,228 +1,255 @@
-import React, { useMemo, useState } from 'react';
-import { X, Plus, Edit2, Trash, Save } from 'lucide-react';
-import { updateBatch, deleteBatch, createBatch } from '../api/client';
+import { useMemo } from 'react';
+import { Download, Package, Plus, Warehouse, X } from 'lucide-react';
 
-export function WarehouseModal({ isOpen, onClose, warehouse, inventory, supplierId, onRefresh }) {
-  if (!isOpen || !warehouse) return null;
+function getWarehouseCapacityMetrics(warehouse) {
+  const capacity = Number(warehouse?.capacity_bags ?? warehouse?.capacity ?? 0);
+  const current = Number(warehouse?.current_bags ?? warehouse?.current ?? 0);
+  const fillPercent = capacity > 0 ? Math.min(Math.round((current / capacity) * 100), 100) : 0;
+  const availableSpace = Math.max(capacity - current, 0);
 
-  const [editingId, setEditingId] = useState(null);
-  const [localEdits, setLocalEdits] = useState({});
-  const [adding, setAdding] = useState(false);
-  const [isTypePickerOpen, setIsTypePickerOpen] = useState(false);
-  const [newItem, setNewItem] = useState({ fertilizer_type: '', quantity_bags: '', unit_weight_kg: '' });
+  let barTone = 'bg-emerald-500';
+  if (current === 0) {
+    barTone = 'bg-slate-300';
+  } else if (fillPercent >= 85) {
+    barTone = 'bg-rose-500';
+  } else if (fillPercent >= 60) {
+    barTone = 'bg-amber-500';
+  }
 
-  const batches = inventory.filter((item) => item.storageLocationId === warehouse.id);
+  return { capacity, current, fillPercent, availableSpace, barTone };
+}
 
-  const fertilizerTypeOptions = useMemo(() => {
-    const options = new Map();
-    inventory.forEach((item) => {
-      const fertilizerType = String(item.name || '').trim();
-      if (!fertilizerType) return;
-      const existing = options.get(fertilizerType) || {
-        name: fertilizerType,
-        count: 0,
-        unitWeightKg: item.unitWeightKg || '',
-      };
-      existing.count += 1;
-      if (!existing.unitWeightKg && item.unitWeightKg) {
-        existing.unitWeightKg = item.unitWeightKg;
-      }
-      options.set(fertilizerType, existing);
-    });
-    return Array.from(options.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [inventory]);
+function getBatchStatus(batch) {
+  const lifecycleState = String(batch.lifecycleState || batch.lifecycle_state || '').toUpperCase();
+  const available = Number(batch.availableBags ?? batch.available ?? batch.available_bags ?? 0);
+  const total = Number(batch.totalBags ?? batch.total_bags ?? batch.quantity_bags ?? available);
+  const expiryDate = batch.expiryDate || batch.expiry_date || '';
+  const expiry = expiryDate ? new Date(expiryDate) : null;
+  const today = new Date();
 
-  const applyFertilizerType = (option) => {
-    setNewItem((current) => ({
-      ...current,
-      fertilizer_type: option.name,
-      unit_weight_kg: option.unitWeightKg || current.unit_weight_kg,
-    }));
-    setIsTypePickerOpen(false);
+  if (expiry && expiry < today) {
+    return 'Expired';
+  }
+  if (lifecycleState === 'DISPATCHED' || available === 0) {
+    return 'Fully Dispatched';
+  }
+  if (lifecycleState === 'PARTIALLY_DISPATCHED' || (available > 0 && total > available)) {
+    return 'Partially Dispatched';
+  }
+  return 'In Storage';
+}
+
+function buildCsvValue(value) {
+  return `"${String(value ?? '').replace(/"/g, '""')}"`;
+}
+
+export function WarehouseModal({ isOpen, onClose, warehouse, inventory, onAddStock }) {
+  const batches = useMemo(() => {
+    if (!warehouse) return [];
+    return inventory
+      .filter((item) => String(item.storageLocationId) === String(warehouse.id))
+      .map((item) => ({
+        ...item,
+        status: getBatchStatus(item),
+      }))
+      .sort((left, right) => String(left.batchCode || left.id).localeCompare(String(right.batchCode || right.id)));
+  }, [inventory, warehouse]);
+
+  if (!isOpen || !warehouse) {
+    return null;
+  }
+
+  const metrics = getWarehouseCapacityMetrics(warehouse);
+
+  const exportInventory = () => {
+    const rows = [
+      ['Batch Code', 'Fertilizer Type', 'Bags Available', 'Date Received', 'Status'],
+      ...batches.map((batch) => [
+        batch.batchCode || batch.id,
+        batch.fertilizerType || batch.name,
+        batch.availableBags ?? batch.available ?? 0,
+        batch.dateReceived || batch.date_received || '',
+        batch.status,
+      ]),
+    ];
+    const csvContent = rows.map((row) => row.map(buildCsvValue).join(',')).join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = downloadUrl;
+    anchor.download = `warehouse-${warehouse.id}-inventory.csv`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    window.URL.revokeObjectURL(downloadUrl);
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white w-11/12 max-w-3xl rounded-lg overflow-hidden">
-        <div className="p-4 border-b flex items-center justify-between">
-          <h3 className="font-semibold">{warehouse.name} • {warehouse.section}</h3>
-          <button onClick={onClose} className="p-1 rounded hover:bg-gray-100"><X /></button>
-        </div>
-        <div className="p-4 max-h-[60vh] overflow-y-auto">
-          <p className="text-sm text-gray-600 mb-3">Capacity: {warehouse.capacity} bags • Current: {warehouse.current} bags</p>
-          {batches.length === 0 ? (
-            <p className="text-sm text-gray-600">No batches assigned to this location.</p>
-          ) : (
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="text-sm text-gray-600 border-b">
-                  <th className="py-2">Batch ID</th>
-                  <th className="py-2">Fertilizer</th>
-                  <th className="py-2">Available</th>
-                  <th className="py-2">Expiry</th>
-                  <th className="py-2">Certification</th>
-                  <th className="py-2">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {batches.map((b) => (
-                  <tr key={b.id} className="border-b">
-                    <td className="py-2">{b.id}</td>
-                    <td className="py-2">
-                      {editingId === b.id ? (
-                        <input className="border px-2 py-1" value={localEdits.fertilizer_type || b.name} onChange={(e) => setLocalEdits({ ...localEdits, fertilizer_type: e.target.value })} />
-                      ) : (
-                        b.name
-                      )}
-                    </td>
-                    <td className="py-2">
-                      {editingId === b.id ? (
-                        <input className="border px-2 py-1 w-24" value={localEdits.quantity_bags ?? b.available} onChange={(e) => setLocalEdits({ ...localEdits, quantity_bags: e.target.value })} />
-                      ) : (
-                        b.available
-                      )}
-                    </td>
-                    <td className="py-2">{b.expiryDate || '—'}</td>
-                    <td className="py-2">{b.certificationStatus}</td>
-                    <td className="py-2">
-                      {editingId === b.id ? (
-                        <div className="flex items-center gap-2">
-                          <button className="px-2 py-1 bg-green-600 text-white rounded" onClick={async () => {
-                            try {
-                              const payload = {};
-                              if (localEdits.fertilizer_type) payload.fertilizer_type = localEdits.fertilizer_type;
-                              if (localEdits.quantity_bags !== undefined) payload.quantity_bags = Number(localEdits.quantity_bags);
-                              await updateBatch(b.id, payload);
-                              setEditingId(null);
-                              setLocalEdits({});
-                              onClose();
-                              if (typeof onRefresh === 'function') onRefresh();
-                            } catch (err) {
-                              alert(err.message || 'Update failed');
-                            }
-                          }}><Save size={14} /> Save</button>
-                          <button className="px-2 py-1 border rounded" onClick={() => { setEditingId(null); setLocalEdits({}); }}><X size={14} /></button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <button className="px-2 py-1 border rounded" onClick={() => { setEditingId(b.id); setLocalEdits({ fertilizer_type: b.name, quantity_bags: b.available }); }}><Edit2 size={14} /></button>
-                          <button className="px-2 py-1 border rounded text-red-600" onClick={async () => {
-                            if (!confirm('Delete this batch?')) return;
-                            try {
-                              await deleteBatch(b.id);
-                              onClose();
-                              if (typeof onRefresh === 'function') onRefresh();
-                            } catch (err) {
-                              alert(err.message || 'Delete failed');
-                            }
-                          }}><Trash size={14} /></button>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-
-          <div className="mt-4 border-t pt-3">
-            {adding ? (
-              <div className="space-y-2">
-                <div className="flex gap-2">
-                  <div className="flex-1 space-y-2">
-                    <div className="flex gap-2">
-                      <input placeholder="Fertilizer type" value={newItem.fertilizer_type} onChange={(e) => setNewItem({ ...newItem, fertilizer_type: e.target.value })} className="px-2 py-1 border rounded flex-1" />
-                      <button type="button" className="px-3 py-1 border rounded text-sm text-green-700" onClick={() => setIsTypePickerOpen(true)}>
-                        Pick Existing
-                      </button>
-                    </div>
-                    <p className="text-xs text-gray-500">Choose a type from existing products to reuse the same fertilizer name and unit weight.</p>
-                  </div>
-                  <input placeholder="Quantity (bags)" type="number" value={newItem.quantity_bags} onChange={(e) => setNewItem({ ...newItem, quantity_bags: e.target.value })} className="px-2 py-1 border rounded w-32" />
-                  <input placeholder="Unit weight (kg)" type="number" value={newItem.unit_weight_kg} onChange={(e) => setNewItem({ ...newItem, unit_weight_kg: e.target.value })} className="px-2 py-1 border rounded w-36" />
-                </div>
-                <div className="flex gap-2">
-                  <button className="px-4 py-2 bg-green-600 text-white rounded" onClick={async () => {
-                    try {
-                      const payload = {
-                        supplier_id: supplierId,
-                        batch_code: `WH-${warehouse.id}-${Date.now()}`,
-                        fertilizer_type: newItem.fertilizer_type,
-                        storage_location_id: warehouse.id,
-                      };
-                      if (newItem.quantity_bags) payload.quantity_bags = Number(newItem.quantity_bags);
-                      if (newItem.unit_weight_kg) payload.unit_weight_kg = Number(newItem.unit_weight_kg);
-                      await createBatch(payload);
-                          setNewItem({ fertilizer_type: '', quantity_bags: '', unit_weight_kg: '' });
-                          setAdding(false);
-                          onClose();
-                          if (typeof onRefresh === 'function') onRefresh();
-                    } catch (err) {
-                      alert(err.message || 'Create failed');
-                    }
-                  }}><Plus size={14} /> Add</button>
-                  <button className="px-4 py-2 border rounded" onClick={() => { setAdding(false); setNewItem({ fertilizer_type: '', quantity_bags: '', unit_weight_kg: '' }); }}>Cancel</button>
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <button className="px-3 py-2 bg-blue-600 text-white rounded" onClick={() => setAdding(true)}><Plus size={14} /> Add Product</button>
-                <p className="text-sm text-gray-600">Add a new fertilizer batch to this warehouse.</p>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {isTypePickerOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 px-4">
-          <div className="w-full max-w-2xl rounded-xl bg-white shadow-2xl overflow-hidden">
-            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
-              <div>
-                <h3 className="text-lg font-bold text-gray-900">Choose Fertilizer Type</h3>
-                <p className="text-sm text-gray-500">Pick an existing product type to speed up adding a similar batch.</p>
-              </div>
-              <button
-                onClick={() => setIsTypePickerOpen(false)}
-                className="rounded-full p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
-                aria-label="Close fertilizer type picker"
-              >
-                <X className="h-5 w-5" />
-              </button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm">
+      <div className="w-full max-w-5xl overflow-hidden rounded-3xl bg-white shadow-2xl">
+        <div className="flex items-start justify-between border-b border-slate-200 px-6 py-5">
+          <div className="flex items-start gap-3">
+            <div className="rounded-2xl bg-emerald-100 p-3 text-emerald-700">
+              <Warehouse className="h-5 w-5" />
             </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-600">Warehouse Details</p>
+              <h3 className="mt-1 text-2xl font-semibold text-slate-900">{warehouse.name}</h3>
+              <p className="mt-1 text-sm text-slate-500">
+                {warehouse.section || 'No section'}
+                {warehouse.region ? ` • ${warehouse.region} Region` : ''}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
+            aria-label="Close warehouse details"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
 
-            <div className="max-h-[60vh] overflow-y-auto p-6">
-              {fertilizerTypeOptions.length === 0 ? (
-                <p className="text-sm text-gray-600">No existing product types found yet.</p>
-              ) : (
-                <div className="grid gap-3 md:grid-cols-2">
-                  {fertilizerTypeOptions.map((option) => (
-                    <button
-                      key={option.name}
-                      type="button"
-                      onClick={() => applyFertilizerType(option)}
-                      className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-left hover:border-green-300 hover:bg-green-50 transition-colors"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="font-semibold text-gray-900">{option.name}</p>
-                          <p className="text-sm text-gray-600">Used in {option.count} batch{option.count === 1 ? '' : 'es'}</p>
-                        </div>
-                        <span className="rounded-full bg-white px-2 py-1 text-xs font-medium text-green-700 ring-1 ring-green-200">
-                          Select
-                        </span>
-                      </div>
-                      <p className="mt-2 text-xs text-gray-500">
-                        {option.unitWeightKg ? `Suggested unit weight: ${option.unitWeightKg} kg` : 'No unit weight saved for this type yet.'}
-                      </p>
-                    </button>
-                  ))}
+        <div className="grid gap-6 px-6 py-6 lg:grid-cols-[1.2fr_0.8fr]">
+          <div className="space-y-5">
+            <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Location</p>
+                  <p className="mt-2 text-sm text-slate-800">{warehouse.address || 'No address recorded'}</p>
+                  <p className="mt-1 text-sm text-slate-600">{warehouse.region || 'Region not set'}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Contact</p>
+                  <p className="mt-2 text-sm text-slate-800">{warehouse.contact_name || warehouse.contactName || 'Not set'}</p>
+                  <p className="mt-1 text-sm text-slate-600">{warehouse.contact_phone || warehouse.contactPhone || 'No phone recorded'}</p>
+                </div>
+              </div>
+              {warehouse.notes && (
+                <div className="mt-4 rounded-2xl bg-white px-4 py-3 text-sm text-slate-600 ring-1 ring-slate-200">
+                  {warehouse.notes}
                 </div>
               )}
             </div>
+
+            <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">Capacity overview</p>
+                  <p className="text-sm text-slate-500">
+                    {metrics.current} / {metrics.capacity} bags in storage
+                  </p>
+                </div>
+                <span
+                  className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                    metrics.current === 0
+                      ? 'bg-slate-100 text-slate-600'
+                      : metrics.fillPercent >= 85
+                        ? 'bg-rose-100 text-rose-700'
+                        : metrics.fillPercent >= 60
+                          ? 'bg-amber-100 text-amber-700'
+                          : 'bg-emerald-100 text-emerald-700'
+                  }`}
+                >
+                  {metrics.current === 0 ? 'Empty' : metrics.fillPercent >= 85 ? 'Near capacity' : metrics.fillPercent >= 60 ? 'Low stock' : 'Healthy'}
+                </span>
+              </div>
+
+              <div className="mt-4 h-3 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className={`h-full rounded-full ${metrics.barTone}`}
+                  style={{ width: `${metrics.fillPercent}%` }}
+                />
+              </div>
+
+              <div className="mt-3 flex items-center justify-between text-sm text-slate-600">
+                <span>{metrics.fillPercent}% filled</span>
+                <span>{metrics.availableSpace} bags free</span>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => onAddStock?.(warehouse)}
+                className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700"
+              >
+                <Plus className="h-4 w-4" />
+                Add Stock to this warehouse
+              </button>
+              <button
+                type="button"
+                onClick={exportInventory}
+                className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              >
+                <Download className="h-4 w-4" />
+                Export inventory list
+              </button>
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">Batches in storage</p>
+                <p className="text-sm text-slate-500">{batches.length} batch{batches.length === 1 ? '' : 'es'}</p>
+              </div>
+              <div className="rounded-2xl bg-white px-3 py-2 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200">
+                <Package className="mr-2 inline-block h-4 w-4" />
+                {metrics.current} bags
+              </div>
+            </div>
+
+            <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+              <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+                <thead className="bg-slate-50 text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3 font-medium">Batch code</th>
+                    <th className="px-4 py-3 font-medium">Fertilizer type</th>
+                    <th className="px-4 py-3 font-medium">Bags available</th>
+                    <th className="px-4 py-3 font-medium">Date received</th>
+                    <th className="px-4 py-3 font-medium">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {batches.length === 0 ? (
+                    <tr>
+                      <td colSpan="5" className="px-4 py-8 text-center text-slate-500">
+                        No batches have been recorded for this warehouse yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    batches.map((batch) => (
+                      <tr key={batch.id} className="align-top">
+                        <td className="px-4 py-3 font-medium text-slate-900">{batch.batchCode || batch.id}</td>
+                        <td className="px-4 py-3 text-slate-700">{batch.fertilizerType || batch.name}</td>
+                        <td className="px-4 py-3 text-slate-700">{batch.availableBags ?? batch.available ?? 0}</td>
+                        <td className="px-4 py-3 text-slate-700">{batch.dateReceived || batch.date_received || '—'}</td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${
+                              batch.status === 'Expired'
+                                ? 'bg-slate-100 text-slate-600'
+                                : batch.status === 'Fully Dispatched'
+                                  ? 'bg-rose-100 text-rose-700'
+                                  : batch.status === 'Partially Dispatched'
+                                    ? 'bg-amber-100 text-amber-700'
+                                    : 'bg-emerald-100 text-emerald-700'
+                            }`}
+                          >
+                            {batch.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
