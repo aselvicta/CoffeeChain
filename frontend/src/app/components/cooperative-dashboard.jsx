@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Package, Users, Send, History, LogOut, TrendingUp, ShieldCheck } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Bell, Package, Users, Send, History, LogOut, TrendingUp, ShieldCheck } from 'lucide-react';
 import { LineChart, Line, PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import { Logo } from './logo';
+import { NotificationPanel } from './notification-panel';
 import { FarmerOTPModal } from './farmer-otp-modal';
 import { FarmerRegistryPanel } from './farmer-registry-panel';
 import { ReceiveFertilizerPanel } from './receive-fertilizer-panel';
@@ -10,6 +11,7 @@ import { VerificationTrustSeal } from './verification-trust-seal';
 import {
   createTransfer,
   fetchFarmers,
+  fetchNotifications,
   fetchTransfers,
   sendOtp,
   uploadProof,
@@ -24,14 +26,19 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
   const [distributions, setDistributions] = useState([]);
   const [verificationList, setVerificationList] = useState([]);
   const [farmers, setFarmers] = useState([]);
+  const [notifications, setNotifications] = useState([]);
   const [pendingTransfer, setPendingTransfer] = useState(null);
   const [pendingFarmer, setPendingFarmer] = useState(null);
+  const [selectedReceiveTransferId, setSelectedReceiveTransferId] = useState('');
   const [isOtpOpen, setIsOtpOpen] = useState(false);
   const [otpMessage, setOtpMessage] = useState('');
   const [smsInfo, setSmsInfo] = useState(null);
   const [latestVerification, setLatestVerification] = useState(null);
   const [statusMessage, setStatusMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [readNotificationIds, setReadNotificationIds] = useState([]);
+  const autoOpenedNotifications = useRef(false);
   const verificationTrend = [
     { month: 'Jan', verified: 32, pending: 12 },
     { month: 'Feb', verified: 45, pending: 10 },
@@ -79,12 +86,15 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
     [inboundTransfers]
   );
 
+  const unreadNotificationCount = notifications.filter((notification) => !readNotificationIds.includes(notification.id)).length;
+
   const refreshData = async () => {
     try {
       const [farmerData, transferData] = await Promise.all([
         fetchFarmers(),
         fetchTransfers(),
       ]);
+      const notificationData = await fetchNotifications();
       const mappedFarmers = farmerData.map((farmer) => ({
         id: farmer.id,
         name: farmer.name,
@@ -116,6 +126,11 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
           status: transfer.status,
         }))
       );
+      setNotifications(notificationData);
+      if (notificationData.some((notification) => notification.type === 'dispatch') && !autoOpenedNotifications.current) {
+        setIsNotificationsOpen(true);
+        autoOpenedNotifications.current = true;
+      }
 
       const outbound = transferData.filter(
         (transfer) =>
@@ -204,6 +219,18 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
               <p className="text-sm text-gray-600">{userProfile.organization} - {userProfile.village}</p>
             </div>
             <div className="flex items-center gap-4">
+              <button
+                onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
+                className="relative p-2 rounded-full hover:bg-green-100"
+                title="Notifications"
+              >
+                <Bell className="h-5 w-5 text-gray-700" />
+                {unreadNotificationCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 inline-flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 py-0.5 text-xs font-semibold leading-none text-white">
+                    {unreadNotificationCount}
+                  </span>
+                )}
+              </button>
               <div className="text-right">
                 <p className="text-sm font-medium text-gray-900">{userProfile.name}</p>
                 <p className="text-xs text-gray-500">AMCOS ID: {userProfile.cooperativeId}</p>
@@ -306,6 +333,7 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
             <ReceiveFertilizerPanel
               inboundTransfers={inboundTransfers}
               onRefresh={refreshData}
+              highlightTransferId={selectedReceiveTransferId}
             />
           )}
 
@@ -638,6 +666,31 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
           distributionData={{
             bagsGiven: pendingTransfer.quantity_bags,
             fertilizerType: pendingTransfer.batch?.fertilizer_type || 'Fertilizer',
+          }}
+        />
+      )}
+      {isNotificationsOpen && (
+        <NotificationPanel
+          isOpen={isNotificationsOpen}
+          onClose={() => setIsNotificationsOpen(false)}
+          notifications={notifications.map((notification) => ({
+            ...notification,
+            unread: !readNotificationIds.includes(notification.id),
+            actionLabel: notification.type === 'dispatch' ? 'View & Confirm' : notification.actionLabel,
+          }))}
+          unreadCount={unreadNotificationCount}
+          onMarkRead={(notificationId) => {
+            setReadNotificationIds((currentIds) =>
+              currentIds.includes(notificationId) ? currentIds : [...currentIds, notificationId]
+            );
+          }}
+          onMarkAllRead={() => setReadNotificationIds(notifications.map((notification) => notification.id))}
+          onOpenDispatch={(transferId) => {
+            if (transferId) {
+              setActiveTab('fertilizer-in');
+              setSelectedReceiveTransferId(String(transferId));
+              setIsNotificationsOpen(false);
+            }
           }}
         />
       )}

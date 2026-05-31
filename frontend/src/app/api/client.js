@@ -204,6 +204,18 @@ export function createTransfer(payload) {
   });
 }
 
+export function fetchNotifications() {
+  return apiFetch('/api/notifications/');
+}
+
+export async function notifyDispatchReceiver(payload) {
+  const response = await apiFetch('/api/transfers/notify-receiver/', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return response;
+}
+
 export function receiveTransfer(id) {
   return apiFetch(`/api/transfers/${id}/receive/`, { method: 'POST' });
 }

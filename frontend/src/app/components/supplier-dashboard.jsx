@@ -5,7 +5,7 @@ import { Logo } from './logo';
 import { NotificationPanel } from './notification-panel';
 import { TraceBatchModal } from './trace-batch-modal';
 import { WarehouseModal } from './warehouse-modal';
-import { createBatch, createTransfer, createWarehouse, deleteWarehouse, fetchBatches, fetchBranches, fetchTransfers, fetchWarehouseCatalog, fetchWarehouses } from '../api/client';
+import { createBatch, createTransfer, createWarehouse, deleteWarehouse, fetchBatches, fetchBranches, fetchTransfers, fetchWarehouseCatalog, fetchWarehouses, notifyDispatchReceiver } from '../api/client';
 
 export function SupplierDashboard({ userProfile, onLogout }) {
   function createDispatchLineItem() {
@@ -23,10 +23,11 @@ export function SupplierDashboard({ userProfile, onLogout }) {
     bags: '',
     destination: '',
     warehouseId: '',
-    manufacturer: '',
-    productionDate: '',
-    expiryDate: '',
-    certificationStatus: 'Pending',
+    deliveryAddress: '',
+    receiverName: '',
+    receiverEmail: '',
+    receiverPhone: '',
+    receiverOrganisation: '',
   });
   const [dispatches, setDispatches] = useState([]);
   const [batches, setBatches] = useState([]);
@@ -118,6 +119,11 @@ export function SupplierDashboard({ userProfile, onLogout }) {
           product: transfer.batch?.fertilizer_type,
           bags: transfer.quantity_bags,
           destination: transfer.to_branch?.name || 'Unknown',
+          receiverName: transfer.receiver_name || '—',
+          receiverEmail: transfer.receiver_email || '—',
+          receiverPhone: transfer.receiver_phone || '—',
+          receiverOrganisation: transfer.receiver_organisation || '—',
+          deliveryAddress: transfer.delivery_address || '—',
           rawStatus: transfer.status,
           status: getDispatchStatusMeta(transfer.status).label,
           statusTone: getDispatchStatusMeta(transfer.status).tone,
@@ -441,6 +447,59 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                         <option key={branch.id} value={`${branch.id} - ${branch.name}`} />
                       ))}
                   </datalist>
+                  <div className="md:col-span-2 space-y-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-900">Receiver Details</h3>
+                      <p className="mt-1 text-xs text-gray-600">
+                        If the receiver already has an account in this system (retailer or cooperative), they will receive an in-app notification with full dispatch details and a confirmation button. An email will also be sent to the address you enter.
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                      <input
+                        type="text"
+                        placeholder="Receiver full name"
+                        value={dispatchForm.receiverName}
+                        onChange={(e) => setDispatchForm({ ...dispatchForm, receiverName: e.target.value })}
+                        className="w-full rounded-lg border border-gray-300 px-4 py-3 focus:border-transparent focus:ring-2 focus:ring-green-500"
+                      />
+                      <input
+                        type="email"
+                        placeholder="Receiver email address"
+                        value={dispatchForm.receiverEmail}
+                        onChange={(e) => setDispatchForm({ ...dispatchForm, receiverEmail: e.target.value })}
+                        className="w-full rounded-lg border border-gray-300 px-4 py-3 focus:border-transparent focus:ring-2 focus:ring-green-500"
+                      />
+                      <input
+                        type="tel"
+                        placeholder="Receiver phone number"
+                        value={dispatchForm.receiverPhone}
+                        onChange={(e) => setDispatchForm({ ...dispatchForm, receiverPhone: e.target.value })}
+                        className="w-full rounded-lg border border-gray-300 px-4 py-3 focus:border-transparent focus:ring-2 focus:ring-green-500"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Organisation / company (optional)"
+                        value={dispatchForm.receiverOrganisation}
+                        onChange={(e) => setDispatchForm({ ...dispatchForm, receiverOrganisation: e.target.value })}
+                        className="w-full rounded-lg border border-gray-300 px-4 py-3 focus:border-transparent focus:ring-2 focus:ring-green-500"
+                      />
+                    </div>
+                  </div>
+                  <input
+                    type="text"
+                    list="delivery-address-options"
+                    placeholder="Delivery Address / Location"
+                    value={dispatchForm.deliveryAddress}
+                    onChange={(e) => setDispatchForm({ ...dispatchForm, deliveryAddress: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  />
+                  <datalist id="delivery-address-options">
+                    {branches
+                      .filter((branch) => ['RETAILER', 'COOPERATIVE'].includes(branch.branch_type))
+                      .map((branch) => (
+                        <option key={`delivery-${branch.id}`} value={`${branch.name}${branch.district ? ` - ${branch.district}` : ''}${branch.region ? `, ${branch.region}` : ''}`} />
+                      ))}
+                  </datalist>
                   <select
                     value={dispatchForm.warehouseId}
                     onChange={(e) => {
@@ -564,55 +623,6 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                     </div>
                   </div>
 
-                  {/* New batch metadata fields */}
-                  <input
-                    type="text"
-                    placeholder="Manufacturer"
-                    value={dispatchForm.manufacturer}
-                    onChange={(e) => setDispatchForm({ ...dispatchForm, manufacturer: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  />
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-700">Production Date</label>
-                    <input
-                      type="date"
-                      placeholder="Production Date"
-                      value={dispatchForm.productionDate}
-                      onChange={(e) => setDispatchForm({ ...dispatchForm, productionDate: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-700">Expiry Date</label>
-                    <input
-                      type="date"
-                      placeholder="Expiry Date"
-                      value={dispatchForm.expiryDate}
-                      onChange={(e) => setDispatchForm({ ...dispatchForm, expiryDate: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                    />
-                  </div>
-                  <select
-                    value={dispatchForm.certificationStatus}
-                    onChange={(e) => setDispatchForm({ ...dispatchForm, certificationStatus: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  >
-                    <option>Pending</option>
-                    <option>Certified</option>
-                    <option>Rejected</option>
-                  </select>
-                  <select
-                    value={dispatchForm.storageLocation}
-                    onChange={(e) => setDispatchForm({ ...dispatchForm, storageLocation: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  >
-                    <option value="">Storage location (optional)</option>
-                    {warehouses.map((warehouse) => (
-                      <option key={warehouse.id} value={warehouse.id}>
-                        {warehouse.name} • {warehouse.section}
-                      </option>
-                    ))}
-                  </select>
                 </div>
                 <div className="mt-4 flex items-center gap-3">
                   <button
@@ -621,6 +631,9 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                       setIsSaving(true);
                       setStatusMessage('');
                       try {
+                        if (!dispatchForm.receiverName || !dispatchForm.receiverEmail) {
+                          throw new Error('Receiver name and email are required.');
+                        }
                         const destinationId = Number.parseInt(
                           dispatchForm.destination.split(' - ')[0],
                           10
@@ -649,6 +662,11 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                               to_branch_id: destinationId,
                               quantity_bags: bags,
                               status: 'DISPATCHED',
+                              delivery_address: dispatchForm.deliveryAddress || '',
+                              receiver_name: dispatchForm.receiverName,
+                              receiver_email: dispatchForm.receiverEmail,
+                              receiver_phone: dispatchForm.receiverPhone,
+                              receiver_organisation: dispatchForm.receiverOrganisation,
                             };
                           })
                           .filter(Boolean);
@@ -657,23 +675,35 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                           throw new Error('Add at least one product with a valid bag quantity.');
                         }
 
-                        await Promise.all(lineItems.map((payload) => createTransfer(payload)));
+                        const createdTransfers = await Promise.all(
+                          lineItems.map((payload) => createTransfer(payload))
+                        );
+                        const createdTransferIds = createdTransfers.map((transfer) => transfer.id);
+                        await notifyDispatchReceiver({
+                          to_branch_id: destinationId,
+                          receiver_email: dispatchForm.receiverEmail,
+                          receiver_name: dispatchForm.receiverName,
+                          transfer_ids: createdTransferIds,
+                          supplier_name: userProfile.organization,
+                          line_items: lineItems,
+                        });
                         setDispatchForm({
                           batchId: '',
                           product: '',
                           bags: '',
                           destination: '',
                           warehouseId: '',
-                          manufacturer: '',
-                          productionDate: '',
-                          expiryDate: '',
-                          certificationStatus: 'Pending',
+                          deliveryAddress: '',
+                          receiverName: '',
+                          receiverEmail: '',
+                          receiverPhone: '',
+                          receiverOrganisation: '',
                         });
                         setDispatchItems([createDispatchLineItem()]);
                         setTraceBatchId('');
                         setSelectedDispatch(null);
                         setStatusMessage(
-                          `Dispatch created: ${lineItems.length} transfer(s), ${dispatchCartTotal} bags total.`
+                          `Dispatch created: ${lineItems.length} transfer(s), ${dispatchCartTotal} bags total. Notification sent to ${dispatchForm.receiverEmail}.`
                         );
                         await refreshData();
                       } catch (error) {
@@ -713,6 +743,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                         <th className="py-3 px-2">Product</th>
                         <th className="py-3 px-2">Bags</th>
                         <th className="py-3 px-2">Destination</th>
+                        <th className="py-3 px-2">Receiver</th>
                         <th className="py-3 px-2">Status</th>
                       </tr>
                     </thead>
@@ -727,6 +758,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                           <td className="py-3 px-2 text-gray-700">{dispatch.product}</td>
                           <td className="py-3 px-2 text-gray-700">{dispatch.bags}</td>
                           <td className="py-3 px-2 text-gray-700">{dispatch.destination}</td>
+                          <td className="py-3 px-2 text-gray-700">{dispatch.receiverName}</td>
                           <td className="py-3 px-2">
                             <span className={`px-2 py-1 rounded-full text-xs font-medium ${dispatch.statusTone}`}>
                               {dispatch.status}
@@ -736,7 +768,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                       ))}
                       {filteredDispatches.length === 0 && (
                         <tr>
-                          <td colSpan="5" className="py-6 text-center text-sm text-gray-500">
+                          <td colSpan="6" className="py-6 text-center text-sm text-gray-500">
                             No dispatches match that ID.
                           </td>
                         </tr>
@@ -951,6 +983,53 @@ export function SupplierDashboard({ userProfile, onLogout }) {
           )}
         </main>
       </div>
+      {selectedDispatch && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/40 px-4 py-6 backdrop-blur-sm">
+          <div className="w-full max-w-2xl rounded-3xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between border-b border-slate-200 px-6 py-5">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-600">Dispatch Details</p>
+                <h3 className="mt-1 text-xl font-semibold text-slate-900">{selectedDispatch.batchCode}</h3>
+                <p className="mt-1 text-sm text-slate-500">Transfer ID {selectedDispatch.id}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedDispatch(null)}
+                className="rounded-full p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="space-y-5 px-6 py-5">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div className="rounded-2xl bg-slate-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Dispatch Summary</p>
+                  <div className="mt-3 space-y-2 text-sm text-slate-700">
+                    <p><span className="font-medium text-slate-900">Product:</span> {selectedDispatch.product}</p>
+                    <p><span className="font-medium text-slate-900">Bags:</span> {selectedDispatch.bags}</p>
+                    <p><span className="font-medium text-slate-900">Destination:</span> {selectedDispatch.destination}</p>
+                    <p><span className="font-medium text-slate-900">Delivery Address:</span> {selectedDispatch.deliveryAddress}</p>
+                  </div>
+                </div>
+                <div className="rounded-2xl bg-slate-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Receiver</p>
+                  <div className="mt-3 space-y-2 text-sm text-slate-700">
+                    <p><span className="font-medium text-slate-900">Name:</span> {selectedDispatch.receiverName}</p>
+                    <p><span className="font-medium text-slate-900">Email:</span> {selectedDispatch.receiverEmail}</p>
+                    <p><span className="font-medium text-slate-900">Phone:</span> {selectedDispatch.receiverPhone}</p>
+                    <p><span className="font-medium text-slate-900">Organisation:</span> {selectedDispatch.receiverOrganisation}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-2xl border border-slate-200 p-4 text-sm text-slate-700">
+                <p><span className="font-medium text-slate-900">Status:</span> {selectedDispatch.status}</p>
+                <p className="mt-1"><span className="font-medium text-slate-900">Warehouse:</span> {selectedDispatch.warehouse}</p>
+                <p className="mt-1"><span className="font-medium text-slate-900">Created:</span> {selectedDispatch.date || '—'}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {isNotificationsOpen && (
         <NotificationPanel
           isOpen={isNotificationsOpen}

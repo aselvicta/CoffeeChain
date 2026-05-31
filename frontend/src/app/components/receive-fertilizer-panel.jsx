@@ -25,7 +25,7 @@ const STATUS_BADGES = {
   },
 };
 
-export function ReceiveFertilizerPanel({ inboundTransfers, onRefresh }) {
+export function ReceiveFertilizerPanel({ inboundTransfers, onRefresh, highlightTransferId = '' }) {
   const [busyId, setBusyId] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
@@ -78,6 +78,11 @@ export function ReceiveFertilizerPanel({ inboundTransfers, onRefresh }) {
             Confirm fertilizer batches dispatched to this AMCOS. Confirming
             updates the stock and notifies the supplier.
           </p>
+          {highlightTransferId && (
+            <p className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+              Notification selected Transfer ID: {highlightTransferId}
+            </p>
+          )}
         </div>
 
         {pending.length === 0 ? (
@@ -97,7 +102,11 @@ export function ReceiveFertilizerPanel({ inboundTransfers, onRefresh }) {
               return (
                 <div
                   key={transfer.id}
-                  className="flex flex-col gap-4 rounded-lg border border-gray-200 bg-gradient-to-r from-white to-amber-50/30 p-4 sm:flex-row sm:items-center sm:justify-between"
+                  className={`flex flex-col gap-4 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between ${
+                    String(highlightTransferId) === String(transfer.id)
+                      ? 'border-emerald-300 bg-emerald-50/70 shadow-sm'
+                      : 'border-gray-200 bg-gradient-to-r from-white to-amber-50/30'
+                  }`}
                 >
                   <div className="flex items-start gap-4">
                     <div className="rounded-lg bg-amber-100 p-3">

@@ -134,6 +134,11 @@ class Transfer(models.Model):
     batch = models.ForeignKey(
         FertilizerBatch, on_delete=models.CASCADE, related_name="transfers"
     )
+    delivery_address = models.CharField(max_length=255, blank=True, default="")
+    receiver_name = models.CharField(max_length=255, blank=True, default="")
+    receiver_email = models.EmailField(blank=True, default="")
+    receiver_phone = models.CharField(max_length=50, blank=True, default="")
+    receiver_organisation = models.CharField(max_length=255, blank=True, default="")
     warehouse = models.ForeignKey(
         'Warehouse', on_delete=models.SET_NULL, null=True, blank=True, related_name='dispatches'
     )
@@ -168,6 +173,32 @@ class Transfer(models.Model):
 
     def __str__(self):
         return f"{self.batch.batch_code} - {self.transfer_type}"
+
+
+class Notification(models.Model):
+    DISPATCH = "dispatch"
+    DELIVERY = "delivery"
+    STOCK = "stock"
+    EXPIRY = "expiry"
+    TYPE_CHOICES = [
+        (DISPATCH, "Dispatch"),
+        (DELIVERY, "Delivery"),
+        (STOCK, "Stock"),
+        (EXPIRY, "Expiry"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notifications"
+    )
+    title = models.CharField(max_length=255)
+    body = models.TextField()
+    type = models.CharField(max_length=20, choices=TYPE_CHOICES, default=DISPATCH)
+    transfer_ids = models.JSONField(default=list, blank=True)
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.title
 
 
 class DeliveryProof(models.Model):

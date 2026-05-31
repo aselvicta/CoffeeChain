@@ -8,6 +8,7 @@ from .models import (
     DeliveryProof,
     Farmer,
     FertilizerBatch,
+    Notification,
     OTPVerification,
     Supplier,
     Transfer,
@@ -165,6 +166,11 @@ class TransferSerializer(serializers.ModelSerializer):
             "id",
             "batch",
             "batch_id",
+            "delivery_address",
+            "receiver_name",
+            "receiver_email",
+            "receiver_phone",
+            "receiver_organisation",
             "warehouse",
             "warehouse_id",
             "transfer_type",
@@ -181,6 +187,22 @@ class TransferSerializer(serializers.ModelSerializer):
             "notes",
             "created_at",
         ]
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Notification
+        fields = [
+            "id",
+            "user",
+            "title",
+            "body",
+            "type",
+            "transfer_ids",
+            "is_read",
+            "created_at",
+        ]
+        read_only_fields = ["user", "created_at"]
 
 
 class DeliveryProofSerializer(serializers.ModelSerializer):
