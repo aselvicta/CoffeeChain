@@ -8,7 +8,11 @@ interface SmsInfo {
   delivered?: boolean;
   api_accepted?: boolean;
   sandbox_mode?: boolean;
+  trial_mode?: boolean;
+  virtual_phone_delivery?: boolean;
+  virtual_phone_console_url?: string;
   simulator_url?: string;
+  verify_url?: string;
   phone_number?: string;
   message?: string;
   code_preview?: string;
@@ -144,109 +148,45 @@ export function FarmerOTPModal({
             </div>
           </div>
 
-          {/* OTP Sent Notification */}
-          <div
-            className={`rounded-lg p-3 flex items-start gap-2 border ${
-              smsInfo?.sandbox_mode
-                ? 'bg-amber-50 border-amber-200'
-                : smsInfo?.delivered === false
-                  ? 'bg-red-50 border-red-200'
-                  : 'bg-blue-50 border-blue-200'
-            }`}
-          >
-            <Shield
-              className={`w-4 h-4 mt-0.5 flex-shrink-0 ${
-                smsInfo?.sandbox_mode
-                  ? 'text-amber-600'
-                  : smsInfo?.delivered === false
-                    ? 'text-red-600'
-                    : 'text-blue-600'
-              }`}
-            />
+          {/* SMS sent — modal only opens after successful delivery */}
+          <div className="rounded-lg p-3 flex items-start gap-2 border bg-green-50 border-green-200">
+            <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
             <div className="flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <p
-                  className={`text-sm font-medium ${
-                    smsInfo?.sandbox_mode
-                      ? 'text-amber-900'
-                      : smsInfo?.delivered === false
-                        ? 'text-red-900'
-                        : 'text-blue-900'
-                  }`}
-                >
-                  {smsInfo?.sandbox_mode
-                    ? (language === 'en' ? 'OTP queued (sandbox)' : 'OTP imewekwa foleni (sandbox)')
-                    : t('otpSentTo')}
-                  {smsInfo?.phone_number ? ` ${smsInfo.phone_number}` : ''}
-                </p>
-                {smsInfo?.provider && (
-                  <span className="rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-gray-700 border border-gray-200">
-                    {smsInfo.provider}
-                  </span>
-                )}
-                {smsInfo?.sandbox_mode && smsInfo?.api_accepted && (
-                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-800">
-                    sandbox only
-                  </span>
-                )}
-                {!smsInfo?.sandbox_mode && smsInfo?.delivered === true && (
-                  <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-green-700">
-                    delivered
-                  </span>
-                )}
-                {!smsInfo?.sandbox_mode && smsInfo?.delivered === false && (
-                  <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-red-700">
-                    not delivered
-                  </span>
-                )}
-              </div>
-              {smsInfo?.sandbox_mode && smsInfo?.simulator_url && (
+              <p className="text-sm font-medium text-green-900">
+                {t('otpSentTo')}
+                {smsInfo?.phone_number ? ` ${smsInfo.phone_number}` : ''}
+              </p>
+              <p className="text-xs text-green-800 mt-1">
+                {smsInfo?.virtual_phone_delivery
+                  ? language === 'en'
+                    ? 'Twilio trial: open Virtual Phone in the Twilio Console (link below), read the OTP, then enter it here.'
+                    : 'Majaribio ya Twilio: fungua Virtual Phone kwenye Twilio Console (kiungo hapa chini), soma OTP, kisha ingiza hapa.'
+                  : language === 'en'
+                    ? 'The farmer should see an SMS notification on their phone. Enter the 4-digit code below once they share it.'
+                    : 'Mkulima anapaswa kuona arifa ya SMS kwenye simu. Ingiza namba ya tarakimu 4 hapa chini atakapokupa.'}
+              </p>
+              {smsInfo?.virtual_phone_delivery && smsInfo?.virtual_phone_console_url && (
                 <p className="text-xs mt-2">
                   <a
-                    href={smsInfo.simulator_url}
+                    href={smsInfo.virtual_phone_console_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="font-medium text-amber-800 underline hover:text-amber-900"
+                    className="font-medium text-green-900 underline hover:text-green-950"
                   >
                     {language === 'en'
-                      ? 'Open Africa\'s Talking Simulator'
-                      : 'Fungua Simulator ya Africa\'s Talking'}
+                      ? 'Open Twilio Virtual Phone'
+                      : 'Fungua Twilio Virtual Phone'}
                   </a>
                   {language === 'en'
-                    ? ' — register +255… number, then resend OTP and read the SMS in the simulator inbox.'
-                    : ' — sajili namba +255…, kisha tuma tena OTP na soma SMS kwenye simulator.'}
+                    ? ' → click “Virtual Phone” tab to read the SMS.'
+                    : ' → bonyeza kichupo “Virtual Phone” kusoma SMS.'}
                 </p>
               )}
-              {smsInfo?.note && smsInfo?.sandbox_mode && (
-                <p className="text-xs text-amber-800 mt-1">{smsInfo.note}</p>
-              )}
-              <p
-                className={`text-xs mt-1 ${
-                  smsInfo?.sandbox_mode
-                    ? 'text-amber-800'
-                    : smsInfo?.delivered === false
-                      ? 'text-red-700'
-                      : 'text-blue-700'
-                }`}
-              >
-                {smsInfo?.provider === 'simulated' && smsInfo?.code_preview
-                  ? (language === 'en'
-                      ? 'Simulated SMS (no phone delivery). Use the code below or configure Africa\'s Talking.'
-                      : 'SMS ya majaribio (haitumi simuni). Tumia namba hapa chini au weka Africa\'s Talking.')
-                  : smsInfo?.message ||
-                    smsMessage ||
-                    (language === 'en'
-                      ? 'Check the farmer\'s phone for the SMS code. It is not shown here for security.'
-                      : 'Angalia simu ya mkulima kwa namba ya uthibitisho. Haijaonyeshwa hapa kwa usalama.')}
-              </p>
               {smsInfo?.provider === 'simulated' && smsInfo?.code_preview && (
-                <p className="text-xs text-amber-700 mt-1">
-                  {language === 'en' ? 'Demo code' : 'Namba ya majaribio'}:{' '}
+                <p className="text-xs text-amber-700 mt-2">
+                  {language === 'en' ? 'Demo code (simulated)' : 'Namba ya majaribio'}:{' '}
                   <strong>{smsInfo.code_preview}</strong>
                 </p>
-              )}
-              {smsInfo?.error && (
-                <p className="text-xs text-red-700 mt-1">{smsInfo.error}</p>
               )}
             </div>
           </div>

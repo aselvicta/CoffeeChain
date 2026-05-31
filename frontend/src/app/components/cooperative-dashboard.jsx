@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Package, Users, Send, History, LogOut, TrendingUp, ShieldCheck } from 'lucide-react';
+import { NotificationBell } from './notification-bell';
+import { useNotifications } from '../hooks/use-notifications';
 import { LineChart, Line, PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import { Logo } from './logo';
 import { FarmerOTPModal } from './farmer-otp-modal';
@@ -15,6 +17,7 @@ import {
   uploadProof,
   verifyOtp,
 } from '../api/client';
+import { handleOtpSmsResponse } from '../utils/otp-sms';
 
 export function CooperativeDashboard({ userProfile, onLogout }) {
   const [activeTab, setActiveTab] = useState('overview');
@@ -32,6 +35,13 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
   const [latestVerification, setLatestVerification] = useState(null);
   const [statusMessage, setStatusMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const {
+    notifications,
+    unreadCount,
+    refresh: refreshNotifications,
+    markRead,
+    markAllRead,
+  } = useNotifications();
   const verificationTrend = [
     { month: 'Jan', verified: 32, pending: 12 },
     { month: 'Feb', verified: 45, pending: 10 },
@@ -149,6 +159,7 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
           rawTransfer: transfer,
         }))
       );
+      await refreshNotifications();
     } catch (error) {
       setStatusMessage(error.message);
     }
@@ -204,6 +215,21 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
               <p className="text-sm text-gray-600">{userProfile.organization} - {userProfile.village}</p>
             </div>
             <div className="flex items-center gap-4">
+              <NotificationBell
+                notifications={notifications}
+                unreadCount={unreadCount}
+                onMarkRead={markRead}
+                onMarkAllRead={markAllRead}
+                onNavigateTab={(tab) => {
+                  const tabMap = {
+                    receive: 'fertilizer-in',
+                    distribute: 'fertilizer-out',
+                    verification: 'verification',
+                    farmers: 'farmers',
+                  };
+                  setActiveTab(tabMap[tab] || tab);
+                }}
+              />
               <div className="text-right">
                 <p className="text-sm font-medium text-gray-900">{userProfile.name}</p>
                 <p className="text-xs text-gray-500">AMCOS ID: {userProfile.cooperativeId}</p>
@@ -406,12 +432,24 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                         await uploadProof(transfer.id, proofFile);
                         setProofFile(null);
                       }
-                      setPendingTransfer(transfer);
-                      setPendingFarmer(selectedFarmer || null);
-                      setOtpMessage(otpResponse.sms?.message || '');
-                      setSmsInfo(otpResponse.sms || null);
-                      setIsOtpOpen(true);
-                      setDistributionForm({ batchId: '', farmer: '', bags: '', otp: '' });
+                      const smsOk = handleOtpSmsResponse(otpResponse.sms, {
+                        onDelivered: (sms) => {
+                          setPendingTransfer(transfer);
+                          setPendingFarmer(selectedFarmer || null);
+                          setOtpMessage(sms.message || '');
+                          setSmsInfo(sms);
+                          setIsOtpOpen(true);
+                          setDistributionForm({ batchId: '', farmer: '', bags: '', otp: '' });
+                        },
+                        onFailed: (message) => setStatusMessage(message),
+                      });
+                      if (!smsOk) {
+                        setStatusMessage(
+                          (current) =>
+                            current ||
+                            'Distribution saved. SMS failed — fix provider settings, then use Verify Distribution to resend.'
+                        );
+                      }
                       await refreshData();
                     } catch (error) {
                       setStatusMessage(error.message);
@@ -518,14 +556,19 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                                 try {
                                   setStatusMessage('');
                                   const otpResponse = await sendOtp(record.id);
-                                  setPendingTransfer(record.rawTransfer);
-                                  setPendingFarmer({
-                                    name: record.farmer,
-                                    ministryId: record.farmerMinistryId,
+                                  handleOtpSmsResponse(otpResponse.sms, {
+                                    onDelivered: (sms) => {
+                                      setPendingTransfer(record.rawTransfer);
+                                      setPendingFarmer({
+                                        name: record.farmer,
+                                        ministryId: record.farmerMinistryId,
+                                      });
+                                      setOtpMessage(sms.message || '');
+                                      setSmsInfo(sms);
+                                      setIsOtpOpen(true);
+                                    },
+                                    onFailed: (message) => setStatusMessage(message),
                                   });
-                                  setOtpMessage(otpResponse.sms?.message || '');
-                                  setSmsInfo(otpResponse.sms || null);
-                                  setIsOtpOpen(true);
                                 } catch (error) {
                                   setStatusMessage(error.message);
                                 }
@@ -628,8 +671,17 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
           }}
           onResend={async () => {
             const response = await sendOtp(pendingTransfer.id);
-            setOtpMessage(response.sms?.message || '');
-            setSmsInfo(response.sms || null);
+            if (!handleOtpSmsResponse(response.sms, {
+              onDelivered: (sms) => {
+                setOtpMessage(sms.message || '');
+                setSmsInfo(sms);
+              },
+              onFailed: (message) => {
+                throw new Error(message);
+              },
+            })) {
+              throw new Error('SMS was not delivered');
+            }
           }}
           farmerName={pendingFarmer?.name || 'Farmer'}
           farmerId={pendingFarmer?.ministryId || ''}

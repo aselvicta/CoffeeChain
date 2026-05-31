@@ -141,6 +141,13 @@ export function registerFarmer(payload) {
   });
 }
 
+export function resolveRetailerBuyer(payload) {
+  return apiFetch('/api/farmers/resolve_buyer/', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 export function fetchBatches() {
   return apiFetch('/api/batches/');
 }
@@ -239,4 +246,16 @@ export async function uploadProof(id, file, meta = {}) {
 
 export function fetchAuditReport() {
   return apiFetch('/api/reports/audit/');
+}
+
+export function fetchNotifications() {
+  return apiFetch('/api/notifications/');
+}
+
+export function markNotificationRead(id) {
+  return apiFetch(`/api/notifications/${id}/read/`, { method: 'POST' });
+}
+
+export function markAllNotificationsRead() {
+  return apiFetch('/api/notifications/read_all/', { method: 'POST' });
 }

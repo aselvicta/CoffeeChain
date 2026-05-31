@@ -7,6 +7,8 @@ import {
 import { Logo } from './logo';
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { createUser, fetchAuditReport, fetchBranches, fetchSuppliers, fetchTransfers, fetchUsers } from '../api/client';
+import { NotificationBell } from './notification-bell';
+import { useNotifications } from '../hooks/use-notifications';
 import { REGION_LIST, TANZANIA_REGIONS } from '../data/tanzania-locations';
 
 export function AdminDashboard({ userProfile, onLogout }) {
@@ -47,6 +49,13 @@ export function AdminDashboard({ userProfile, onLogout }) {
   const [userStatus, setUserStatus] = useState('');
   const [audit, setAudit] = useState({ dispatched: 0, received: 0, verified: 0, gap: 0 });
   const [statusMessage, setStatusMessage] = useState('');
+  const {
+    notifications,
+    unreadCount,
+    refresh: refreshNotifications,
+    markRead,
+    markAllRead,
+  } = useNotifications();
 
   useEffect(() => {
     const loadData = async () => {
@@ -94,6 +103,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
         );
         setAudit(auditData);
         setUsers(userData);
+        await refreshNotifications();
       } catch (error) {
         setStatusMessage(error.message);
       }
@@ -336,6 +346,13 @@ export function AdminDashboard({ userProfile, onLogout }) {
               <p className="text-sm text-gray-600">Welcome back, {userProfile.name}</p>
             </div>
             <div className="flex items-center gap-4">
+              <NotificationBell
+                notifications={notifications}
+                unreadCount={unreadCount}
+                onMarkRead={markRead}
+                onMarkAllRead={markAllRead}
+                onNavigateTab={() => setActiveTab('overview')}
+              />
               <div className="text-right">
                 <p className="text-sm font-medium text-gray-900">{userProfile.name}</p>
                 <p className="text-xs text-gray-500">{userProfile.level}</p>

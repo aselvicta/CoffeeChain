@@ -1,17 +1,33 @@
 import { useMemo, useState } from 'react';
-import { AlertTriangle, Bell, CheckCheck, ChevronRight, Clock3, Filter, Package, Truck, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  Bell,
+  CheckCheck,
+  ChevronRight,
+  Clock3,
+  Filter,
+  Package,
+  ShieldCheck,
+  Truck,
+  UserPlus,
+  X,
+} from 'lucide-react';
 
 const FILTERS = [
   { id: 'all', label: 'All' },
   { id: 'alerts', label: 'Alerts' },
-  { id: 'dispatches', label: 'Dispatches' },
+  { id: 'dispatches', label: 'Activity' },
 ];
 
 const iconMap = {
   expiry: AlertTriangle,
   stock: Package,
   dispatch: Truck,
+  receipt: Package,
   delivery: CheckCheck,
+  otp: ShieldCheck,
+  registry: UserPlus,
+  system: Bell,
   update: Bell,
 };
 
@@ -24,13 +40,18 @@ export function NotificationPanel({
   onMarkAllRead,
   onOpenInventory,
   onOpenDispatch,
+  onNavigateTab,
 }) {
   const [filter, setFilter] = useState('all');
 
   const filteredNotifications = useMemo(() => {
     return notifications.filter((notification) => {
-      if (filter === 'alerts') return ['expiry', 'stock'].includes(notification.type);
-      if (filter === 'dispatches') return ['dispatch', 'delivery'].includes(notification.type);
+      if (filter === 'alerts') {
+        return ['expiry', 'stock', 'system'].includes(notification.type) || notification.priority === 'high';
+      }
+      if (filter === 'dispatches') {
+        return ['dispatch', 'receipt', 'delivery', 'otp', 'registry'].includes(notification.type);
+      }
       return true;
     });
   }, [filter, notifications]);
@@ -39,16 +60,23 @@ export function NotificationPanel({
 
   const handleItemClick = (notification) => {
     onMarkRead?.(notification.id);
+    if (notification.tab) {
+      onNavigateTab?.(notification.tab);
+      return;
+    }
     if (notification.type === 'expiry' || notification.type === 'stock') {
       onOpenInventory?.();
+      return;
     }
-    if (notification.type === 'dispatch' || notification.type === 'delivery') {
-      onOpenDispatch?.(notification.dispatchId || notification.id);
+    if (['dispatch', 'delivery', 'receipt'].includes(notification.type)) {
+      onOpenDispatch?.(notification.transferId || notification.dispatchId || notification.id);
     }
   };
 
   const urgentCount = notifications.filter((notification) => notification.priority === 'high').length;
-  const dispatchCount = notifications.filter((notification) => ['dispatch', 'delivery'].includes(notification.type)).length;
+  const dispatchCount = notifications.filter((notification) =>
+    ['dispatch', 'receipt', 'delivery', 'otp', 'registry'].includes(notification.type)
+  ).length;
 
   return (
     <div className="fixed inset-0 z-40">
@@ -84,7 +112,7 @@ export function NotificationPanel({
               <p className="mt-1 text-2xl font-semibold text-slate-900">{urgentCount}</p>
             </div>
             <div className="rounded-2xl bg-white/80 p-3 shadow-sm ring-1 ring-slate-200">
-              <p className="text-xs uppercase tracking-wide text-slate-500">Dispatches</p>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Activity</p>
               <p className="mt-1 text-2xl font-semibold text-slate-900">{dispatchCount}</p>
             </div>
           </div>

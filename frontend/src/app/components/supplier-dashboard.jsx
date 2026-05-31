@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Package, Send, History, BarChart3, LogOut, TrendingUp, Bell, Search, X } from 'lucide-react';
+import { Package, Send, History, BarChart3, LogOut, TrendingUp, Search, X } from 'lucide-react';
 import { LineChart, Line, PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import { Logo } from './logo';
-import { NotificationPanel } from './notification-panel';
+import { NotificationBell } from './notification-bell';
+import { useNotifications } from '../hooks/use-notifications';
 import { TraceBatchModal } from './trace-batch-modal';
 import { WarehouseModal } from './warehouse-modal';
 import { createBatch, createTransfer, createWarehouse, deleteWarehouse, fetchBatches, fetchBranches, fetchTransfers, fetchWarehouseCatalog, fetchWarehouses } from '../api/client';
@@ -34,7 +35,6 @@ export function SupplierDashboard({ userProfile, onLogout }) {
   const [warehouseCatalog, setWarehouseCatalog] = useState([]);
   const [inventory, setInventory] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
-  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isTraceOpen, setIsTraceOpen] = useState(false);
   const [traceBatchId, setTraceBatchId] = useState('');
   const [isWarehouseModalOpen, setIsWarehouseModalOpen] = useState(false);
@@ -46,6 +46,12 @@ export function SupplierDashboard({ userProfile, onLogout }) {
   const [selectedDispatch, setSelectedDispatch] = useState(null);
   const [readNotificationIds, setReadNotificationIds] = useState([]);
   const [dispatchItems, setDispatchItems] = useState([createDispatchLineItem()]);
+  const {
+    notifications: apiNotifications,
+    refresh: refreshNotifications,
+    markRead: markApiRead,
+    markAllRead: markAllApiRead,
+  } = useNotifications();
 
   const getDispatchStatusMeta = (status) => {
     const normalizedStatus = String(status || '').toUpperCase();
@@ -162,6 +168,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
         };
       });
       setInventory(batchInventory);
+      await refreshNotifications();
     } catch (error) {
       setStatusMessage(error.message);
     }
@@ -233,7 +240,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
     return dispatches.filter((dispatch) => String(dispatch.id).toLowerCase().includes(query));
   }, [dispatches, dispatchSearch]);
 
-  const notifications = useMemo(() => {
+  const localNotifications = useMemo(() => {
     const inventoryNotifications = inventory
       .filter((item) => item.expiryRisk || item.available <= item.threshold)
       .map((item) => {
@@ -276,15 +283,35 @@ export function SupplierDashboard({ userProfile, onLogout }) {
       };
     });
 
-    return [...inventoryNotifications, ...dispatchNotifications].sort((left, right) => {
+    return [...inventoryNotifications, ...dispatchNotifications];
+  }, [dispatches, inventory, readNotificationIds]);
+
+  const notifications = useMemo(() => {
+    const merged = [...apiNotifications, ...localNotifications];
+    return merged.sort((left, right) => {
       const leftScore = left.priority === 'high' ? 2 : left.priority === 'medium' ? 1 : 0;
       const rightScore = right.priority === 'high' ? 2 : right.priority === 'medium' ? 1 : 0;
       if (rightScore !== leftScore) return rightScore - leftScore;
       return String(right.timeLabel || '').localeCompare(String(left.timeLabel || ''));
     });
-  }, [dispatches, inventory, readNotificationIds]);
+  }, [apiNotifications, localNotifications]);
 
   const unreadNotificationCount = notifications.filter((notification) => notification.unread).length;
+
+  const handleMarkRead = (notificationId) => {
+    if (typeof notificationId === 'string' && notificationId.includes('-')) {
+      setReadNotificationIds((currentIds) =>
+        currentIds.includes(notificationId) ? currentIds : [...currentIds, notificationId]
+      );
+      return;
+    }
+    markApiRead(notificationId);
+  };
+
+  const handleMarkAllRead = async () => {
+    setReadNotificationIds(localNotifications.map((notification) => notification.id));
+    await markAllApiRead();
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
@@ -331,18 +358,21 @@ export function SupplierDashboard({ userProfile, onLogout }) {
               <p className="text-sm text-gray-600">{userProfile.organization}</p>
             </div>
             <div className="flex items-center gap-4">
-              <button
-                onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
-                className="relative p-2 rounded-full hover:bg-green-100"
-                title="Notifications"
-              >
-                <Bell className="h-5 w-5 text-gray-700" />
-                {unreadNotificationCount > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 inline-flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 py-0.5 text-xs font-semibold leading-none text-white">
-                    {unreadNotificationCount}
-                  </span>
-                )}
-              </button>
+              <NotificationBell
+                notifications={notifications}
+                unreadCount={unreadNotificationCount}
+                onMarkRead={handleMarkRead}
+                onMarkAllRead={handleMarkAllRead}
+                onNavigateTab={(tab) => setActiveTab(tab === 'dispatch' ? 'dispatch' : tab)}
+                onOpenInventory={() => setActiveTab('inventory')}
+                onOpenDispatch={(dispatchId) => {
+                  const dispatch = dispatches.find((item) => String(item.id) === String(dispatchId));
+                  if (dispatch) {
+                    setSelectedDispatch(dispatch);
+                    setActiveTab('history');
+                  }
+                }}
+              />
               <div className="text-right">
                 <p className="text-sm font-medium text-gray-900">{userProfile.name}</p>
                 <p className="text-xs text-gray-500">Supplier ID: {userProfile.supplierId}</p>
@@ -951,32 +981,6 @@ export function SupplierDashboard({ userProfile, onLogout }) {
           )}
         </main>
       </div>
-      {isNotificationsOpen && (
-        <NotificationPanel
-          isOpen={isNotificationsOpen}
-          onClose={() => setIsNotificationsOpen(false)}
-          notifications={notifications}
-          unreadCount={unreadNotificationCount}
-          onMarkRead={(notificationId) => {
-            setReadNotificationIds((currentIds) =>
-              currentIds.includes(notificationId) ? currentIds : [...currentIds, notificationId]
-            );
-          }}
-          onMarkAllRead={() => setReadNotificationIds(notifications.map((notification) => notification.id))}
-          onOpenInventory={() => {
-            setActiveTab('inventory');
-            setIsNotificationsOpen(false);
-          }}
-          onOpenDispatch={(dispatchId) => {
-            const dispatch = dispatches.find((item) => String(item.id) === String(dispatchId));
-            if (dispatch) {
-              setSelectedDispatch(dispatch);
-              setActiveTab('history');
-            }
-            setIsNotificationsOpen(false);
-          }}
-        />
-      )}
       {isTraceOpen && (
         <TraceBatchModal isOpen={isTraceOpen} onClose={() => setIsTraceOpen(false)} batchId={traceBatchId || ''} />
       )}
