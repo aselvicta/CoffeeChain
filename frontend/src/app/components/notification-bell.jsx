@@ -38,8 +38,8 @@ export function NotificationBell({
         unreadCount={unreadCount}
         onMarkRead={onMarkRead}
         onMarkAllRead={onMarkAllRead}
-        onNavigateTab={(tab) => {
-          onNavigateTab?.(tab);
+        onNavigateTab={(tab, notification) => {
+          onNavigateTab?.(tab, notification);
           setIsOpen(false);
         }}
         onOpenInventory={() => {

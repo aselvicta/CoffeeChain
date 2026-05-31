@@ -61,7 +61,7 @@ export function NotificationPanel({
   const handleItemClick = (notification) => {
     onMarkRead?.(notification.id);
     if (notification.tab) {
-      onNavigateTab?.(notification.tab);
+      onNavigateTab?.(notification.tab, notification);
       return;
     }
     if (notification.type === 'expiry' || notification.type === 'stock') {
@@ -69,7 +69,12 @@ export function NotificationPanel({
       return;
     }
     if (['dispatch', 'delivery', 'receipt'].includes(notification.type)) {
-      onOpenDispatch?.(notification.transferId || notification.dispatchId || notification.id);
+      onOpenDispatch?.(
+        notification.transferId ||
+          notification.transfer_ids?.[0] ||
+          notification.dispatchId ||
+          notification.id
+      );
     }
   };
 

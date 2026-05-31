@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.contrib.auth.models import Group, User
+from django.core.mail import send_mail
 from django.db import transaction
 from django.db.models import F, Sum
 from django.utils import timezone
@@ -42,6 +43,7 @@ from .serializers import (
     DeliveryProofSerializer,
     FarmerSerializer,
     FertilizerBatchSerializer,
+    NotificationSerializer,
     WarehouseSerializer,
     NotificationSerializer,
     OTPVerificationSerializer,
@@ -65,6 +67,15 @@ import logging
 import uuid
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_FERTILIZER_TYPES = [
+    "DAP",
+    "CAN",
+    "Urea",
+    "NPK",
+    "CAN+B",
+    "Organic Compost",
+]
 
 
 def resolve_role(user):
@@ -160,6 +171,29 @@ def build_warehouse_catalog(warehouses):
             }
         )
     return catalog
+
+
+def build_fertilizer_type_catalog():
+    known_types = []
+    seen = set()
+
+    for fertilizer_type in DEFAULT_FERTILIZER_TYPES:
+        normalized = fertilizer_type.strip()
+        if normalized and normalized.lower() not in seen:
+            seen.add(normalized.lower())
+            known_types.append({"value": normalized, "label": normalized})
+
+    for fertilizer_type in (
+        FertilizerBatch.objects.order_by("fertilizer_type")
+        .values_list("fertilizer_type", flat=True)
+        .distinct()
+    ):
+        normalized = (fertilizer_type or "").strip()
+        if normalized and normalized.lower() not in seen:
+            seen.add(normalized.lower())
+            known_types.append({"value": normalized, "label": normalized})
+
+    return known_types
 
 
 def recalculate_warehouse_current_bags(warehouse):
@@ -304,6 +338,13 @@ class WarehouseCatalogView(APIView):
             "batches__transfers", "batches__supplier"
         )
         return Response(build_warehouse_catalog(warehouses))
+
+
+class FertilizerTypeCatalogView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(build_fertilizer_type_catalog())
 
 
 class FarmerViewSet(viewsets.ModelViewSet):
@@ -977,6 +1018,93 @@ class TransferViewSet(viewsets.ModelViewSet):
             ),
         }
 
+    @action(detail=False, methods=["post"], url_path="notify-receiver")
+    def notify_receiver(self, request):
+        to_branch_id = request.data.get("to_branch_id")
+        receiver_email = (request.data.get("receiver_email") or "").strip()
+        receiver_name = (request.data.get("receiver_name") or "").strip()
+        supplier_name = (request.data.get("supplier_name") or "CoffeeChain").strip()
+        transfer_ids = request.data.get("transfer_ids") or []
+
+        if not to_branch_id:
+            raise ValidationError({"to_branch_id": "to_branch_id is required."})
+        if not receiver_email:
+            raise ValidationError({"receiver_email": "receiver_email is required."})
+        if not receiver_name:
+            raise ValidationError({"receiver_name": "receiver_name is required."})
+        if not isinstance(transfer_ids, list) or not transfer_ids:
+            raise ValidationError({"transfer_ids": "transfer_ids must be a non-empty list."})
+
+        transfers = list(
+            Transfer.objects.select_related("batch", "to_branch")
+            .filter(id__in=transfer_ids)
+            .order_by("id")
+        )
+        if not transfers:
+            raise ValidationError({"transfer_ids": "No matching transfers were found."})
+
+        table_rows = []
+        for transfer in transfers:
+            table_rows.append(
+                {
+                    "batch_code": transfer.batch.batch_code if transfer.batch else "",
+                    "fertilizer_type": transfer.batch.fertilizer_type if transfer.batch else "",
+                    "quantity_bags": transfer.quantity_bags,
+                    "delivery_address": transfer.delivery_address or "",
+                }
+            )
+
+        transfer_id_text = ", ".join(str(transfer.id) for transfer in transfers)
+        subject = f"Fertilizer Dispatch from {supplier_name} — Transfer IDs: {transfer_id_text}"
+        body_lines = [
+            f"Supplier: {supplier_name}",
+            f"Receiver: {receiver_name}",
+            f"Transfer IDs: {transfer_id_text}",
+            "",
+            "Dispatch summary:",
+        ]
+        for row in table_rows:
+            body_lines.append(
+                f"- {row['batch_code']} | {row['fertilizer_type']} | {row['quantity_bags']} bags | {row['delivery_address'] or '—'}"
+            )
+        body_lines.extend(
+            [
+                "",
+                "To confirm receipt of each delivery, log into CoffeeChain and use the Transfer ID(s) above in the Receive Batches section.",
+            ]
+        )
+
+        email_sent = False
+        try:
+            send_mail(
+                subject,
+                "\n".join(body_lines),
+                getattr(settings, "DEFAULT_FROM_EMAIL", None),
+                [receiver_email],
+                fail_silently=False,
+            )
+            email_sent = True
+        except Exception:
+            logger.exception("Failed to send dispatch notification email")
+
+        in_app_sent = False
+        branch = Branch.objects.select_related("user").filter(id=to_branch_id).first()
+        if branch and branch.user:
+            notification_body = (
+                f"{sum(row['quantity_bags'] for row in table_rows)} bag(s) of fertilizer dispatched to your branch. "
+                f"Transfer IDs: {transfer_id_text}. Tap to view and confirm receipt."
+            )
+            Notification.objects.create(
+                user=branch.user,
+                title=f"New dispatch from {supplier_name}",
+                body=notification_body,
+                type=Notification.DISPATCH,
+                transfer_ids=[transfer.id for transfer in transfers],
+            )
+            in_app_sent = True
+
+        return Response({"email_sent": email_sent, "in_app_sent": in_app_sent})
+
     @action(detail=True, methods=["post"])
     def upload_proof(self, request, pk=None):
         transfer = self.get_object()
@@ -1007,6 +1135,15 @@ class DeliveryProofViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = DeliveryProof.objects.all()
     serializer_class = DeliveryProofSerializer
     permission_classes = [IsAuthenticated]
+
+
+class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Notification.objects.all().select_related("user")
+    serializer_class = NotificationSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return Notification.objects.filter(user=self.request.user).order_by("-created_at")
 
 
 class OTPVerificationViewSet(viewsets.ReadOnlyModelViewSet):

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Plus, Search, Filter, Download, Package, Calendar, User, Scale } from 'lucide-react';
 import { HashTrail } from './hash-trail';
+import { useFertilizerTypes } from '../hooks/use-fertilizer-types';
 
 const mockDistributions = [
   {
@@ -50,6 +51,7 @@ const mockDistributions = [
 ];
 
 export function InputDistribution() {
+  const { fertilizerTypes } = useFertilizerTypes();
   const [showAddForm, setShowAddForm] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [formData, setFormData] = useState({
@@ -66,6 +68,19 @@ export function InputDistribution() {
     setShowAddForm(false);
     setFormData({ farmer: '', inputType: '', quantity: '', date: '' });
   };
+
+  const inputTypeOptions = [
+    ...fertilizerTypes.map((type) => ({
+      value: `Fertilizer - ${type.label}`,
+      label: `Fertilizer - ${type.label}`,
+    })),
+    { value: 'Pesticide - Coffee Berry Disease', label: 'Pesticide - Coffee Berry Disease' },
+    { value: 'Pesticide - Leaf Rust', label: 'Pesticide - Leaf Rust' },
+    { value: 'Coffee Seedlings - Ruiru 11', label: 'Coffee Seedlings - Ruiru 11' },
+    { value: 'Coffee Seedlings - Batian', label: 'Coffee Seedlings - Batian' },
+    { value: 'Pruning Tools', label: 'Pruning Tools' },
+    { value: 'Harvesting Baskets', label: 'Harvesting Baskets' },
+  ];
 
   const filteredDistributions = mockDistributions.filter((dist) =>
     dist.farmer.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -118,14 +133,11 @@ export function InputDistribution() {
                   required
                 >
                   <option value="">Select input type</option>
-                  <option value="Fertilizer - NPK 17-17-17">Fertilizer - NPK 17-17-17</option>
-                  <option value="Fertilizer - Organic Compost">Fertilizer - Organic Compost</option>
-                  <option value="Pesticide - Coffee Berry Disease">Pesticide - Coffee Berry Disease</option>
-                  <option value="Pesticide - Leaf Rust">Pesticide - Leaf Rust</option>
-                  <option value="Coffee Seedlings - Ruiru 11">Coffee Seedlings - Ruiru 11</option>
-                  <option value="Coffee Seedlings - Batian">Coffee Seedlings - Batian</option>
-                  <option value="Pruning Tools">Pruning Tools</option>
-                  <option value="Harvesting Baskets">Harvesting Baskets</option>
+                  {inputTypeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div>

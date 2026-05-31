@@ -29,6 +29,7 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
   const [farmers, setFarmers] = useState([]);
   const [pendingTransfer, setPendingTransfer] = useState(null);
   const [pendingFarmer, setPendingFarmer] = useState(null);
+  const [selectedReceiveTransferId, setSelectedReceiveTransferId] = useState('');
   const [isOtpOpen, setIsOtpOpen] = useState(false);
   const [otpMessage, setOtpMessage] = useState('');
   const [smsInfo, setSmsInfo] = useState(null);
@@ -220,7 +221,7 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                 unreadCount={unreadCount}
                 onMarkRead={markRead}
                 onMarkAllRead={markAllRead}
-                onNavigateTab={(tab) => {
+                onNavigateTab={(tab, notification) => {
                   const tabMap = {
                     receive: 'fertilizer-in',
                     distribute: 'fertilizer-out',
@@ -228,6 +229,13 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                     farmers: 'farmers',
                   };
                   setActiveTab(tabMap[tab] || tab);
+                  const transferId =
+                    notification?.transferId ||
+                    notification?.metadata?.transfer_id ||
+                    notification?.transfer_ids?.[0];
+                  if ((tab === 'receive' || tabMap[tab] === 'fertilizer-in') && transferId) {
+                    setSelectedReceiveTransferId(String(transferId));
+                  }
                 }}
               />
               <div className="text-right">
@@ -332,6 +340,7 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
             <ReceiveFertilizerPanel
               inboundTransfers={inboundTransfers}
               onRefresh={refreshData}
+              highlightTransferId={selectedReceiveTransferId}
             />
           )}
 
