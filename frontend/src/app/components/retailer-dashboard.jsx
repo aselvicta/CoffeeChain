@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Package, Users, Send, History, LogOut, TrendingUp } from 'lucide-react';
+import { Package, Users, Send, History, LogOut, TrendingUp, Layers, CheckCircle } from 'lucide-react';
 import { LineChart, Line, PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import { Logo } from './logo';
 import { FarmerOTPModal } from './farmer-otp-modal';
@@ -34,6 +34,15 @@ export function RetailerDashboard({ userProfile, onLogout }) {
   const [otpMessage, setOtpMessage] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [transferDetails, setTransferDetails] = useState(null);
+  const [transferDataCache, setTransferDataCache] = useState([]);
+  const [verificationForm, setVerificationForm] = useState({
+      quantityReceived : '',
+      verificationStatus : '',
+      discrepancyStatus: '',
+      remarks: '',
+
+  })
   const distributionTrends = [
     { week: 'W1', bags: 18, verified: 12 },
     { week: 'W2', bags: 24, verified: 19 },
@@ -80,8 +89,10 @@ export function RetailerDashboard({ userProfile, onLogout }) {
     try {
       const [farmerData, transferData] = await Promise.all([
         fetchFarmers(),
-        fetchTransfers(),
+        fetchTransfers(),   
       ]);
+
+      setTransferDataCache(transferData);
       setFarmers(
         farmerData.map((farmer) => ({
           id: farmer.id,
@@ -134,6 +145,41 @@ export function RetailerDashboard({ userProfile, onLogout }) {
     refreshData();
   }, []);
 
+  const activeBatches = receivedBatches.filter(
+    (batch) => batch.status === 'ACTIVE'
+  );
+
+  const pendingTransfers = receivedBatches.filter(
+    (batch) => batch.status === 'PENDING'
+  );
+
+  const completedTransfers = receivedBatches.filter(
+    (batch) => batch.status === 'COMPLETED'
+  );
+
+  const lowStockAlerts = receivedBatches.filter(
+    (batch) => batch.bags <= 10
+  );
+
+  const getTransferById = (id) => {
+    return transferDataCache.find(
+        (t) => String(t.id) === String(id)
+      );
+    };
+
+  const expiringBatches = receivedBatches.filter((batch) => {
+    if (!batch.expiryDate) return false;
+
+    const today = new Date();
+    const expiry = new Date(batch.expiryDate);
+
+    const diffInDays =
+      (expiry - today) / (1000 * 60 * 60 * 24);
+
+    return diffInDays <= 30;
+  });
+
+
   return (
     <div className="min-h-screen bg-gray-50 flex">
       {/* Sidebar */}
@@ -169,9 +215,7 @@ export function RetailerDashboard({ userProfile, onLogout }) {
         </nav>
       </div>
 
-      {/* Main Content */}
       <div className="flex-1 flex flex-col">
-        {/* Header */}
         <header className="bg-white border-b border-gray-200 px-8 py-4">
           <div className="flex items-center justify-between">
             <div>
@@ -194,7 +238,6 @@ export function RetailerDashboard({ userProfile, onLogout }) {
           </div>
         </header>
 
-        {/* Content */}
         <main className="flex-1 overflow-y-auto p-8">
           {activeTab === 'overview' && (
             <div className="space-y-6">
@@ -203,6 +246,12 @@ export function RetailerDashboard({ userProfile, onLogout }) {
                   { label: 'Stock Available', value: `${receivedBatches.reduce((sum, batch) => sum + batch.bags, 0)} bags`, change: 'Inbound batches', icon: Package },
                   { label: 'Distributed Today', value: `${distributions.length} transfers`, change: 'OTP protected', icon: Send },
                   { label: 'Total Farmers', value: `${farmers.length}`, change: 'Registered farmers', icon: Users },
+                  { label: 'Active Fertilizer Batches', value: `${activeBatches.length}`, change: 'Batches in inventory', icon: Layers },
+                  { label: 'Pending Transfers', value: `${pendingTransfers.length}`, change: 'Awaiting confirmations', icon: History },
+                  { label: 'Transfers Completed', value: `${completedTransfers.length}`, change: 'Confirmed receipts', icon: CheckCircle },
+                  { label: 'Low Stock Alerts', value: `${lowStockAlerts.length}`, change: 'Below threshold batches', icon: TrendingUp },
+                  { label: 'Expiring Batches', value: `${expiringBatches.length}`, change: 'Expiring soon', icon: History },
+                  
                 ].map((metric, index) => (
                   <div key={index} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                     <div className="flex items-center gap-3 mb-4">
@@ -239,57 +288,174 @@ export function RetailerDashboard({ userProfile, onLogout }) {
             </div>
           )}
 
+          
           {activeTab === 'receive' && (
-            <div className="space-y-6">
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                <h2 className="text-xl font-bold text-gray-900 mb-4">Receive Batches</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <input
-                    type="text"
-                    placeholder="Transfer ID"
-                    value={receiveForm.transferId}
-                    onChange={(e) => setReceiveForm({ ...receiveForm, transferId: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  />
-                </div>
-                <button
-                  onClick={async () => {
-                    if (!receiveForm.transferId) return;
-                    setIsSaving(true);
-                    setStatusMessage('');
-                    try {
-                      await receiveTransfer(receiveForm.transferId);
-                      await refreshData();
-                      setReceiveForm({ transferId: '' });
-                    } catch (error) {
-                      setStatusMessage(error.message);
-                    } finally {
-                      setIsSaving(false);
-                    }
-                  }}
-                  className="mt-4 bg-green-600 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-green-700 transition-colors"
-                >
-                  {isSaving ? 'Recording...' : 'Record Receipt'}
-                </button>
-                {statusMessage && <p className="mt-3 text-sm text-red-600">{statusMessage}</p>}
-              </div>
+  <div className="space-y-6">
 
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-4">Recent Receipts</h3>
-                <div className="space-y-3">
-                  {receivedBatches.map((batch) => (
-                    <div key={batch.id} className="flex items-center justify-between border border-gray-100 rounded-lg p-4">
-                      <div>
-                        <p className="font-semibold text-gray-900">{batch.id}</p>
-                        <p className="text-sm text-gray-600">{batch.supplier} • {batch.bags} bags</p>
-                      </div>
-                      <span className="text-sm text-gray-500">{batch.date}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
+  
+    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+      <h2 className="text-xl font-bold text-gray-900 mb-4">
+        Receive Batches
+      </h2>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <input
+          type="text"
+          placeholder="Transfer ID"
+          value={receiveForm.transferId}
+          onChange={(e) =>
+            setReceiveForm({ ...receiveForm, transferId: e.target.value })
+          }
+          className="w-full px-4 py-3 border border-gray-300 rounded-lg"
+        />
+      </div>
+
+      <button
+        onClick={() => {
+          const transfer = receivedBatches.find(
+            (batch) => String(batch.id) === receiveForm.transferId
+          );
+
+          if (!transfer) {
+            setStatusMessage('Transfer not found');
+            return;
+          }
+
+    
+          setTransferDetails({
+            // Supplier Info
+            supplierName: transfer.supplier,
+            supplierId: transfer.supplierId || 'SUP-001',
+            dispatchReference: transfer.id,
+
+            // Batch Info
+            batchId: transfer.batchId,
+            fertilizerType: transfer.fertilizerType || 'NPK',
+            quantitySent: transfer.bags,
+            productionDate: transfer.productionDate || '2026-01-01',
+            expiryDate: transfer.expiryDate || '2026-12-31',
+
+            // Verification Info
+            verificationStatus: transfer.status,
+            discrepancyStatus: 'NONE',
+          });
+
+       
+          setVerificationForm({
+            quantityReceived: transfer.bags,
+            verificationStatus: transfer.status,
+            discrepancyStatus: 'NONE',
+            remarks: '',
+          });
+        }}
+        className="mt-4 bg-green-600 text-white px-6 py-2.5 rounded-lg"
+      >
+        Load Transfer Details
+      </button>
+
+      {statusMessage && (
+        <p className="mt-3 text-sm text-red-600">{statusMessage}</p>
+      )}
+    </div>
+
+    
+    {transferDetails && (
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-4">
+
+        <h3 className="text-lg font-bold">Transfer Details</h3>
+
+        {/* Supplier Info */}
+        <div className="border p-3 rounded">
+          <p className="font-semibold">Supplier Information</p>
+          <p>Name: {transferDetails.supplierName}</p>
+          <p>ID: {transferDetails.supplierId}</p>
+          <p>Dispatch Ref: {transferDetails.dispatchReference}</p>
+        </div>
+
+        {/* Batch Info */}
+        <div className="border p-3 rounded">
+          <p className="font-semibold">Batch Information</p>
+          <p>Batch ID: {transferDetails.batchId}</p>
+          <p>Type: {transferDetails.fertilizerType}</p>
+          <p>Quantity Sent: {transferDetails.quantitySent} bags</p>
+          <p>Production Date: {transferDetails.productionDate}</p>
+          <p>Expiry Date: {transferDetails.expiryDate}</p>
+        </div>
+
+        {/* Verification Info */}
+        <div className="border p-3 rounded">
+          <p className="font-semibold">Verification</p>
+
+          <input
+            type="number"
+            value={verificationForm.quantityReceived}
+            onChange={(e) =>
+              setVerificationForm({
+                ...verificationForm,
+                quantityReceived: e.target.value,
+              })
+            }
+            placeholder="Quantity Received"
+            className="w-full border p-2 rounded mt-2"
+          />
+
+          <input
+            type="text"
+            value={verificationForm.remarks}
+            onChange={(e) =>
+              setVerificationForm({
+                ...verificationForm,
+                remarks: e.target.value,
+              })
+            }
+            placeholder="Remarks"
+            className="w-full border p-2 rounded mt-2"
+          />
+
+          <select
+            value={verificationForm.discrepancyStatus}
+            onChange={(e) =>
+              setVerificationForm({
+                ...verificationForm,
+                discrepancyStatus: e.target.value,
+              })
+            }
+            className="w-full border p-2 rounded mt-2"
+          >
+            <option value="NONE">No Discrepancy</option>
+            <option value="DISCREPANCY">Discrepancy</option>
+          </select>
+        </div>
+      </div>
+    )}
+
+    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+      <h3 className="text-lg font-bold text-gray-900 mb-4">
+        Recent Receipts
+      </h3>
+
+      <div className="space-y-3">
+        {receivedBatches.map((batch) => (
+          <div
+            key={batch.id}
+            className="flex items-center justify-between border p-4 rounded-lg"
+          >
+            <div>
+              <p className="font-semibold">{batch.id}</p>
+              <p className="text-sm text-gray-600">
+                {batch.supplier} • {batch.bags} bags
+              </p>
             </div>
+            <span className="text-sm text-gray-500">{batch.date}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  </div>
           )}
+          
+
+
 
           {activeTab === 'distribute' && (
             <div className="space-y-6">
