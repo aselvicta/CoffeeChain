@@ -17,6 +17,12 @@ import {
   verifyOtp,
 } from '../api/client';
 import { handleOtpSmsResponse } from '../utils/otp-sms';
+import {
+  QuickActionCard,
+  ContentListRow,
+  PanelPrimaryButton,
+  PanelOutlineButton,
+} from './ui/dashboard-ui';
 
 export function RetailerDashboard({ userProfile, onLogout }) {
   const [activeTab, setActiveTab] = useState('overview');
@@ -31,6 +37,7 @@ export function RetailerDashboard({ userProfile, onLogout }) {
   const [isOtpOpen, setIsOtpOpen] = useState(false);
   const [otpMessage, setOtpMessage] = useState('');
   const [smsInfo, setSmsInfo] = useState(null);
+  const [otpCodeLength, setOtpCodeLength] = useState(6);
   const [latestVerification, setLatestVerification] = useState(null);
   const [statusMessage, setStatusMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -302,33 +309,25 @@ export function RetailerDashboard({ userProfile, onLogout }) {
 
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                 <h3 className="text-lg font-bold text-gray-900 mb-4">Quick Actions</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <button
-                    type="button"
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <QuickActionCard
+                    icon={Package}
+                    tone="amber"
+                    title="Receive Batches"
+                    description={
+                      pendingReceiptCount > 0
+                        ? `${pendingReceiptCount} awaiting confirmation`
+                        : 'Confirm incoming stock'
+                    }
                     onClick={() => setActiveTab('receive')}
-                    className="flex items-center gap-3 p-4 bg-amber-50 rounded-lg hover:bg-amber-100 text-left"
-                  >
-                    <Package className="h-5 w-5 text-amber-700" />
-                    <div>
-                      <p className="font-semibold text-gray-900">Receive Batches</p>
-                      <p className="text-sm text-gray-600">
-                        {pendingReceiptCount > 0
-                          ? `${pendingReceiptCount} awaiting confirmation`
-                          : 'Confirm incoming stock'}
-                      </p>
-                    </div>
-                  </button>
-                  <button
-                    type="button"
+                  />
+                  <QuickActionCard
+                    icon={Send}
+                    tone="green"
+                    title="Point of Sale"
+                    description="Ministry ID discount or walk-in"
                     onClick={() => setActiveTab('distribute')}
-                    className="flex items-center gap-3 p-4 bg-green-50 rounded-lg hover:bg-green-100 text-left"
-                  >
-                    <Send className="h-5 w-5 text-green-700" />
-                    <div>
-                      <p className="font-semibold text-gray-900">Point of Sale</p>
-                      <p className="text-sm text-gray-600">Ministry ID discount or walk-in</p>
-                    </div>
-                  </button>
+                  />
                 </div>
               </div>
             </div>
@@ -423,7 +422,8 @@ export function RetailerDashboard({ userProfile, onLogout }) {
                     className="w-full text-sm text-gray-600"
                   />
                 </div>
-                <button
+                <PanelPrimaryButton
+                  icon={Send}
                   onClick={async () => {
                     if (!saleBuyer?.farmerId || !distributionForm.bags || !distributionForm.batchId) {
                       setStatusMessage('Select a customer above, then batch and bags.');
@@ -450,6 +450,7 @@ export function RetailerDashboard({ userProfile, onLogout }) {
                       }
                       const smsOk = handleOtpSmsResponse(otpResponse.sms, {
                         onDelivered: (sms) => {
+                          setOtpCodeLength(otpResponse.otp_code_length ?? 6);
                           setPendingTransfer(transfer);
                           setPendingFarmer({
                             name: saleBuyer.name,
@@ -467,7 +468,7 @@ export function RetailerDashboard({ userProfile, onLogout }) {
                         setStatusMessage(
                           (current) =>
                             current ||
-                            'Sale was saved but SMS failed. Open Verify Distribution to resend OTP.'
+                            'Sale was saved but Briq OTP failed. Open Verify Distribution to resend.'
                         );
                       }
                       await refreshData();
@@ -477,11 +478,11 @@ export function RetailerDashboard({ userProfile, onLogout }) {
                       setIsSaving(false);
                     }
                   }}
-                  className="mt-4 bg-green-600 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-green-700 disabled:opacity-50"
+                  className="mt-4"
                   disabled={isSaving || distributableStock.length === 0 || !saleBuyer?.farmerId}
                 >
                   {isSaving ? 'Processing...' : 'Send Verification SMS'}
-                </button>
+                </PanelPrimaryButton>
                 {statusMessage && <p className="mt-3 text-sm text-red-600">{statusMessage}</p>}
               </div>
 
@@ -545,62 +546,64 @@ export function RetailerDashboard({ userProfile, onLogout }) {
                     {verificationList.map((record) => {
                       const isVerified = record.status === 'verified';
                       return (
-                        <div
+                        <ContentListRow
                           key={record.id}
-                          className="flex flex-col gap-4 rounded-lg border border-gray-200 p-4 sm:flex-row sm:items-center sm:justify-between"
+                          icon={ShieldCheck}
+                          tone={isVerified ? 'emerald' : 'amber'}
+                          action={
+                            !isVerified ? (
+                              <PanelOutlineButton
+                                icon={ShieldCheck}
+                                onClick={async () => {
+                                  try {
+                                    setStatusMessage('');
+                                    const otpResponse = await sendOtp(record.id);
+                                    handleOtpSmsResponse(otpResponse.sms, {
+                                      onDelivered: (sms) => {
+                                        setOtpCodeLength(otpResponse.otp_code_length ?? 6);
+                                        setPendingTransfer(record.rawTransfer);
+                                        setPendingFarmer({
+                                          name: record.farmer,
+                                          ministryId: record.farmerMinistryId,
+                                        });
+                                        setOtpMessage(sms.message || '');
+                                        setSmsInfo(sms);
+                                        setIsOtpOpen(true);
+                                      },
+                                      onFailed: (message) => setStatusMessage(message),
+                                    });
+                                  } catch (error) {
+                                    setStatusMessage(error.message);
+                                  }
+                                }}
+                              >
+                                Resend &amp; Verify OTP
+                              </PanelOutlineButton>
+                            ) : null
+                          }
                         >
-                          <div>
-                            <p className="font-semibold text-gray-900">
-                              {record.farmer}{' '}
-                              {record.farmerMinistryId && (
-                                <span className="text-xs text-gray-500">({record.farmerMinistryId})</span>
-                              )}
-                            </p>
-                            <p className="text-sm text-gray-600">
-                              {record.bags} bags
-                              {record.batchCode ? ` • ${record.batchCode}` : ''}
-                            </p>
-                            <span
-                              className={`inline-block mt-1 px-2 py-0.5 rounded-full text-xs font-medium ${
-                                isVerified
-                                  ? 'bg-green-100 text-green-700'
-                                  : 'bg-yellow-100 text-yellow-700'
-                              }`}
-                            >
-                              {isVerified ? 'Verified' : 'Pending'}
-                            </span>
-                          </div>
-                          {!isVerified && (
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                try {
-                                  setStatusMessage('');
-                                  const otpResponse = await sendOtp(record.id);
-                                  handleOtpSmsResponse(otpResponse.sms, {
-                                    onDelivered: (sms) => {
-                                      setPendingTransfer(record.rawTransfer);
-                                      setPendingFarmer({
-                                        name: record.farmer,
-                                        ministryId: record.farmerMinistryId,
-                                      });
-                                      setOtpMessage(sms.message || '');
-                                      setSmsInfo(sms);
-                                      setIsOtpOpen(true);
-                                    },
-                                    onFailed: (message) => setStatusMessage(message),
-                                  });
-                                } catch (error) {
-                                  setStatusMessage(error.message);
-                                }
-                              }}
-                              className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700"
-                            >
-                              <ShieldCheck className="h-4 w-4" />
-                              Resend &amp; Verify OTP
-                            </button>
-                          )}
-                        </div>
+                          <p className="font-semibold text-gray-900">
+                            {record.farmer}{' '}
+                            {record.farmerMinistryId && (
+                              <span className="text-xs font-normal text-gray-500">
+                                ({record.farmerMinistryId})
+                              </span>
+                            )}
+                          </p>
+                          <p className="text-sm text-gray-600">
+                            {record.bags} bags
+                            {record.batchCode ? ` • ${record.batchCode}` : ''}
+                          </p>
+                          <span
+                            className={`mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
+                              isVerified
+                                ? 'bg-green-100 text-green-700'
+                                : 'bg-yellow-100 text-yellow-700'
+                            }`}
+                          >
+                            {isVerified ? 'Verified' : 'Pending'}
+                          </span>
+                        </ContentListRow>
                       );
                     })}
                   </div>
@@ -682,9 +685,10 @@ export function RetailerDashboard({ userProfile, onLogout }) {
             }
           }}
           onResend={async () => {
-            const response = await sendOtp(pendingTransfer.id);
+            const response = await sendOtp(pendingTransfer.id, { resend: true });
             if (!handleOtpSmsResponse(response.sms, {
               onDelivered: (sms) => {
+                setOtpCodeLength(response.otp_code_length ?? 6);
                 setOtpMessage(sms.message || '');
                 setSmsInfo(sms);
               },
@@ -692,7 +696,7 @@ export function RetailerDashboard({ userProfile, onLogout }) {
                 throw new Error(message);
               },
             })) {
-              throw new Error('SMS was not delivered');
+              throw new Error('OTP was not delivered');
             }
           }}
           farmerName={pendingFarmer?.name || 'Farmer'}
@@ -703,6 +707,7 @@ export function RetailerDashboard({ userProfile, onLogout }) {
             bagsGiven: pendingTransfer.quantity_bags,
             fertilizerType: pendingTransfer.batch?.fertilizer_type || 'Fertilizer',
           }}
+          otpLength={otpCodeLength}
         />
       )}
     </div>

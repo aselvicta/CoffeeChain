@@ -11,6 +11,7 @@ import {
   UserX,
 } from 'lucide-react';
 import { lookupMinistryFarmer, resolveRetailerBuyer } from '../api/client';
+import { PanelOutlineButton, PanelPrimaryButton, QuickActionCard } from './ui/dashboard-ui';
 
 const emptyBuyer = {
   farmerId: null,
@@ -130,41 +131,29 @@ export function RetailerSalePanel({ onBuyerResolved, onClear }) {
         </p>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <QuickActionCard
+          icon={IdCard}
+          tone="green"
+          title="Ministry ID"
+          description="Subsidy discount for registered farmers"
           onClick={() => {
             setMode('ministry');
             reset();
           }}
-          className={`rounded-lg px-4 py-2 text-sm font-medium border ${
-            mode === 'ministry'
-              ? 'bg-green-600 text-white border-green-600'
-              : 'bg-white text-gray-700 border-gray-300'
-          }`}
-        >
-          <span className="inline-flex items-center gap-2">
-            <IdCard className="h-4 w-4" />
-            Ministry ID
-          </span>
-        </button>
-        <button
-          type="button"
+          className={mode === 'ministry' ? 'ring-2 ring-green-500 ring-offset-1' : 'opacity-90'}
+        />
+        <QuickActionCard
+          icon={UserX}
+          tone="slate"
+          title="Walk-in (no ID)"
+          description="Full price sale without Ministry lookup"
           onClick={() => {
             setMode('walkin');
             reset();
           }}
-          className={`rounded-lg px-4 py-2 text-sm font-medium border ${
-            mode === 'walkin'
-              ? 'bg-gray-700 text-white border-gray-700'
-              : 'bg-white text-gray-700 border-gray-300'
-          }`}
-        >
-          <span className="inline-flex items-center gap-2">
-            <UserX className="h-4 w-4" />
-            Walk-in (no ID)
-          </span>
-        </button>
+          className={mode === 'walkin' ? 'ring-2 ring-gray-400 ring-offset-1' : 'opacity-90'}
+        />
       </div>
 
       {mode === 'ministry' && (
@@ -180,14 +169,14 @@ export function RetailerSalePanel({ onBuyerResolved, onClear }) {
               placeholder="e.g. MOA-KAG-031"
               className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
             />
-            <button
+            <PanelOutlineButton
               type="submit"
+              icon={isLoading ? Loader2 : Search}
               disabled={isLoading || !ministryIdInput.trim()}
-              className="inline-flex items-center gap-2 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+              className={isLoading ? '[&_svg]:animate-spin' : ''}
             >
-              {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
               Look up
-            </button>
+            </PanelOutlineButton>
           </div>
           {preview && (
             <div className="rounded-lg border border-green-200 bg-green-50 p-4 space-y-3">
@@ -208,14 +197,14 @@ export function RetailerSalePanel({ onBuyerResolved, onClear }) {
                 <Percent className="h-4 w-4" />
                 {preview.discount_percent ?? 10}% subsidy discount eligible
               </div>
-              <button
-                type="button"
+              <PanelPrimaryButton
+                icon={User}
                 onClick={handleConfirmMinistryBuyer}
                 disabled={isLoading}
-                className="w-full py-2.5 bg-green-700 text-white rounded-lg font-medium hover:bg-green-800 disabled:opacity-50"
+                className="w-full justify-center"
               >
                 Use this customer for sale
-              </button>
+              </PanelPrimaryButton>
             </div>
           )}
         </form>
@@ -255,13 +244,14 @@ export function RetailerSalePanel({ onBuyerResolved, onClear }) {
               />
             </div>
           </div>
-          <button
+          <PanelOutlineButton
             type="submit"
+            icon={User}
+            tone="slate"
             disabled={isLoading}
-            className="px-6 py-2.5 bg-gray-800 text-white rounded-lg font-medium hover:bg-gray-900 disabled:opacity-50"
           >
             {isLoading ? 'Saving…' : 'Record walk-in customer'}
-          </button>
+          </PanelOutlineButton>
         </form>
       )}
 

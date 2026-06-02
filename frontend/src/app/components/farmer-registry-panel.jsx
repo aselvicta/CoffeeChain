@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import { lookupMinistryFarmer, registerFarmer } from '../api/client';
+import { PanelOutlineButton, PanelPrimaryButton } from './ui/dashboard-ui';
 
 const initialLookupState = {
   status: 'idle',
@@ -130,14 +131,9 @@ export function FarmerRegistryPanel({ farmers, userProfile, onRegistered }) {
               New farmers must exist in the Ministry of Agriculture registry.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={openDialog}
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-green-600 px-4 py-2.5 font-medium text-white transition-colors hover:bg-green-700"
-          >
-            <UserPlus className="h-4 w-4" />
+          <PanelOutlineButton icon={UserPlus} onClick={openDialog}>
             Register Farmer
-          </button>
+          </PanelOutlineButton>
         </div>
 
         <div className="relative mb-4">
@@ -219,7 +215,7 @@ export function FarmerRegistryPanel({ farmers, userProfile, onRegistered }) {
             onClick={isRegistering ? undefined : closeDialog}
             aria-hidden="true"
           />
-          <div className="relative z-10 w-full max-w-lg rounded-xl bg-white shadow-2xl">
+          <div className="relative z-10 w-full max-w-lg rounded-xl border border-gray-200 bg-white shadow-lg">
             <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
               <div>
                 <h3 className="text-lg font-bold text-gray-900">Register Farmer</h3>
@@ -261,27 +257,18 @@ export function FarmerRegistryPanel({ farmers, userProfile, onRegistered }) {
                       disabled={lookupState.status === 'loading' || isRegistering}
                     />
                   </div>
-                  <button
+                  <PanelOutlineButton
                     type="submit"
+                    icon={lookupState.status === 'loading' ? Loader2 : Search}
                     disabled={
                       !ministryIdInput.trim() ||
                       lookupState.status === 'loading' ||
                       isRegistering
                     }
-                    className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    className={lookupState.status === 'loading' ? '[&_svg]:animate-spin' : ''}
                   >
-                    {lookupState.status === 'loading' ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Looking up
-                      </>
-                    ) : (
-                      <>
-                        <Search className="h-4 w-4" />
-                        Look up
-                      </>
-                    )}
-                  </button>
+                    {lookupState.status === 'loading' ? 'Looking up' : 'Look up'}
+                  </PanelOutlineButton>
                 </div>
                 <p className="text-xs text-gray-500">
                   The Ministry registry will provide the farmer's full details
@@ -407,8 +394,8 @@ export function FarmerRegistryPanel({ farmers, userProfile, onRegistered }) {
               >
                 Cancel
               </button>
-              <button
-                type="button"
+              <PanelPrimaryButton
+                icon={isRegistering ? Loader2 : CheckCircle2}
                 onClick={handleConfirmRegister}
                 disabled={
                   lookupState.status !== 'found' ||
@@ -417,20 +404,10 @@ export function FarmerRegistryPanel({ farmers, userProfile, onRegistered }) {
                     lookupState.record?.current_cooperative?.id !==
                       userProfile?.branchId)
                 }
-                className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+                className={isRegistering ? '[&_svg]:animate-spin' : ''}
               >
-                {isRegistering ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Registering
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle2 className="h-4 w-4" />
-                    Confirm &amp; Register
-                  </>
-                )}
-              </button>
+                {isRegistering ? 'Registering' : 'Confirm & Register'}
+              </PanelPrimaryButton>
             </div>
           </div>
         </div>

@@ -11,7 +11,7 @@ export function handleOtpSmsResponse(sms, { onDelivered, onFailed }) {
     sms?.user_message ||
       sms?.note ||
       sms?.error ||
-      'SMS could not be sent. Check SMS provider settings and try again.'
+      'SMS could not be sent. Check Briq settings in backend/.env and try again.'
   );
   return false;
 }

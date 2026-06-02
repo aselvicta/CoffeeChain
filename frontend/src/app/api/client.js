@@ -240,8 +240,11 @@ export function receiveTransfer(id) {
   return apiFetch(`/api/transfers/${id}/receive/`, { method: 'POST' });
 }
 
-export function sendOtp(id) {
-  return apiFetch(`/api/transfers/${id}/send_otp/`, { method: 'POST' });
+export function sendOtp(id, options = {}) {
+  return apiFetch(`/api/transfers/${id}/send_otp/`, {
+    method: 'POST',
+    body: JSON.stringify(options),
+  });
 }
 
 export function verifyOtp(id, code) {
@@ -271,10 +274,6 @@ export async function uploadProof(id, file, meta = {}) {
 
 export function fetchAuditReport() {
   return apiFetch('/api/reports/audit/');
-}
-
-export function fetchNotifications() {
-  return apiFetch('/api/notifications/');
 }
 
 export function markNotificationRead(id) {

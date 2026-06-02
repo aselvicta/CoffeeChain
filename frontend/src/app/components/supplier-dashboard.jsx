@@ -7,6 +7,7 @@ import { useNotifications } from '../hooks/use-notifications';
 import { TraceBatchModal } from './trace-batch-modal';
 import { WarehouseModal } from './warehouse-modal';
 import { createBatch, createTransfer, createWarehouse, deleteWarehouse, fetchBatches, fetchBranches, fetchTransfers, fetchWarehouseCatalog, fetchWarehouses } from '../api/client';
+import { QuickActionCard, PanelPrimaryButton, PanelOutlineButton } from './ui/dashboard-ui';
 
 export function SupplierDashboard({ userProfile, onLogout }) {
   function createDispatchLineItem() {
@@ -414,31 +415,21 @@ export function SupplierDashboard({ userProfile, onLogout }) {
 
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                 <h3 className="text-lg font-bold text-gray-900 mb-4">Quick Actions</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <button
-                    onClick={() => {
-                      setActiveTab('dispatch');
-                    }}
-                    className="flex items-center gap-3 p-4 bg-green-50 rounded-lg hover:bg-green-100 transition-colors"
-                  >
-                    <Send className="h-5 w-5 text-green-700" />
-                    <div className="text-left">
-                      <p className="font-semibold text-gray-900">Create New Dispatch</p>
-                      <p className="text-sm text-gray-600">Send fertilizer to retailers/AMCOS</p>
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setActiveTab('inventory');
-                    }}
-                    className="flex items-center gap-3 p-4 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors"
-                  >
-                    <Package className="h-5 w-5 text-blue-700" />
-                    <div className="text-left">
-                      <p className="font-semibold text-gray-900">Check Inventory</p>
-                      <p className="text-sm text-gray-600">View current stock levels</p>
-                    </div>
-                  </button>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <QuickActionCard
+                    icon={Send}
+                    tone="green"
+                    title="Create New Dispatch"
+                    description="Send fertilizer to retailers/AMCOS"
+                    onClick={() => setActiveTab('dispatch')}
+                  />
+                  <QuickActionCard
+                    icon={Package}
+                    tone="blue"
+                    title="Check Inventory"
+                    description="View current stock levels"
+                    onClick={() => setActiveTab('inventory')}
+                  />
                 </div>
               </div>
             </div>
@@ -495,7 +486,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                       </option>
                     ))}
                   </select>
-                  <div className="md:col-span-2 space-y-3 rounded-xl border border-dashed border-green-200 bg-green-50/50 p-4">
+                  <div className="md:col-span-2 space-y-3 rounded-xl border border-gray-200 bg-gray-50 p-4">
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <h3 className="text-sm font-semibold text-gray-900">Dispatch Items</h3>
@@ -644,8 +635,10 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                     ))}
                   </select>
                 </div>
-                <div className="mt-4 flex items-center gap-3">
-                  <button
+                <div className="mt-4 flex flex-wrap items-center gap-3">
+                  <PanelPrimaryButton
+                    icon={Send}
+                    disabled={isSaving}
                     onClick={async () => {
                       if (!dispatchForm.destination || !dispatchForm.warehouseId || dispatchItems.length === 0) return;
                       setIsSaving(true);
@@ -712,11 +705,20 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                         setIsSaving(false);
                       }
                     }}
-                    className="bg-green-600 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-green-700 transition-colors"
                   >
                     {isSaving ? 'Saving...' : 'Create Dispatch'}
-                  </button>
-                  <button onClick={() => { setTraceBatchId(dispatchItems[0]?.batchCode || dispatchForm.batchId || ''); setIsTraceOpen(true); }} className="ml-2 px-4 py-2 rounded-lg border border-gray-200">Trace Batch</button>
+                  </PanelPrimaryButton>
+                  <PanelOutlineButton
+                    icon={Search}
+                    onClick={() => {
+                      setTraceBatchId(dispatchItems[0]?.batchCode || dispatchForm.batchId || '');
+                      setIsTraceOpen(true);
+                    }}
+                    className="ml-2"
+                    tone="slate"
+                  >
+                    Trace Batch
+                  </PanelOutlineButton>
                 </div>
                 {statusMessage && (
                   <p className="mt-3 text-sm text-red-600">{statusMessage}</p>

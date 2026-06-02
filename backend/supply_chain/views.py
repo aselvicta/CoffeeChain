@@ -1,3 +1,5 @@
+import re
+
 from django.conf import settings
 from django.contrib.auth.models import Group, User
 from django.core.mail import send_mail
@@ -45,7 +47,6 @@ from .serializers import (
     FertilizerBatchSerializer,
     NotificationSerializer,
     WarehouseSerializer,
-    NotificationSerializer,
     OTPVerificationSerializer,
     SupplierSerializer,
     TransferSerializer,
@@ -61,7 +62,7 @@ from .services.notifications import (
     notify_for_transfer_created,
     notify_for_transfer_received,
 )
-from .services.otp import generate_code, is_expired, send_sms
+from .services.farmer_otp import dispatch_farmer_otp, verify_farmer_otp
 
 import logging
 import uuid
@@ -794,7 +795,35 @@ class TransferViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        code = generate_code()
+        fertilizer_type = ""
+        if transfer.batch_id:
+            fertilizer_type = transfer.batch.fertilizer_type or ""
+
+        is_resend = bool(request.data.get("resend"))
+        delivery_method = (request.data.get("delivery_method") or "sms").strip().lower()
+        if is_resend and delivery_method == "sms":
+            # Voice call is more reliable when SMS does not reach the handset.
+            delivery_method = (
+                getattr(settings, "BRIQ_OTP_RESEND_METHOD", "call") or "call"
+            ).lower()
+        code, sms_payload = dispatch_farmer_otp(
+            transfer.farmer.phone_number,
+            quantity_bags=transfer.quantity_bags,
+            fertilizer_type=fertilizer_type,
+            is_resend=is_resend,
+            delivery_method=delivery_method,
+        )
+        if not code or not sms_payload.get("delivered"):
+            return Response(
+                {
+                    "detail": sms_payload.get("error")
+                    or sms_payload.get("user_message")
+                    or "OTP SMS could not be sent.",
+                    "sms": sms_payload,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         otp_record, _ = OTPVerification.objects.update_or_create(
             transfer=transfer,
             defaults={
@@ -806,16 +835,21 @@ class TransferViewSet(viewsets.ModelViewSet):
                 "attempts": 0,
             },
         )
-        sms_payload = send_sms(otp_record.phone_number, code)
         AuditLog.objects.create(
             action="otp_sent",
             user=request.user,
             transfer=transfer,
-            details={"phone_number": otp_record.phone_number},
+            details={"phone_number": otp_record.phone_number, "provider": sms_payload.get("provider")},
         )
         notify_for_otp_sent(transfer)
         return Response(
-            {"otp": OTPVerificationSerializer(otp_record).data, "sms": sms_payload}
+            {
+                "otp": OTPVerificationSerializer(otp_record).data,
+                "sms": sms_payload,
+                "otp_code_length": int(
+                    sms_payload.get("otp_code_length") or settings.OTP_CODE_LENGTH
+                ),
+            }
         )
 
     @action(detail=True, methods=["post"])
@@ -830,20 +864,33 @@ class TransferViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if is_expired(otp_record.sent_at):
-            otp_record.status = OTPVerification.EXPIRED
-            otp_record.save(update_fields=["status"])
+        clean_code = re.sub(r"\D", "", str(code or "").strip())
+        if not clean_code:
             return Response(
-                {"detail": "OTP expired."},
+                {"detail": "OTP code is required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        otp_record.attempts += 1
-        if otp_record.code != str(code).strip():
+        verify_result = verify_farmer_otp(otp_record, clean_code)
+        if not verify_result.get("verified"):
+            otp_record.attempts += 1
             otp_record.status = OTPVerification.FAILED
             otp_record.save(update_fields=["status", "attempts"])
+            detail = verify_result.get("error") or "Invalid OTP code."
+            remaining = verify_result.get("remaining_attempts")
+            if remaining is not None and remaining > 0:
+                detail = f"{detail} ({remaining} attempt(s) remaining.)"
+            elif verify_result.get("locked"):
+                detail = f"{detail} Request a new code using Resend OTP."
+            if verify_result.get("expired") or verify_result.get("locked"):
+                otp_record.status = OTPVerification.EXPIRED
+                otp_record.save(update_fields=["status"])
             return Response(
-                {"detail": "Invalid OTP code."},
+                {
+                    "detail": detail,
+                    "remaining_attempts": remaining,
+                    "locked": bool(verify_result.get("locked")),
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -1096,10 +1143,16 @@ class TransferViewSet(viewsets.ModelViewSet):
             )
             Notification.objects.create(
                 user=branch.user,
+                notification_type=Notification.TYPE_DISPATCH,
                 title=f"New dispatch from {supplier_name}",
-                body=notification_body,
-                type=Notification.DISPATCH,
-                transfer_ids=[transfer.id for transfer in transfers],
+                message=notification_body,
+                details=f"Transfer IDs: {transfer_id_text}",
+                priority=Notification.PRIORITY_HIGH,
+                transfer=transfers[0],
+                metadata={
+                    "transfer_ids": [transfer.id for transfer in transfers],
+                    "tab": "receive",
+                },
             )
             in_app_sent = True
 
@@ -1135,15 +1188,6 @@ class DeliveryProofViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = DeliveryProof.objects.all()
     serializer_class = DeliveryProofSerializer
     permission_classes = [IsAuthenticated]
-
-
-class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Notification.objects.all().select_related("user")
-    serializer_class = NotificationSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        return Notification.objects.filter(user=self.request.user).order_by("-created_at")
 
 
 class OTPVerificationViewSet(viewsets.ReadOnlyModelViewSet):

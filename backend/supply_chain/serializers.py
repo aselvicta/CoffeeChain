@@ -211,22 +211,6 @@ class TransferSerializer(serializers.ModelSerializer):
         }
 
 
-class NotificationSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Notification
-        fields = [
-            "id",
-            "user",
-            "title",
-            "body",
-            "type",
-            "transfer_ids",
-            "is_read",
-            "created_at",
-        ]
-        read_only_fields = ["user", "created_at"]
-
-
 class DeliveryProofSerializer(serializers.ModelSerializer):
     class Meta:
         model = DeliveryProof

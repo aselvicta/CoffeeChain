@@ -6,14 +6,14 @@ import {
 } from '../api/client';
 
 const BADGE_TONES = {
-  dispatch: 'bg-blue-600',
-  receipt: 'bg-teal-600',
-  delivery: 'bg-emerald-600',
-  otp: 'bg-violet-600',
-  registry: 'bg-amber-600',
-  stock: 'bg-sky-600',
-  system: 'bg-slate-600',
-  expiry: 'bg-amber-500',
+  dispatch: 'bg-blue-100 text-blue-700',
+  receipt: 'bg-teal-100 text-teal-700',
+  delivery: 'bg-emerald-100 text-emerald-700',
+  otp: 'bg-violet-100 text-violet-700',
+  registry: 'bg-amber-100 text-amber-700',
+  stock: 'bg-sky-100 text-sky-700',
+  system: 'bg-gray-100 text-gray-700',
+  expiry: 'bg-amber-100 text-amber-700',
 };
 
 function formatTimeLabel(iso) {

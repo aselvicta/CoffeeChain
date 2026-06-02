@@ -29,7 +29,7 @@ export function VerificationTrustSeal({ verification, onDismiss }) {
       : storageUrl;
 
   return (
-    <div className="relative overflow-hidden rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-emerald-50 p-5 shadow-sm">
+    <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-5 shadow-sm">
       <div className="flex items-start gap-4">
         <div className="rounded-full bg-emerald-100 p-2.5">
           <ShieldCheck className="h-6 w-6 text-emerald-700" />

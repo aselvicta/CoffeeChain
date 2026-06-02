@@ -71,10 +71,10 @@ export function CooperativeHistoryPanel({ receivedBatches, distributions }) {
               key={option.id}
               type="button"
               onClick={() => setFilter(option.id)}
-              className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+              className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
                 filter === option.id
-                  ? 'bg-green-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  ? 'border-green-600 bg-green-50 text-green-800'
+                  : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
               }`}
             >
               {option.label}

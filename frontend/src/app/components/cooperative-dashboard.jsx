@@ -18,6 +18,12 @@ import {
   verifyOtp,
 } from '../api/client';
 import { handleOtpSmsResponse } from '../utils/otp-sms';
+import {
+  QuickActionCard,
+  ContentListRow,
+  PanelPrimaryButton,
+  PanelOutlineButton,
+} from './ui/dashboard-ui';
 
 export function CooperativeDashboard({ userProfile, onLogout }) {
   const [activeTab, setActiveTab] = useState('overview');
@@ -33,6 +39,7 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
   const [isOtpOpen, setIsOtpOpen] = useState(false);
   const [otpMessage, setOtpMessage] = useState('');
   const [smsInfo, setSmsInfo] = useState(null);
+  const [otpCodeLength, setOtpCodeLength] = useState(6);
   const [latestVerification, setLatestVerification] = useState(null);
   const [statusMessage, setStatusMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -285,44 +292,32 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
 
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                 <h3 className="text-lg font-bold text-gray-900 mb-4">Quick Actions</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <button
-                    type="button"
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                  <QuickActionCard
+                    icon={Send}
+                    tone="green"
+                    title="Distribute Fertilizer"
+                    description="Give to farmers with OTP"
                     onClick={() => setActiveTab('fertilizer-out')}
-                    className="flex items-center gap-3 p-4 bg-green-50 rounded-lg hover:bg-green-100 transition-colors text-left"
-                  >
-                    <Send className="h-5 w-5 text-green-700" />
-                    <div>
-                      <p className="font-semibold text-gray-900">Distribute Fertilizer</p>
-                      <p className="text-sm text-gray-600">Give to farmers with OTP</p>
-                    </div>
-                  </button>
-                  <button
-                    type="button"
+                  />
+                  <QuickActionCard
+                    icon={Package}
+                    tone="amber"
+                    title="Receive Fertilizer"
+                    description={
+                      pendingReceiptCount > 0
+                        ? `${pendingReceiptCount} pending receipt${pendingReceiptCount === 1 ? '' : 's'}`
+                        : 'Confirm incoming batches'
+                    }
                     onClick={() => setActiveTab('fertilizer-in')}
-                    className="flex items-center gap-3 p-4 bg-amber-50 rounded-lg hover:bg-amber-100 transition-colors text-left"
-                  >
-                    <Package className="h-5 w-5 text-amber-700" />
-                    <div>
-                      <p className="font-semibold text-gray-900">Receive Fertilizer</p>
-                      <p className="text-sm text-gray-600">
-                        {pendingReceiptCount > 0
-                          ? `${pendingReceiptCount} pending receipt${pendingReceiptCount === 1 ? '' : 's'}`
-                          : 'Confirm incoming batches'}
-                      </p>
-                    </div>
-                  </button>
-                  <button
-                    type="button"
+                  />
+                  <QuickActionCard
+                    icon={Users}
+                    tone="blue"
+                    title="Farmer Registry"
+                    description="Register and view farmers"
                     onClick={() => setActiveTab('farmers')}
-                    className="flex items-center gap-3 p-4 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors text-left"
-                  >
-                    <Users className="h-5 w-5 text-blue-700" />
-                    <div>
-                      <p className="font-semibold text-gray-900">Farmer Registry</p>
-                      <p className="text-sm text-gray-600">Register and view farmers</p>
-                    </div>
-                  </button>
+                  />
                 </div>
               </div>
             </div>
@@ -419,7 +414,8 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                     className="w-full text-sm text-gray-600"
                   />
                 </div>
-                <button
+                <PanelPrimaryButton
+                  icon={Send}
                   onClick={async () => {
                     if (!distributionForm.farmer || !distributionForm.bags || !distributionForm.batchId) return;
                     setIsSaving(true);
@@ -443,6 +439,7 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                       }
                       const smsOk = handleOtpSmsResponse(otpResponse.sms, {
                         onDelivered: (sms) => {
+                          setOtpCodeLength(otpResponse.otp_code_length ?? 6);
                           setPendingTransfer(transfer);
                           setPendingFarmer(selectedFarmer || null);
                           setOtpMessage(sms.message || '');
@@ -456,7 +453,7 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                         setStatusMessage(
                           (current) =>
                             current ||
-                            'Distribution saved. SMS failed — fix provider settings, then use Verify Distribution to resend.'
+                            'Distribution saved. Briq OTP failed — check backend/.env, then use Verify Distribution to resend.'
                         );
                       }
                       await refreshData();
@@ -466,10 +463,11 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                       setIsSaving(false);
                     }
                   }}
-                  className="mt-4 bg-green-600 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-green-700 transition-colors"
+                  className="mt-4"
+                  disabled={isSaving}
                 >
                   {isSaving ? 'Processing...' : 'Send Verification SMS'}
-                </button>
+                </PanelPrimaryButton>
                 {statusMessage && <p className="mt-3 text-sm text-red-600">{statusMessage}</p>}
               </div>
 
@@ -528,45 +526,21 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                     {verificationList.map((record) => {
                       const isVerified = record.status === 'verified';
                       return (
-                        <div
+                        <ContentListRow
                           key={record.id}
-                          className="flex flex-col gap-4 rounded-lg border border-gray-200 p-4 sm:flex-row sm:items-center sm:justify-between"
-                        >
-                          <div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="font-semibold text-gray-900">{record.farmer}</p>
-                              {record.farmerMinistryId && (
-                                <span className="text-xs text-gray-500">
-                                  ({record.farmerMinistryId})
-                                </span>
-                              )}
-                              <span
-                                className={`px-3 py-1 rounded-full text-xs font-medium ${
-                                  isVerified
-                                    ? 'bg-green-100 text-green-700'
-                                    : 'bg-yellow-100 text-yellow-700'
-                                }`}
-                              >
-                                {isVerified ? 'Verified' : 'Pending'}
-                              </span>
-                            </div>
-                            <p className="text-sm text-gray-600">
-                              {record.bags} bags
-                              {record.batchCode ? ` • ${record.batchCode}` : ''}
-                            </p>
-                            <p className="text-xs text-gray-500">
-                              Distribution #{record.id} • {record.date}
-                            </p>
-                          </div>
-                          {!isVerified && (
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                try {
-                                  setStatusMessage('');
-                                  const otpResponse = await sendOtp(record.id);
+                          icon={ShieldCheck}
+                          tone={isVerified ? 'emerald' : 'amber'}
+                          action={
+                            !isVerified ? (
+                              <PanelOutlineButton
+                                icon={ShieldCheck}
+                                onClick={async () => {
+                                  try {
+                                    setStatusMessage('');
+                                    const otpResponse = await sendOtp(record.id);
                                   handleOtpSmsResponse(otpResponse.sms, {
                                     onDelivered: (sms) => {
+                                      setOtpCodeLength(otpResponse.otp_code_length ?? 6);
                                       setPendingTransfer(record.rawTransfer);
                                       setPendingFarmer({
                                         name: record.farmer,
@@ -576,19 +550,43 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                                       setSmsInfo(sms);
                                       setIsOtpOpen(true);
                                     },
-                                    onFailed: (message) => setStatusMessage(message),
-                                  });
-                                } catch (error) {
-                                  setStatusMessage(error.message);
-                                }
-                              }}
-                              className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700"
+                                      onFailed: (message) => setStatusMessage(message),
+                                    });
+                                  } catch (error) {
+                                    setStatusMessage(error.message);
+                                  }
+                                }}
+                              >
+                                Resend &amp; Verify OTP
+                              </PanelOutlineButton>
+                            ) : null
+                          }
+                        >
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-semibold text-gray-900">{record.farmer}</p>
+                            {record.farmerMinistryId && (
+                              <span className="text-xs text-gray-500">
+                                ({record.farmerMinistryId})
+                              </span>
+                            )}
+                            <span
+                              className={`rounded-full px-3 py-1 text-xs font-medium ${
+                                isVerified
+                                  ? 'bg-green-100 text-green-700'
+                                  : 'bg-yellow-100 text-yellow-700'
+                              }`}
                             >
-                              <ShieldCheck className="h-4 w-4" />
-                              Resend &amp; Verify OTP
-                            </button>
-                          )}
-                        </div>
+                              {isVerified ? 'Verified' : 'Pending'}
+                            </span>
+                          </div>
+                          <p className="text-sm text-gray-600">
+                            {record.bags} bags
+                            {record.batchCode ? ` • ${record.batchCode}` : ''}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            Distribution #{record.id} • {record.date}
+                          </p>
+                        </ContentListRow>
                       );
                     })}
                   </div>
@@ -679,9 +677,10 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
             }
           }}
           onResend={async () => {
-            const response = await sendOtp(pendingTransfer.id);
+            const response = await sendOtp(pendingTransfer.id, { resend: true });
             if (!handleOtpSmsResponse(response.sms, {
               onDelivered: (sms) => {
+                setOtpCodeLength(response.otp_code_length ?? 6);
                 setOtpMessage(sms.message || '');
                 setSmsInfo(sms);
               },
@@ -689,7 +688,7 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                 throw new Error(message);
               },
             })) {
-              throw new Error('SMS was not delivered');
+              throw new Error('OTP was not delivered');
             }
           }}
           farmerName={pendingFarmer?.name || 'Farmer'}
@@ -700,6 +699,7 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
             bagsGiven: pendingTransfer.quantity_bags,
             fertilizerType: pendingTransfer.batch?.fertilizer_type || 'Fertilizer',
           }}
+          otpLength={otpCodeLength}
         />
       )}
     </div>
