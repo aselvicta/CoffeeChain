@@ -279,7 +279,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
     dispatchedPageStart,
     dispatchedPageStart + pageSize
   );
-  const dispatchedPageEnd = Math.min(dispatchedPageStart + pageSize, filteredDispatchedTransfers.length);
+  const dispatchedPageEnd = Math.min(dispatchedPageStart + pageSize, dispatchedTransfers.length);
 
   useEffect(() => {
     if (dispatchedIndex >= dispatchedTransfers.length && dispatchedTransfers.length > 0) {
