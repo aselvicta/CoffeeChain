@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Package, Send, History, BarChart3, LogOut, TrendingUp, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Package, Send, History, BarChart3, LogOut, TrendingUp, ChevronLeft, ChevronRight, Search } from 'lucide-react';
 import { LineChart, Line, PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import { Logo } from './logo';
 import { NotificationBell } from './notification-bell';
@@ -25,7 +25,9 @@ export function SupplierDashboard({ userProfile, onLogout }) {
   const [dispatches, setDispatches] = useState([]);
   const [dispatchedIndex, setDispatchedIndex] = useState(0);
   const [dispatchedQuery, setDispatchedQuery] = useState('');
+  const [dispatchedSearchDraft, setDispatchedSearchDraft] = useState('');
   const [dispatchedStatusFilter, setDispatchedStatusFilter] = useState('all');
+  const [dispatchedStatusDraft, setDispatchedStatusDraft] = useState('all');
   const [dispatchedTransfers, setDispatchedTransfers] = useState([]);
   const [batches, setBatches] = useState([]);
   const [branches, setBranches] = useState([]);
@@ -284,8 +286,20 @@ export function SupplierDashboard({ userProfile, onLogout }) {
     };
 
     loadDispatchedTransfers();
-    setDispatchedIndex(0);
   }, [dispatchedQuery, dispatchedStatusFilter, userProfile?.supplierRecordId]);
+
+  const applyDispatchedFilters = () => {
+    setDispatchedQuery(dispatchedSearchDraft.trim());
+    setDispatchedStatusFilter(dispatchedStatusDraft);
+    setDispatchedIndex(0);
+  };
+
+  const handleDispatchedSearchKeyDown = (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      applyDispatchedFilters();
+    }
+  };
 
   const pageSize = 6;
   const dispatchedPageStart = dispatchedIndex;
@@ -753,19 +767,30 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 mb-5">
                   <div>
                     <label className="mb-1 block text-sm font-medium text-gray-700">Search</label>
-                    <input
-                      type="text"
-                      value={dispatchedQuery}
-                      onChange={(e) => setDispatchedQuery(e.target.value)}
-                      placeholder="Search batch, receiver, warehouse..."
-                      className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:border-transparent focus:ring-2 focus:ring-green-500"
-                    />
+                    <div className="flex items-stretch gap-2">
+                      <input
+                        type="text"
+                        value={dispatchedSearchDraft}
+                        onChange={(e) => setDispatchedSearchDraft(e.target.value)}
+                        onKeyDown={handleDispatchedSearchKeyDown}
+                        placeholder="Search batch, receiver, warehouse..."
+                        className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:border-transparent focus:ring-2 focus:ring-green-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={applyDispatchedFilters}
+                        className="inline-flex items-center justify-center rounded-lg bg-green-700 px-4 py-3 text-white shadow-sm hover:bg-green-800"
+                        aria-label="Apply dispatched search and filter"
+                      >
+                        <Search className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
                   <div>
                     <label className="mb-1 block text-sm font-medium text-gray-700">Filter</label>
                     <select
-                      value={dispatchedStatusFilter}
-                      onChange={(e) => setDispatchedStatusFilter(e.target.value)}
+                      value={dispatchedStatusDraft}
+                      onChange={(e) => setDispatchedStatusDraft(e.target.value)}
                       className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:border-transparent focus:ring-2 focus:ring-green-500"
                     >
                         {dispatchedStatusOptions.map((option) => (
@@ -846,7 +871,12 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                     </div>
                   </div>
                 ) : (
-                  <p className="text-sm text-gray-500">No dispatched batches match your search or filter.</p>
+                  <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center">
+                    <p className="text-lg font-semibold text-gray-900">No dispatched batches found</p>
+                    <p className="mt-2 text-sm text-gray-600">
+                      Try a different search term or status, then apply again with the search icon.
+                    </p>
+                  </div>
                 )}
               </div>
             </div>
