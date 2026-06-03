@@ -16,7 +16,7 @@ const DASHBOARD_CONFIG = {
   },
   supplier: {
     defaultTab: 'overview',
-    validTabs: ['overview', 'dispatch', 'dispatched', 'warehouse', 'inventory', 'analytics', 'history'],
+    validTabs: ['overview', 'dispatch', 'dispatched', 'warehouse', 'inventory', 'issues', 'analytics', 'history'],
   },
   retailer: {
     defaultTab: 'overview',
