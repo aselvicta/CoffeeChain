@@ -4,7 +4,7 @@ from django.conf import settings
 from django.contrib.auth.models import Group, User
 from django.core.mail import send_mail
 from django.db import transaction
-from django.db.models import F, Sum
+from django.db.models import F, Q, Sum
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -687,6 +687,35 @@ class TransferViewSet(viewsets.ModelViewSet):
     )
     serializer_class = TransferSerializer
     permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        params = self.request.query_params
+
+        supplier_id = (params.get("supplier_id") or params.get("from_supplier_id") or "").strip()
+        if supplier_id:
+            queryset = queryset.filter(from_supplier_id=supplier_id)
+
+        transfer_type = (params.get("transfer_type") or "").strip()
+        if transfer_type:
+            queryset = queryset.filter(transfer_type=transfer_type)
+
+        status_filter = (params.get("status") or "").strip()
+        if status_filter and status_filter.lower() != "all":
+            queryset = queryset.filter(status=status_filter)
+
+        search = (params.get("search") or params.get("q") or "").strip()
+        if search:
+            queryset = queryset.filter(
+                Q(batch__batch_code__icontains=search)
+                | Q(batch__fertilizer_type__icontains=search)
+                | Q(to_branch__name__icontains=search)
+                | Q(receiver_name__icontains=search)
+                | Q(receiver_organisation__icontains=search)
+                | Q(warehouse__name__icontains=search)
+            )
+
+        return queryset
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
