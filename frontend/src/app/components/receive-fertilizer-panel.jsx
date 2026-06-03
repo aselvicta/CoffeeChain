@@ -280,6 +280,7 @@ export function ReceiveFertilizerPanel({ inboundTransfers, onRefresh, highlightT
             <div className="flex items-center gap-2">
               <PanelOutlineButton
                 icon={issueBusy ? Loader2 : AlertCircle}
+                type="submit"
                 disabled={issueBusy}
                 className={issueBusy ? '[&_svg]:animate-spin' : ''}
               >
@@ -287,6 +288,7 @@ export function ReceiveFertilizerPanel({ inboundTransfers, onRefresh, highlightT
               </PanelOutlineButton>
               <PanelOutlineButton
                 icon={AlertCircle}
+                type="button"
                 onClick={() => setSelectedTransfer(null)}
                 disabled={issueBusy}
               >
