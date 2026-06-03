@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
+  FileWarning,
   Package,
   Truck,
   CheckCircle2,
@@ -8,7 +9,7 @@ import {
   Calendar,
   Inbox,
 } from 'lucide-react';
-import { receiveTransfer } from '../api/client';
+import { createIssue, receiveTransfer } from '../api/client';
 import { ContentListRow, PanelOutlineButton } from './ui/dashboard-ui';
 
 const STATUS_BADGES = {
@@ -28,8 +29,16 @@ const STATUS_BADGES = {
 
 export function ReceiveFertilizerPanel({ inboundTransfers, onRefresh, highlightTransferId = '' }) {
   const [busyId, setBusyId] = useState(null);
+  const [issueBusy, setIssueBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [selectedTransfer, setSelectedTransfer] = useState(null);
+  const [issueForm, setIssueForm] = useState({
+    issueType: 'DISCREPANCY',
+    summary: '',
+    description: '',
+    evidenceFile: null,
+  });
 
   const pending = useMemo(
     () => inboundTransfers.filter((transfer) => transfer.status === 'DISPATCHED'),
@@ -54,6 +63,51 @@ export function ReceiveFertilizerPanel({ inboundTransfers, onRefresh, highlightT
       setErrorMessage(error.message || 'Failed to confirm receipt.');
     } finally {
       setBusyId(null);
+    }
+  };
+
+  const handleOpenDetails = (transfer) => {
+    setSelectedTransfer(transfer);
+    setIssueForm({
+      issueType: 'DISCREPANCY',
+      summary: '',
+      description: '',
+      evidenceFile: null,
+    });
+    setErrorMessage('');
+  };
+
+  const handleIssueSubmit = async (event) => {
+    event.preventDefault();
+    if (!selectedTransfer) {
+      return;
+    }
+    const summary = issueForm.summary.trim();
+    const description = issueForm.description.trim();
+    if (!summary || !description) {
+      setErrorMessage('Please provide both summary and detailed description for the issue.');
+      return;
+    }
+
+    setIssueBusy(true);
+    setErrorMessage('');
+    setSuccessMessage('');
+    try {
+      await createIssue({
+        transferId: selectedTransfer.id,
+        issueType: issueForm.issueType,
+        summary,
+        description,
+        evidenceFile: issueForm.evidenceFile,
+      });
+      setSuccessMessage(`Issue submitted for ${selectedTransfer.batchCode || `Transfer #${selectedTransfer.id}`}.`);
+      setSelectedTransfer(null);
+      setIssueForm({ issueType: 'DISCREPANCY', summary: '', description: '', evidenceFile: null });
+      await onRefresh?.();
+    } catch (error) {
+      setErrorMessage(error.message || 'Failed to submit issue.');
+    } finally {
+      setIssueBusy(false);
     }
   };
 
@@ -107,14 +161,22 @@ export function ReceiveFertilizerPanel({ inboundTransfers, onRefresh, highlightT
                   tone="amber"
                   highlighted={String(highlightTransferId) === String(transfer.id)}
                   action={
-                    <PanelOutlineButton
-                      icon={isBusy ? Loader2 : CheckCircle2}
-                      onClick={() => handleReceive(transfer)}
-                      disabled={isBusy}
-                      className={isBusy ? '[&_svg]:animate-spin' : ''}
-                    >
-                      {isBusy ? 'Confirming' : 'Confirm Receipt'}
-                    </PanelOutlineButton>
+                    <div className="flex items-center gap-2">
+                      <PanelOutlineButton
+                        icon={FileWarning}
+                        onClick={() => handleOpenDetails(transfer)}
+                      >
+                        View details
+                      </PanelOutlineButton>
+                      <PanelOutlineButton
+                        icon={isBusy ? Loader2 : CheckCircle2}
+                        onClick={() => handleReceive(transfer)}
+                        disabled={isBusy}
+                        className={isBusy ? '[&_svg]:animate-spin' : ''}
+                      >
+                        {isBusy ? 'Confirming' : 'Confirm Receipt'}
+                      </PanelOutlineButton>
+                    </div>
                   }
                 >
                   <div className="flex flex-wrap items-center gap-2">
@@ -147,6 +209,93 @@ export function ReceiveFertilizerPanel({ inboundTransfers, onRefresh, highlightT
           </div>
         )}
       </div>
+
+      {selectedTransfer && (
+        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+          <div className="mb-4">
+            <h3 className="text-lg font-bold text-gray-900">Received dispatch details</h3>
+            <p className="text-sm text-gray-600">
+              Batch {selectedTransfer.batchCode || `Transfer #${selectedTransfer.id}`} from {selectedTransfer.source}
+            </p>
+            <p className="text-sm text-gray-600">
+              {selectedTransfer.bags} bags
+              {selectedTransfer.fertilizerType ? ` • ${selectedTransfer.fertilizerType}` : ''} • {selectedTransfer.date}
+            </p>
+          </div>
+
+          <form className="space-y-4" onSubmit={handleIssueSubmit}>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <label className="text-sm text-gray-700">
+                <span className="mb-1 block font-medium">Issue type</span>
+                <select
+                  value={issueForm.issueType}
+                  onChange={(event) =>
+                    setIssueForm((current) => ({ ...current, issueType: event.target.value }))
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:ring-2 focus:ring-green-500"
+                >
+                  <option value="DISCREPANCY">Discrepancy</option>
+                  <option value="COMPLAINT">Complaint</option>
+                </select>
+              </label>
+              <label className="text-sm text-gray-700">
+                <span className="mb-1 block font-medium">Evidence (optional)</span>
+                <input
+                  type="file"
+                  accept="image/*,video/*,.pdf,.doc,.docx,.txt,.csv"
+                  onChange={(event) =>
+                    setIssueForm((current) => ({ ...current, evidenceFile: event.target.files?.[0] || null }))
+                  }
+                  className="w-full text-sm text-gray-600"
+                />
+              </label>
+            </div>
+
+            <label className="text-sm text-gray-700">
+              <span className="mb-1 block font-medium">Summary</span>
+              <input
+                type="text"
+                value={issueForm.summary}
+                onChange={(event) =>
+                  setIssueForm((current) => ({ ...current, summary: event.target.value }))
+                }
+                placeholder="Short issue summary"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:ring-2 focus:ring-green-500"
+              />
+            </label>
+
+            <label className="text-sm text-gray-700">
+              <span className="mb-1 block font-medium">Description</span>
+              <textarea
+                rows={4}
+                value={issueForm.description}
+                onChange={(event) =>
+                  setIssueForm((current) => ({ ...current, description: event.target.value }))
+                }
+                placeholder="Describe the complaint/discrepancy and expected resolution"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:ring-2 focus:ring-green-500"
+              />
+            </label>
+
+            <div className="flex items-center gap-2">
+              <PanelOutlineButton
+                icon={issueBusy ? Loader2 : AlertCircle}
+                disabled={issueBusy}
+                className={issueBusy ? '[&_svg]:animate-spin' : ''}
+              >
+                {issueBusy ? 'Submitting issue' : 'Submit issue'}
+              </PanelOutlineButton>
+              <PanelOutlineButton
+                icon={AlertCircle}
+                onClick={() => setSelectedTransfer(null)}
+                disabled={issueBusy}
+              >
+                Close
+              </PanelOutlineButton>
+            </div>
+          </form>
+        </div>
+      )}
 
       <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
         <h3 className="mb-4 text-lg font-bold text-gray-900">Receipt History</h3>
@@ -181,7 +330,11 @@ export function ReceiveFertilizerPanel({ inboundTransfers, onRefresh, highlightT
                   const badge =
                     STATUS_BADGES[transfer.status] || STATUS_BADGES.RECEIVED;
                   return (
-                    <tr key={transfer.id} className="hover:bg-gray-50">
+                    <tr
+                      key={transfer.id}
+                      className="cursor-pointer hover:bg-gray-50"
+                      onClick={() => handleOpenDetails(transfer)}
+                    >
                       <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-gray-900">
                         {transfer.batchCode || `#${transfer.id}`}
                       </td>

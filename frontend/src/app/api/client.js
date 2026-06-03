@@ -343,6 +343,52 @@ export async function uploadProof(id, file, meta = {}, retryOnUnauthorized = tru
   return response.json();
 }
 
+export function fetchIssues() {
+  return apiFetch('/api/issues/');
+}
+
+export async function createIssue(payload, retryOnUnauthorized = true) {
+  const token = getAccessToken();
+  const formData = new FormData();
+  formData.append('transfer_id', String(payload.transferId));
+  formData.append('issue_type', payload.issueType);
+  formData.append('summary', payload.summary);
+  formData.append('description', payload.description);
+  if (payload.evidenceFile) {
+    formData.append('evidence_file', payload.evidenceFile);
+  }
+
+  const response = await fetch(`${API_BASE}/api/issues/`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
+  });
+  if (response.status === 401 && retryOnUnauthorized) {
+    const refreshedToken = await refreshAccessToken();
+    if (refreshedToken) {
+      return createIssue(payload, false);
+    }
+    clearSession();
+    notifySessionExpired();
+    throw new AuthError('Your session has expired. Please sign in again.', 401);
+  }
+
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({}));
+    const detail = result?.detail || result?.description?.[0] || result?.summary?.[0];
+    throw new Error(detail || 'Failed to create issue');
+  }
+
+  return response.json();
+}
+
+export function resolveIssue(id, resolutionNotes = '') {
+  return apiFetch(`/api/issues/${id}/resolve/`, {
+    method: 'POST',
+    body: JSON.stringify({ resolution_notes: resolutionNotes }),
+  });
+}
+
 export function fetchAuditReport() {
   return apiFetch('/api/reports/audit/');
 }

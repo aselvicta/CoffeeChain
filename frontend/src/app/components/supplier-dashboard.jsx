@@ -1,18 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { Package, Send, History, BarChart3, LogOut, TrendingUp, ChevronLeft, ChevronRight, Search } from 'lucide-react';
+import { Package, Send, History, BarChart3, LogOut, TrendingUp, ChevronLeft, ChevronRight, Search, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { LineChart, Line, PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import { Logo } from './logo';
 import { NotificationBell } from './notification-bell';
 import { useNotifications } from '../hooks/use-notifications';
 import { WarehouseModal } from './warehouse-modal';
-import { createTransfer, createWarehouse, deleteWarehouse, fetchBatches, fetchBranches, fetchTransfers, fetchWarehouseCatalog, fetchWarehouses } from '../api/client';
+import { createTransfer, createWarehouse, deleteWarehouse, fetchBatches, fetchBranches, fetchIssues, fetchTransfers, fetchWarehouseCatalog, fetchWarehouses, resolveIssue } from '../api/client';
 import { QuickActionCard, PanelPrimaryButton } from './ui/dashboard-ui';
 import { buildDashboardPath, resolveDashboardTab } from '../utils/dashboard-routing';
 
 export function SupplierDashboard({ userProfile, onLogout }) {
   const dashboardRole = 'supplier';
-  const dashboardTabs = ['overview', 'dispatch', 'dispatched', 'warehouse', 'inventory', 'analytics', 'history'];
+  const dashboardTabs = ['overview', 'dispatch', 'dispatched', 'warehouse', 'inventory', 'issues', 'analytics', 'history'];
   function createDispatchLineItem() {
     return {
       id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -38,6 +38,8 @@ export function SupplierDashboard({ userProfile, onLogout }) {
   const [warehouseCatalog, setWarehouseCatalog] = useState([]);
   const [inventory, setInventory] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
+  const [issues, setIssues] = useState([]);
+  const [resolutionByIssueId, setResolutionByIssueId] = useState({});
   const [isWarehouseModalOpen, setIsWarehouseModalOpen] = useState(false);
   const [selectedWarehouse, setSelectedWarehouse] = useState(null);
   const [newWarehouse, setNewWarehouse] = useState({ name: '', section: '', capacity: '' });
@@ -108,12 +110,13 @@ export function SupplierDashboard({ userProfile, onLogout }) {
 
   const refreshData = async () => {
     try {
-      const [branchData, batchData, transferData, warehouseData, catalogData] = await Promise.all([
+      const [branchData, batchData, transferData, warehouseData, catalogData, issueData] = await Promise.all([
         fetchBranches(),
         fetchBatches(),
         fetchTransfers(),
         fetchWarehouses(),
         fetchWarehouseCatalog(),
+        fetchIssues(),
       ]);
       setBranches(branchData);
       setBatches(batchData);
@@ -186,6 +189,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
         };
       });
       setInventory(batchInventory);
+      setIssues(issueData);
       await refreshNotifications();
     } catch (error) {
       setStatusMessage(error.message);
@@ -468,6 +472,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
             { id: 'dispatched', label: 'Dispatched', icon: History },
             { id: 'warehouse', label: 'Warehouse', icon: Package },
             { id: 'inventory', label: 'Inventory', icon: Package },
+            { id: 'issues', label: 'Issues', icon: AlertCircle },
             { id: 'analytics', label: 'Analytics', icon: TrendingUp },
             { id: 'history', label: 'History', icon: History },
           ].map((item) => (
@@ -1096,6 +1101,100 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {activeTab === 'issues' && (
+            <div className="space-y-4">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <h2 className="text-xl font-bold text-gray-900 mb-1">Issues</h2>
+                <p className="text-sm text-gray-600">
+                  Review discrepancies and complaints reported by receiving branches.
+                </p>
+              </div>
+
+              {issues.length === 0 ? (
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 text-sm text-gray-500">
+                  No issues reported yet.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {issues.map((issue) => {
+                    const isResolved = issue.status === 'RESOLVED';
+                    const transfer = issue.transfer || {};
+                    const batchCode = transfer.batch?.batch_code || `Transfer #${transfer.id || issue.transfer_id}`;
+                    const transferDestination = transfer.to_branch?.name || 'Unknown destination';
+                    const resolutionNotes = resolutionByIssueId[issue.id] || '';
+
+                    return (
+                      <div key={issue.id} className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 space-y-3">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm text-gray-500">{issue.issue_type === 'COMPLAINT' ? 'Complaint' : 'Discrepancy'}</p>
+                            <h3 className="text-base font-semibold text-gray-900">{issue.summary}</h3>
+                            <p className="text-sm text-gray-600 mt-1">{issue.description}</p>
+                          </div>
+                          <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${isResolved ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                            {isResolved ? 'Resolved' : 'Outstanding'}
+                          </span>
+                        </div>
+
+                        <div className="text-xs text-gray-500 flex flex-wrap gap-3">
+                          <span>Batch: {batchCode}</span>
+                          <span>Destination: {transferDestination}</span>
+                          <span>Reported: {(issue.created_at || '').slice(0, 10) || '—'}</span>
+                        </div>
+
+                        {issue.evidence_file_url && (
+                          <a
+                            href={issue.evidence_file_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex text-sm font-medium text-green-700 hover:underline"
+                          >
+                            View evidence
+                          </a>
+                        )}
+
+                        {!isResolved ? (
+                          <div className="space-y-2">
+                            <textarea
+                              rows={3}
+                              value={resolutionNotes}
+                              onChange={(event) =>
+                                setResolutionByIssueId((current) => ({
+                                  ...current,
+                                  [issue.id]: event.target.value,
+                                }))
+                              }
+                              placeholder="Resolution notes (optional)"
+                              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500"
+                            />
+                            <PanelPrimaryButton
+                              icon={CheckCircle2}
+                              onClick={async () => {
+                                setStatusMessage('');
+                                try {
+                                  await resolveIssue(issue.id, resolutionNotes.trim());
+                                  await refreshData();
+                                } catch (error) {
+                                  setStatusMessage(error.message || 'Failed to resolve issue.');
+                                }
+                              }}
+                            >
+                              Mark as resolved
+                            </PanelPrimaryButton>
+                          </div>
+                        ) : (
+                          issue.resolution_notes && (
+                            <p className="text-sm text-gray-600">Resolution: {issue.resolution_notes}</p>
+                          )
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 

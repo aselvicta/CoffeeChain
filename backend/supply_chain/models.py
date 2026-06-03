@@ -215,6 +215,52 @@ class DeliveryProof(models.Model):
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
 
+class Issue(models.Model):
+    OUTSTANDING = "OUTSTANDING"
+    RESOLVED = "RESOLVED"
+    STATUS_CHOICES = [
+        (OUTSTANDING, "Outstanding"),
+        (RESOLVED, "Resolved"),
+    ]
+
+    COMPLAINT = "COMPLAINT"
+    DISCREPANCY = "DISCREPANCY"
+    ISSUE_TYPES = [
+        (COMPLAINT, "Complaint"),
+        (DISCREPANCY, "Discrepancy"),
+    ]
+
+    transfer = models.ForeignKey(
+        Transfer, on_delete=models.CASCADE, related_name="issues"
+    )
+    issue_type = models.CharField(max_length=20, choices=ISSUE_TYPES)
+    summary = models.CharField(max_length=200)
+    description = models.TextField()
+    evidence_file = models.FileField(upload_to="issues/", blank=True, null=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=OUTSTANDING)
+    resolution_notes = models.TextField(blank=True)
+    reporter = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reported_issues",
+    )
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="resolved_issues",
+    )
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.get_issue_type_display()} on {self.transfer_id}"
+
+
 class OTPVerification(models.Model):
     SENT = "SENT"
     VERIFIED = "VERIFIED"

@@ -7,6 +7,7 @@ from .models import (
     DeliveryProof,
     Farmer,
     FertilizerBatch,
+    Issue,
     OTPVerification,
     Supplier,
     Transfer,
@@ -17,6 +18,7 @@ admin.site.register(Supplier)
 admin.site.register(Branch)
 admin.site.register(Farmer)
 admin.site.register(FertilizerBatch)
+admin.site.register(Issue)
 admin.site.register(Transfer)
 admin.site.register(DeliveryProof)
 admin.site.register(OTPVerification)
