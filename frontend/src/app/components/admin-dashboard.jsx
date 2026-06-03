@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { Logo } from './logo';
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { createUser, fetchAuditReport, fetchBranches, fetchSuppliers, fetchTransfers, fetchUsers } from '../api/client';
+import { createUser, fetchAuditReport, fetchBatches, fetchBranches, fetchSuppliers, fetchTransfers, fetchUsers } from '../api/client';
 import { NotificationBell } from './notification-bell';
 import { useNotifications } from '../hooks/use-notifications';
 import { REGION_LIST, TANZANIA_REGIONS } from '../data/tanzania-locations';
@@ -79,6 +79,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
   const [cooperatives, setCooperatives] = useState([]);
   const [users, setUsers] = useState([]);
   const [batches, setBatches] = useState([]);
+  const [transferData, setTransferData] = useState([]);
   const [showUserForm, setShowUserForm] = useState(false);
   const [userQuery, setUserQuery] = useState('');
   const [userRoleFilter, setUserRoleFilter] = useState('all');
@@ -112,7 +113,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [supplierData, branchData, auditData, transferData, userData, batchData] = await Promise.all([
+        const [supplierData, branchData, auditData, transferRecords, userData, batchRecords] = await Promise.all([
           fetchSuppliers(),
           fetchBranches(),
           fetchAuditReport(),
@@ -120,6 +121,8 @@ export function AdminDashboard({ userProfile, onLogout }) {
           fetchUsers(),
           fetchBatches(),
         ]);
+        setTransferData(transferRecords);
+        setBatches(batchRecords);
         setSuppliers(
           supplierData.map((supplier) => ({
             id: `SUP-${supplier.id.toString().padStart(3, '0')}`,
@@ -127,7 +130,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
             region: supplier.region || 'Region',
             phone: supplier.contact_phone || 'N/A',
             status: 'registered',
-            lastDispatch: transferData.find((transfer) => transfer.from_supplier?.id === supplier.id)?.created_at?.slice(0, 10) || 'N/A',
+            lastDispatch: transferRecords.find((transfer) => transfer.from_supplier?.id === supplier.id)?.created_at?.slice(0, 10) || 'N/A',
           }))
         );
         setRetailers(
@@ -137,7 +140,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
               id: `RET-${branch.id.toString().padStart(3, '0')}`,
               name: branch.name,
               district: branch.district || 'District',
-              bagsAvailable: transferData
+              bagsAvailable: transferRecords
                 .filter((transfer) => transfer.to_branch?.id === branch.id)
                 .reduce((sum, transfer) => sum + transfer.quantity_bags, 0),
               status: 'registered',
