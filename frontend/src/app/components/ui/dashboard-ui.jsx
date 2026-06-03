@@ -49,9 +49,11 @@ export function QuickActionCard({
       onClick={onClick}
       className={`flex w-full items-center gap-3 rounded-xl p-4 text-left transition-colors ${palette.card} ${className}`}
     >
-      <div className={`rounded-lg p-2.5 ${palette.iconWrap}`}>
-        <Icon className={`h-5 w-5 ${palette.icon}`} />
-      </div>
+      {Icon && (
+        <div className={`rounded-lg p-2.5 ${palette.iconWrap}`}>
+          <Icon className={`h-5 w-5 ${palette.icon}`} />
+        </div>
+      )}
       <div>
         <p className="font-semibold text-gray-900">{title}</p>
         {description && <p className="text-sm text-gray-600">{description}</p>}

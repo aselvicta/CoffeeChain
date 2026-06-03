@@ -340,6 +340,7 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                     onClick={() => goToTab('fertilizer-in')}
                   />
                   <QuickActionCard
+                    icon={Users}
                     tone="blue"
                     title="Farmer Registry"
                     description="Register and view farmers"
