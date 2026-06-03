@@ -225,6 +225,20 @@ export function SupplierDashboard({ userProfile, onLogout }) {
 
   const recentDispatches = useMemo(() => dispatches.slice(0, 8), [dispatches]);
 
+  const dispatchedStatusOptions = useMemo(() => {
+    const counts = dispatchedTransfers.reduce((acc, dispatch) => {
+      acc[dispatch.rawStatus] = (acc[dispatch.rawStatus] || 0) + 1;
+      return acc;
+    }, {});
+
+    return [
+      { value: 'all', label: 'All statuses', count: dispatchedTransfers.length },
+      { value: 'DISPATCHED', label: 'Dispatched', count: counts.DISPATCHED || 0 },
+      { value: 'RECEIVED', label: 'Received', count: counts.RECEIVED || 0 },
+      { value: 'VERIFIED', label: 'Verified', count: counts.VERIFIED || 0 },
+    ];
+  }, [dispatchedTransfers]);
+
   useEffect(() => {
     const loadDispatchedTransfers = async () => {
       if (!userProfile?.supplierRecordId) return;
@@ -754,16 +768,17 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                       onChange={(e) => setDispatchedStatusFilter(e.target.value)}
                       className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:border-transparent focus:ring-2 focus:ring-green-500"
                     >
-                      <option value="all">All statuses</option>
-                      <option value="DISPATCHED">Dispatched</option>
-                      <option value="RECEIVED">Received</option>
-                      <option value="VERIFIED">Verified</option>
+                        {dispatchedStatusOptions.map((option) => (
+                          <option key={option.value} value={option.value} disabled={option.value !== 'all' && option.count === 0}>
+                            {option.label} ({option.count})
+                          </option>
+                        ))}
                     </select>
                   </div>
                   <div className="rounded-lg border border-gray-200 p-4 flex items-center justify-between">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Results</p>
-                      <p className="text-sm text-gray-600">Showing up to 3 dispatches at a time</p>
+                        <p className="text-sm text-gray-600">Showing up to 6 dispatches at a time</p>
                     </div>
                     <p className="text-lg font-bold text-gray-900">{dispatchedTransfers.length}</p>
                   </div>
