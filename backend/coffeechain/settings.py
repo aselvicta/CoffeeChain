@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(BASE_DIR / ".env")
+load_dotenv(BASE_DIR / ".env", override=True)
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "replace-me-in-production")
 DEBUG = os.getenv("DJANGO_DEBUG", "true").lower() == "true"
@@ -23,6 +23,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "rest_framework",
     "rest_framework_simplejwt",
+    "django_extensions",
     "supply_chain",
 ]
 
@@ -114,7 +115,9 @@ CORS_ALLOWED_ORIGINS = [
     if origin.strip()
 ]
 
-OTP_CODE_LENGTH = int(os.getenv("OTP_CODE_LENGTH", "4"))
+# Farmer OTP — Briq Karibu only (https://docs.briq.tz/)
+SMS_PROVIDER = os.getenv("SMS_PROVIDER", "briq").lower()
+OTP_CODE_LENGTH = int(os.getenv("OTP_CODE_LENGTH", "6"))
 OTP_EXPIRY_MINUTES = int(os.getenv("OTP_EXPIRY_MINUTES", "10"))
 
 IPFS_GATEWAY_URL = os.getenv("IPFS_GATEWAY_URL", "https://ipfs.io/ipfs/")
@@ -123,13 +126,16 @@ POLYGON_RPC_URL = os.getenv("POLYGON_RPC_URL", "")
 POLYGON_CONTRACT_ADDRESS = os.getenv("POLYGON_CONTRACT_ADDRESS", "")
 POLYGON_PRIVATE_KEY = os.getenv("POLYGON_PRIVATE_KEY", "")
 
-SMS_PROVIDER = os.getenv("SMS_PROVIDER", "simulated")
-AT_USERNAME = os.getenv("AT_USERNAME", "")
-AT_API_KEY = os.getenv("AT_API_KEY", "")
-AT_SENDER_ID = os.getenv("AT_SENDER_ID", "")
-AT_BASE_URL = os.getenv(
-    "AT_BASE_URL", "https://api.africastalking.com/version1/messaging"
-)
-TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
-TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
-TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER", "")
+BRIQ_API_KEY = os.getenv("BRIQ_API_KEY", "")
+BRIQ_APP_KEY = os.getenv("BRIQ_APP_KEY", "")
+BRIQ_BASE_URL = os.getenv("BRIQ_BASE_URL", "https://karibu.briq.tz")
+BRIQ_OTP_SENDER_ID = os.getenv("BRIQ_OTP_SENDER_ID", "")
+BRIQ_OTP_LANGUAGE = os.getenv("BRIQ_OTP_LANGUAGE", "en")
+BRIQ_OTP_MESSAGE_TEMPLATE = os.getenv("BRIQ_OTP_MESSAGE_TEMPLATE", "")
+BRIQ_OTP_PRIMARY_METHOD = os.getenv("BRIQ_OTP_PRIMARY_METHOD", "sms")  # sms | call | whatsapp
+BRIQ_OTP_RESEND_METHOD = os.getenv("BRIQ_OTP_RESEND_METHOD", "call")  # alternate channel on resend
+BRIQ_OTP_LOCAL_FALLBACK = os.getenv("BRIQ_OTP_LOCAL_FALLBACK", "false").lower() == "true"
+BRIQ_REQUEST_TIMEOUT = int(os.getenv("BRIQ_REQUEST_TIMEOUT", "45"))
+
+# Retailer POS: discount for buyers verified against the Ministry registry
+RETAILER_MINISTRY_DISCOUNT_PERCENT = int(os.getenv("RETAILER_MINISTRY_DISCOUNT_PERCENT", "10"))

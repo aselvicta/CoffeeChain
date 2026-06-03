@@ -9,6 +9,7 @@ import {
   Inbox,
 } from 'lucide-react';
 import { receiveTransfer } from '../api/client';
+import { ContentListRow, PanelOutlineButton } from './ui/dashboard-ui';
 
 const STATUS_BADGES = {
   DISPATCHED: {
@@ -100,64 +101,47 @@ export function ReceiveFertilizerPanel({ inboundTransfers, onRefresh, highlightT
               const badge = STATUS_BADGES[transfer.status] || STATUS_BADGES.DISPATCHED;
               const isBusy = busyId === transfer.id;
               return (
-                <div
+                <ContentListRow
                   key={transfer.id}
-                  className={`flex flex-col gap-4 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between ${
-                    String(highlightTransferId) === String(transfer.id)
-                      ? 'border-emerald-300 bg-emerald-50/70 shadow-sm'
-                      : 'border-gray-200 bg-gradient-to-r from-white to-amber-50/30'
-                  }`}
+                  icon={Package}
+                  tone="amber"
+                  highlighted={String(highlightTransferId) === String(transfer.id)}
+                  action={
+                    <PanelOutlineButton
+                      icon={isBusy ? Loader2 : CheckCircle2}
+                      onClick={() => handleReceive(transfer)}
+                      disabled={isBusy}
+                      className={isBusy ? '[&_svg]:animate-spin' : ''}
+                    >
+                      {isBusy ? 'Confirming' : 'Confirm Receipt'}
+                    </PanelOutlineButton>
+                  }
                 >
-                  <div className="flex items-start gap-4">
-                    <div className="rounded-lg bg-amber-100 p-3">
-                      <Package className="h-5 w-5 text-amber-700" />
-                    </div>
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="font-semibold text-gray-900">
-                          {transfer.batchCode || `Transfer #${transfer.id}`}
-                        </p>
-                        <span
-                          className={`rounded-full border px-2 py-0.5 text-xs font-medium ${badge.classes}`}
-                        >
-                          {badge.label}
-                        </span>
-                      </div>
-                      <p className="text-sm text-gray-600">
-                        {transfer.bags} bags
-                        {transfer.fertilizerType ? ` • ${transfer.fertilizerType}` : ''}
-                      </p>
-                      <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-gray-500">
-                        <span className="inline-flex items-center gap-1">
-                          <Truck className="h-3 w-3" />
-                          From {transfer.source}
-                        </span>
-                        <span className="inline-flex items-center gap-1">
-                          <Calendar className="h-3 w-3" />
-                          {transfer.date}
-                        </span>
-                      </div>
-                    </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-semibold text-gray-900">
+                      {transfer.batchCode || `Transfer #${transfer.id}`}
+                    </p>
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-xs font-medium ${badge.classes}`}
+                    >
+                      {badge.label}
+                    </span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => handleReceive(transfer)}
-                    disabled={isBusy}
-                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {isBusy ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Confirming
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle2 className="h-4 w-4" />
-                        Confirm Receipt
-                      </>
-                    )}
-                  </button>
-                </div>
+                  <p className="text-sm text-gray-600">
+                    {transfer.bags} bags
+                    {transfer.fertilizerType ? ` • ${transfer.fertilizerType}` : ''}
+                  </p>
+                  <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-gray-500">
+                    <span className="inline-flex items-center gap-1">
+                      <Truck className="h-3 w-3" />
+                      From {transfer.source}
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      <Calendar className="h-3 w-3" />
+                      {transfer.date}
+                    </span>
+                  </div>
+                </ContentListRow>
               );
             })}
           </div>

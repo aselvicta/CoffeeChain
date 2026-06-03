@@ -1,3 +1,5 @@
+import re
+
 from django.conf import settings
 from django.contrib.auth.models import Group, User
 from django.core.mail import send_mail
@@ -25,6 +27,7 @@ from .models import (
     Transfer,
 )
 from .permissions import (
+    BranchStaffOrAdmin,
     CooperativeOrAdmin,
     IsAdmin,
     IsCooperative,
@@ -52,9 +55,17 @@ from .serializers import (
 from .services.blockchain import anchor_to_polygon, build_hash
 from .services.ipfs import store_file, store_json
 from .services.ministry_of_agriculture import fetch_farmer
-from .services.otp import generate_code, is_expired, send_sms
+from .services.notifications import (
+    notify_for_farmer_registered,
+    notify_for_otp_sent,
+    notify_for_otp_verified,
+    notify_for_transfer_created,
+    notify_for_transfer_received,
+)
+from .services.farmer_otp import issue_distribution_otp, verify_farmer_otp
 
 import logging
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -347,6 +358,8 @@ class FarmerViewSet(viewsets.ModelViewSet):
             return [IsAuthenticated()]
         if self.action == "register":
             return [IsAuthenticated(), CooperativeOrAdmin()]
+        if self.action == "resolve_buyer":
+            return [IsAuthenticated(), IsRetailer()]
         return [IsAdmin()]
 
     def get_queryset(self):
@@ -360,6 +373,20 @@ class FarmerViewSet(viewsets.ModelViewSet):
             if branch:
                 return qs.filter(cooperative=branch)
             return qs.none()
+        if role == "retailer":
+            branch = Branch.objects.filter(user=user, branch_type=Branch.RETAILER).first()
+            if not branch:
+                return qs.none()
+            sold_ids = (
+                Transfer.objects.filter(
+                    from_branch=branch,
+                    transfer_type=Transfer.BRANCH_TO_FARMER,
+                    farmer_id__isnull=False,
+                )
+                .values_list("farmer_id", flat=True)
+                .distinct()
+            )
+            return qs.filter(id__in=sold_ids)
         return qs
 
     @action(detail=False, methods=["get"])
@@ -404,7 +431,106 @@ class FarmerViewSet(viewsets.ModelViewSet):
                     if existing and existing.cooperative
                     else None
                 ),
+                "discount_eligible": True,
+                "discount_percent": getattr(
+                    settings, "RETAILER_MINISTRY_DISCOUNT_PERCENT", 10
+                ),
             }
+        )
+
+    @action(detail=False, methods=["post"])
+    def resolve_buyer(self, request):
+        """Resolve a buyer at retailer point-of-sale without AMCOS registration.
+
+        - Ministry ID: match registry, eligible for subsidy discount.
+        - Walk-in: name + phone only, no Ministry ID, no discount.
+        """
+        ministry_id = (request.data.get("ministry_id") or "").strip()
+        walk_in_name = (request.data.get("name") or "").strip()
+        walk_in_phone = (request.data.get("phone_number") or "").strip()
+
+        retailer_branch = Branch.objects.filter(
+            user=request.user, branch_type=Branch.RETAILER
+        ).first()
+        if not retailer_branch:
+            return Response(
+                {"detail": "No retailer branch is assigned to this account."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        discount_rate = getattr(settings, "RETAILER_MINISTRY_DISCOUNT_PERCENT", 10)
+
+        if ministry_id:
+            record = fetch_farmer(ministry_id)
+            if not record:
+                return Response(
+                    {
+                        "detail": (
+                            f"No farmer found in the Ministry registry with ID "
+                            f"{ministry_id}."
+                        )
+                    },
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            coop_branch = None
+            if record.cooperative_name:
+                coop_branch = Branch.objects.filter(
+                    name__iexact=record.cooperative_name,
+                    branch_type=Branch.COOPERATIVE,
+                ).first()
+            farmer, _ = Farmer.objects.update_or_create(
+                ministry_id=record.ministry_id,
+                defaults={
+                    "name": record.name,
+                    "phone_number": record.phone_number,
+                    "district": record.district,
+                    "cooperative": coop_branch,
+                },
+            )
+            return Response(
+                {
+                    "farmer": FarmerSerializer(farmer).data,
+                    "farmer_id": farmer.id,
+                    "buyer_type": Transfer.BUYER_MINISTRY,
+                    "ministry_verified": True,
+                    "discount_percent": discount_rate,
+                    "discount_eligible": True,
+                    "message": (
+                        f"Ministry ID verified. {discount_rate}% subsidy discount applies."
+                    ),
+                }
+            )
+
+        if not walk_in_name or not walk_in_phone:
+            return Response(
+                {
+                    "detail": (
+                        "Provide ministry_id for registered farmers, or name and "
+                        "phone_number for walk-in customers."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        walk_in_id = f"WALKIN-{retailer_branch.id}-{uuid.uuid4().hex[:10].upper()}"
+        farmer = Farmer.objects.create(
+            ministry_id=walk_in_id,
+            name=walk_in_name,
+            phone_number=walk_in_phone,
+            district=retailer_branch.district or "",
+            cooperative=None,
+        )
+        return Response(
+            {
+                "farmer": FarmerSerializer(farmer).data,
+                "farmer_id": farmer.id,
+                "buyer_type": Transfer.BUYER_WALK_IN,
+                "ministry_verified": False,
+                "discount_percent": 0,
+                "discount_eligible": False,
+                "message": "Walk-in sale recorded. No Ministry subsidy discount.",
+            },
+            status=status.HTTP_201_CREATED,
         )
 
     @action(detail=False, methods=["post"])
@@ -433,6 +559,17 @@ class FarmerViewSet(viewsets.ModelViewSet):
             )
 
         role = resolve_role(request.user)
+        if role == "retailer":
+            return Response(
+                {
+                    "detail": (
+                        "Retailers do not register farmers. Look up a Ministry ID "
+                        "at point of sale or record a walk-in buyer."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         branch = None
         if role == "cooperative":
             branch = Branch.objects.filter(user=request.user).first()
@@ -500,6 +637,7 @@ class FarmerViewSet(viewsets.ModelViewSet):
                 "branch_id": branch.id,
             },
         )
+        notify_for_farmer_registered(farmer, branch, actor=request.user)
         return Response(
             FarmerSerializer(farmer).data,
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
@@ -550,6 +688,19 @@ class TransferViewSet(viewsets.ModelViewSet):
     serializer_class = TransferSerializer
     permission_classes = [IsAuthenticated]
 
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        transfer = serializer.instance
+        payload = TransferSerializer(transfer).data
+        if transfer.transfer_type == Transfer.BRANCH_TO_FARMER and transfer.farmer_id:
+            payload.update(
+                issue_distribution_otp(transfer, user=request.user)
+            )
+        headers = self.get_success_headers(payload)
+        return Response(payload, status=status.HTTP_201_CREATED, headers=headers)
+
     def perform_create(self, serializer):
         batch = serializer.validated_data["batch"]
         transfer_type = serializer.validated_data.get("transfer_type")
@@ -562,12 +713,16 @@ class TransferViewSet(viewsets.ModelViewSet):
                 raise ValidationError({"from_branch_id": "from_branch is required."})
             if not farmer:
                 raise ValidationError({"farmer_id": "farmer is required."})
-            if farmer.cooperative_id and farmer.cooperative_id != from_branch.id:
+            if (
+                from_branch.branch_type == Branch.COOPERATIVE
+                and farmer.cooperative_id
+                and farmer.cooperative_id != from_branch.id
+            ):
                 raise ValidationError(
                     {
                         "farmer_id": (
                             f"Farmer {farmer.ministry_id} is registered with "
-                            f"{farmer.cooperative.name}, not this branch."
+                            f"{farmer.cooperative.name}, not this AMCOS."
                         )
                     }
                 )
@@ -582,9 +737,25 @@ class TransferViewSet(viewsets.ModelViewSet):
                     }
                 )
             warehouse = serializer.validated_data.get("warehouse") or batch.storage_location
+            buyer_type = serializer.validated_data.get("buyer_type") or Transfer.BUYER_MINISTRY
+            if farmer.ministry_id.startswith("WALKIN-"):
+                buyer_type = Transfer.BUYER_WALK_IN
+            ministry_verified = serializer.validated_data.get("ministry_verified")
+            if ministry_verified is None:
+                ministry_verified = buyer_type == Transfer.BUYER_MINISTRY
+            discount_percent = serializer.validated_data.get("discount_percent")
+            if discount_percent is None:
+                discount_percent = (
+                    getattr(settings, "RETAILER_MINISTRY_DISCOUNT_PERCENT", 10)
+                    if ministry_verified
+                    else 0
+                )
             transfer = serializer.save(
                 created_by=self.request.user,
                 warehouse=warehouse,
+                buyer_type=buyer_type,
+                ministry_verified=ministry_verified,
+                discount_percent=discount_percent,
             )
         else:
             warehouse = serializer.validated_data.get("warehouse") or batch.storage_location
@@ -613,6 +784,7 @@ class TransferViewSet(viewsets.ModelViewSet):
             transfer=transfer,
             details={"status": transfer.status, "transfer_type": transfer.transfer_type},
         )
+        notify_for_transfer_created(transfer, actor=self.request.user)
 
     @action(detail=True, methods=["post"])
     def receive(self, request, pk=None):
@@ -624,6 +796,7 @@ class TransferViewSet(viewsets.ModelViewSet):
             user=request.user,
             transfer=transfer,
         )
+        notify_for_transfer_received(transfer, actor=request.user)
         return Response(TransferSerializer(transfer).data)
 
     @action(detail=True, methods=["post"])
@@ -635,27 +808,36 @@ class TransferViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        code = generate_code()
-        otp_record, _ = OTPVerification.objects.update_or_create(
-            transfer=transfer,
-            defaults={
-                "phone_number": transfer.farmer.phone_number,
-                "code": code,
-                "status": OTPVerification.SENT,
-                "sent_at": timezone.now(),
-                "verified_at": None,
-                "attempts": 0,
-            },
+        is_resend = bool(request.data.get("resend"))
+        delivery_method = (request.data.get("delivery_method") or "").strip().lower()
+        logger.info(
+            "send_otp API transfer_id=%s user=%s resend=%s delivery_method=%s",
+            transfer.id,
+            getattr(request.user, "username", None),
+            is_resend,
+            delivery_method or "(default)",
         )
-        sms_payload = send_sms(otp_record.phone_number, code)
-        AuditLog.objects.create(
-            action="otp_sent",
+        result = issue_distribution_otp(
+            transfer,
             user=request.user,
-            transfer=transfer,
-            details={"phone_number": otp_record.phone_number},
+            is_resend=is_resend,
+            delivery_method=delivery_method,
         )
+        if not result.get("otp_sent"):
+            return Response(
+                {
+                    "detail": result.get("detail") or "OTP SMS could not be sent.",
+                    "sms": result.get("sms"),
+                    "otp_code_length": result.get("otp_code_length"),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         return Response(
-            {"otp": OTPVerificationSerializer(otp_record).data, "sms": sms_payload}
+            {
+                "otp": result.get("otp"),
+                "sms": result.get("sms"),
+                "otp_code_length": result.get("otp_code_length"),
+            }
         )
 
     @action(detail=True, methods=["post"])
@@ -670,20 +852,33 @@ class TransferViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if is_expired(otp_record.sent_at):
-            otp_record.status = OTPVerification.EXPIRED
-            otp_record.save(update_fields=["status"])
+        clean_code = re.sub(r"\D", "", str(code or "").strip())
+        if not clean_code:
             return Response(
-                {"detail": "OTP expired."},
+                {"detail": "OTP code is required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        otp_record.attempts += 1
-        if otp_record.code != str(code).strip():
+        verify_result = verify_farmer_otp(otp_record, clean_code)
+        if not verify_result.get("verified"):
+            otp_record.attempts += 1
             otp_record.status = OTPVerification.FAILED
             otp_record.save(update_fields=["status", "attempts"])
+            detail = verify_result.get("error") or "Invalid OTP code."
+            remaining = verify_result.get("remaining_attempts")
+            if remaining is not None and remaining > 0:
+                detail = f"{detail} ({remaining} attempt(s) remaining.)"
+            elif verify_result.get("locked"):
+                detail = f"{detail} Request a new code using Resend OTP."
+            if verify_result.get("expired") or verify_result.get("locked"):
+                otp_record.status = OTPVerification.EXPIRED
+                otp_record.save(update_fields=["status"])
             return Response(
-                {"detail": "Invalid OTP code."},
+                {
+                    "detail": detail,
+                    "remaining_attempts": remaining,
+                    "locked": bool(verify_result.get("locked")),
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -702,6 +897,7 @@ class TransferViewSet(viewsets.ModelViewSet):
             transfer=transfer,
             details=anchor_summary,
         )
+        notify_for_otp_verified(transfer, anchor_summary=anchor_summary)
 
         response_payload = TransferSerializer(transfer).data
         response_payload["verification"] = anchor_summary
@@ -935,10 +1131,16 @@ class TransferViewSet(viewsets.ModelViewSet):
             )
             Notification.objects.create(
                 user=branch.user,
+                notification_type=Notification.TYPE_DISPATCH,
                 title=f"New dispatch from {supplier_name}",
-                body=notification_body,
-                type=Notification.DISPATCH,
-                transfer_ids=[transfer.id for transfer in transfers],
+                message=notification_body,
+                details=f"Transfer IDs: {transfer_id_text}",
+                priority=Notification.PRIORITY_HIGH,
+                transfer=transfers[0],
+                metadata={
+                    "transfer_ids": [transfer.id for transfer in transfers],
+                    "tab": "receive",
+                },
             )
             in_app_sent = True
 
@@ -976,15 +1178,6 @@ class DeliveryProofViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
 
 
-class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Notification.objects.all().select_related("user")
-    serializer_class = NotificationSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        return Notification.objects.filter(user=self.request.user).order_by("-created_at")
-
-
 class OTPVerificationViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = OTPVerification.objects.all()
     serializer_class = OTPVerificationSerializer
@@ -995,6 +1188,33 @@ class BlockchainAnchorViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = BlockchainAnchor.objects.all()
     serializer_class = BlockchainAnchorSerializer
     permission_classes = [IsAuthenticated]
+
+
+class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = NotificationSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return Notification.objects.filter(user=self.request.user).select_related(
+            "transfer"
+        )
+
+    @action(detail=True, methods=["post"])
+    def read(self, request, pk=None):
+        notification = self.get_object()
+        if not notification.read_at:
+            notification.read_at = timezone.now()
+            notification.save(update_fields=["read_at"])
+        return Response(NotificationSerializer(notification).data)
+
+    @action(detail=False, methods=["post"])
+    def read_all(self, request):
+        updated = (
+            self.get_queryset()
+            .filter(read_at__isnull=True)
+            .update(read_at=timezone.now())
+        )
+        return Response({"marked_read": updated})
 
 
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):

@@ -198,25 +198,17 @@ class TransferSerializer(serializers.ModelSerializer):
             "farmer_id",
             "quantity_bags",
             "status",
+            "buyer_type",
+            "ministry_verified",
+            "discount_percent",
             "notes",
             "created_at",
         ]
-
-
-class NotificationSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Notification
-        fields = [
-            "id",
-            "user",
-            "title",
-            "body",
-            "type",
-            "transfer_ids",
-            "is_read",
-            "created_at",
-        ]
-        read_only_fields = ["user", "created_at"]
+        extra_kwargs = {
+            "buyer_type": {"required": False},
+            "ministry_verified": {"required": False},
+            "discount_percent": {"required": False},
+        }
 
 
 class DeliveryProofSerializer(serializers.ModelSerializer):
@@ -253,6 +245,30 @@ class BlockchainAnchorSerializer(serializers.ModelSerializer):
     class Meta:
         model = BlockchainAnchor
         fields = ["transfer", "data_hash", "tx_hash", "network", "anchored_at", "payload"]
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    is_read = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Notification
+        fields = [
+            "id",
+            "notification_type",
+            "title",
+            "message",
+            "details",
+            "priority",
+            "read_at",
+            "is_read",
+            "transfer_id",
+            "metadata",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+    def get_is_read(self, obj):
+        return obj.read_at is not None
 
 
 class AuditLogSerializer(serializers.ModelSerializer):
