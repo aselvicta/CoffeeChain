@@ -24,6 +24,9 @@ export function SupplierDashboard({ userProfile, onLogout }) {
   });
   const [dispatches, setDispatches] = useState([]);
   const [dispatchedIndex, setDispatchedIndex] = useState(0);
+  const [dispatchedQuery, setDispatchedQuery] = useState('');
+  const [dispatchedStatusFilter, setDispatchedStatusFilter] = useState('all');
+  const [dispatchedTransfers, setDispatchedTransfers] = useState([]);
   const [batches, setBatches] = useState([]);
   const [branches, setBranches] = useState([]);
   const [warehouseCatalog, setWarehouseCatalog] = useState([]);
@@ -222,15 +225,67 @@ export function SupplierDashboard({ userProfile, onLogout }) {
 
   const recentDispatches = useMemo(() => dispatches.slice(0, 8), [dispatches]);
 
-  const dispatchedTransfers = useMemo(
-    () =>
-      [...dispatches].sort(
-        (left, right) => new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime()
-      ),
-    [dispatches]
-  );
+  useEffect(() => {
+    const loadDispatchedTransfers = async () => {
+      if (!userProfile?.supplierRecordId) return;
+      try {
+        const params = {
+          supplier_id: userProfile.supplierRecordId,
+          transfer_type: 'SUPPLIER_TO_BRANCH',
+        };
+        if (dispatchedQuery.trim()) {
+          params.search = dispatchedQuery.trim();
+        }
+        if (dispatchedStatusFilter !== 'all') {
+          params.status = dispatchedStatusFilter;
+        }
+        const transferData = await fetchTransfers(params);
+        setDispatchedTransfers(
+          [...transferData]
+            .map((transfer) => ({
+              id: transfer.id,
+              batchCode: transfer.batch?.batch_code || '—',
+              product: transfer.batch?.fertilizer_type || '—',
+              bags: transfer.quantity_bags,
+              destination: transfer.to_branch?.name || 'Unknown',
+              recipient: transfer.to_branch?.name || transfer.receiver_name || 'Unknown',
+              rawStatus: transfer.status,
+              status: getDispatchStatusMeta(transfer.status).label,
+              statusTone: getDispatchStatusMeta(transfer.status).tone,
+              statusDescription: getDispatchStatusMeta(transfer.status).description,
+              warehouse: transfer.warehouse?.name || transfer.batch?.storage_location?.name || '—',
+              supplier: transfer.from_supplier?.name || '—',
+              date: transfer.created_at?.slice(0, 10),
+              createdAt: transfer.created_at || '',
+              confirmedAt: transfer.confirmed_at || '',
+            }))
+            .sort(
+              (left, right) =>
+                new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime()
+            )
+        );
+      } catch (error) {
+        setStatusMessage(error.message);
+      }
+    };
 
-  const currentDispatchedTransfer = dispatchedTransfers[dispatchedIndex] || null;
+    loadDispatchedTransfers();
+    setDispatchedIndex(0);
+  }, [dispatchedQuery, dispatchedStatusFilter, userProfile?.supplierRecordId]);
+
+  const pageSize = 3;
+  const dispatchedPageStart = dispatchedIndex;
+  const currentDispatchedTransfers = dispatchedTransfers.slice(
+    dispatchedPageStart,
+    dispatchedPageStart + pageSize
+  );
+  const dispatchedPageEnd = Math.min(dispatchedPageStart + pageSize, filteredDispatchedTransfers.length);
+
+  useEffect(() => {
+    if (dispatchedIndex >= dispatchedTransfers.length && dispatchedTransfers.length > 0) {
+      setDispatchedIndex(Math.max(dispatchedTransfers.length - pageSize, 0));
+    }
+  }, [dispatchedIndex, dispatchedTransfers.length]);
 
   const formatDateTime = (value) => {
     if (!value) return '—';
@@ -676,46 +731,81 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                     <p>
                       {dispatchedTransfers.length === 0
                         ? 'No dispatched batches'
-                        : `${dispatchedIndex + 1} of ${dispatchedTransfers.length}`}
+                        : `${dispatchedPageStart + 1}-${dispatchedPageEnd} of ${dispatchedTransfers.length}`}
                     </p>
                   </div>
                 </div>
 
-                {currentDispatchedTransfer ? (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 mb-5">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">Search</label>
+                    <input
+                      type="text"
+                      value={dispatchedQuery}
+                      onChange={(e) => setDispatchedQuery(e.target.value)}
+                      placeholder="Search batch, receiver, warehouse..."
+                      className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:border-transparent focus:ring-2 focus:ring-green-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">Filter</label>
+                    <select
+                      value={dispatchedStatusFilter}
+                      onChange={(e) => setDispatchedStatusFilter(e.target.value)}
+                      className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:border-transparent focus:ring-2 focus:ring-green-500"
+                    >
+                      <option value="all">All statuses</option>
+                      <option value="DISPATCHED">Dispatched</option>
+                      <option value="RECEIVED">Received</option>
+                      <option value="VERIFIED">Verified</option>
+                    </select>
+                  </div>
+                  <div className="rounded-lg border border-gray-200 p-4 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Results</p>
+                      <p className="text-sm text-gray-600">Showing up to 3 dispatches at a time</p>
+                    </div>
+                    <p className="text-lg font-bold text-gray-900">{dispatchedTransfers.length}</p>
+                  </div>
+                </div>
+
+                {currentDispatchedTransfers.length > 0 ? (
                   <div className="space-y-5">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="rounded-lg border border-gray-200 p-4">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Batch</p>
-                        <p className="mt-1 text-lg font-bold text-gray-900">{currentDispatchedTransfer.batchCode}</p>
-                        <p className="text-sm text-gray-600">{currentDispatchedTransfer.product} · {currentDispatchedTransfer.bags} bags</p>
-                      </div>
-                      <div className="rounded-lg border border-gray-200 p-4">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">To</p>
-                        <p className="mt-1 text-lg font-bold text-gray-900">{currentDispatchedTransfer.recipient}</p>
-                        <p className="text-sm text-gray-600">Warehouse: {currentDispatchedTransfer.warehouse}</p>
-                      </div>
-                      <div className="rounded-lg border border-gray-200 p-4">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Dispatch Status</p>
-                        <div className="mt-2 flex items-center gap-2">
-                          <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-medium ${currentDispatchedTransfer.statusTone}`}>
-                            {currentDispatchedTransfer.status}
-                          </span>
-                          <span className="text-sm text-gray-600">{currentDispatchedTransfer.statusDescription}</span>
+                    <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+                      {currentDispatchedTransfers.map((dispatch) => (
+                        <div key={dispatch.id} className="rounded-xl border border-gray-200 p-4 shadow-sm">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Batch</p>
+                              <p className="mt-1 text-lg font-bold text-gray-900">{dispatch.batchCode}</p>
+                            </div>
+                            <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-medium ${dispatch.statusTone}`}>
+                              {dispatch.status}
+                            </span>
+                          </div>
+                          <p className="mt-2 text-sm text-gray-600">{dispatch.product} · {dispatch.bags} bags</p>
+                          <div className="mt-4 space-y-3 text-sm">
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">To</p>
+                              <p className="font-medium text-gray-900">{dispatch.recipient}</p>
+                              <p className="text-gray-600">Warehouse: {dispatch.warehouse}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Confirmation</p>
+                              <p className="font-medium text-gray-900">
+                                {dispatch.confirmedAt ? 'Confirmed' : 'Awaiting confirmation'}
+                              </p>
+                              <p className="text-gray-600">{formatDateTime(dispatch.confirmedAt)}</p>
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                      <div className="rounded-lg border border-gray-200 p-4">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Confirmation Time</p>
-                        <p className="mt-1 text-lg font-bold text-gray-900">
-                          {currentDispatchedTransfer.confirmedAt ? 'Confirmed' : 'Awaiting confirmation'}
-                        </p>
-                        <p className="text-sm text-gray-600">{formatDateTime(currentDispatchedTransfer.confirmedAt)}</p>
-                      </div>
+                      ))}
                     </div>
 
                     <div className="flex items-center justify-between gap-3">
                       <button
                         type="button"
-                        onClick={() => setDispatchedIndex((current) => Math.max(current - 1, 0))}
+                        onClick={() => setDispatchedIndex((current) => Math.max(current - pageSize, 0))}
                         disabled={dispatchedIndex === 0}
                         className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
                       >
@@ -723,16 +813,16 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                         Back
                       </button>
                       <div className="text-sm text-gray-500">
-                        {formatDateTime(currentDispatchedTransfer.createdAt)}
+                        {currentDispatchedTransfers.length} shown
                       </div>
                       <button
                         type="button"
                         onClick={() =>
                           setDispatchedIndex((current) =>
-                            Math.min(current + 1, dispatchedTransfers.length - 1)
+                            Math.min(current + pageSize, Math.max(dispatchedTransfers.length - pageSize, 0))
                           )
                         }
-                        disabled={dispatchedIndex >= dispatchedTransfers.length - 1}
+                        disabled={dispatchedIndex >= Math.max(dispatchedTransfers.length - pageSize, 0)}
                         className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         Next
@@ -741,7 +831,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                     </div>
                   </div>
                 ) : (
-                  <p className="text-sm text-gray-500">No dispatched batches available yet.</p>
+                  <p className="text-sm text-gray-500">No dispatched batches match your search or filter.</p>
                 )}
               </div>
             </div>

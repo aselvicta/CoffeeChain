@@ -269,8 +269,14 @@ export function deleteWarehouse(id) {
   });
 }
 
-export function fetchTransfers() {
-  return apiFetch('/api/transfers/');
+export function fetchTransfers(params = {}) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '') return;
+    query.set(key, String(value));
+  });
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  return apiFetch(`/api/transfers/${suffix}`);
 }
 
 export function createTransfer(payload) {
