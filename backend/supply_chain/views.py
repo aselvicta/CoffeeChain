@@ -9,6 +9,7 @@ from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -1226,6 +1227,7 @@ class IssueViewSet(viewsets.ModelViewSet):
     )
     serializer_class = IssueSerializer
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -1239,7 +1241,14 @@ class IssueViewSet(viewsets.ModelViewSet):
             supplier = Supplier.objects.filter(user=user).first()
             if not supplier:
                 return queryset.none()
-            return queryset.filter(transfer__from_supplier=supplier).order_by("-created_at")
+            return (
+                queryset.filter(
+                    Q(transfer__from_supplier=supplier)
+                    | Q(transfer__from_supplier__isnull=True, transfer__batch__supplier=supplier)
+                )
+                .distinct()
+                .order_by("-created_at")
+            )
 
         if role in {"retailer", "cooperative"}:
             return queryset.filter(reporter=user).order_by("-created_at")

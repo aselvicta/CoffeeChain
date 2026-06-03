@@ -49,6 +49,16 @@ export function ReceiveFertilizerPanel({ inboundTransfers, onRefresh, highlightT
     [inboundTransfers]
   );
 
+  const closeIssueForm = () => {
+    setSelectedTransfer(null);
+    setIssueForm({
+      issueType: 'DISCREPANCY',
+      summary: '',
+      description: '',
+      evidenceFile: null,
+    });
+  };
+
   const handleReceive = async (transfer) => {
     setBusyId(transfer.id);
     setErrorMessage('');
@@ -67,13 +77,8 @@ export function ReceiveFertilizerPanel({ inboundTransfers, onRefresh, highlightT
   };
 
   const handleOpenDetails = (transfer) => {
+    closeIssueForm();
     setSelectedTransfer(transfer);
-    setIssueForm({
-      issueType: 'DISCREPANCY',
-      summary: '',
-      description: '',
-      evidenceFile: null,
-    });
     setErrorMessage('');
   };
 
@@ -101,8 +106,7 @@ export function ReceiveFertilizerPanel({ inboundTransfers, onRefresh, highlightT
         evidenceFile: issueForm.evidenceFile,
       });
       setSuccessMessage(`Issue submitted for ${selectedTransfer.batchCode || `Transfer #${selectedTransfer.id}`}.`);
-      setSelectedTransfer(null);
-      setIssueForm({ issueType: 'DISCREPANCY', summary: '', description: '', evidenceFile: null });
+      closeIssueForm();
       await onRefresh?.();
     } catch (error) {
       setErrorMessage(error.message || 'Failed to submit issue.');
@@ -289,7 +293,7 @@ export function ReceiveFertilizerPanel({ inboundTransfers, onRefresh, highlightT
               <PanelOutlineButton
                 icon={AlertCircle}
                 type="button"
-                onClick={() => setSelectedTransfer(null)}
+                onClick={closeIssueForm}
                 disabled={issueBusy}
               >
                 Close
