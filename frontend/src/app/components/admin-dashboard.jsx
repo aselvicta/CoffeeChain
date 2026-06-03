@@ -6,8 +6,59 @@ import {
 } from 'lucide-react';
 import { Logo } from './logo';
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { createUser, fetchAuditReport, fetchBranches, fetchSuppliers, fetchTransfers, fetchUsers } from '../api/client';
+import { createUser, fetchAuditReport, fetchBatches, fetchBranches, fetchSuppliers, fetchTransfers, fetchUsers } from '../api/client';
 import { REGION_LIST, TANZANIA_REGIONS } from '../data/tanzania-locations';
+
+const ANALYTICS_COLORS = ['#16a34a', '#84cc16', '#0f766e', '#22c55e', '#65a30d', '#15803d'];
+
+function buildMonthlyAnalytics(records) {
+  const buckets = new Map();
+  const today = new Date();
+
+  for (let offset = 5; offset >= 0; offset -= 1) {
+    const date = new Date(today.getFullYear(), today.getMonth() - offset, 1);
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    buckets.set(key, {
+      month: date.toLocaleString('en-US', { month: 'short' }),
+      fertilizer: 0,
+      records: 0,
+    });
+  }
+
+  records.forEach((record) => {
+    const createdAt = record?.created_at;
+    if (!createdAt) return;
+
+    const createdDate = new Date(createdAt);
+    if (Number.isNaN(createdDate.getTime())) return;
+
+    const key = `${createdDate.getFullYear()}-${String(createdDate.getMonth() + 1).padStart(2, '0')}`;
+    const bucket = buckets.get(key);
+    if (!bucket) return;
+
+    bucket.fertilizer += Number(record.quantity_bags) || 0;
+    bucket.records += 1;
+  });
+
+  return Array.from(buckets.values());
+}
+
+function buildFertilizerDistribution(records) {
+  const grouped = records.reduce((acc, record) => {
+    const name = record?.batch?.fertilizer_type || record?.fertilizer_type || 'Unknown';
+    const value = Number(record?.quantity_bags) || 0;
+    acc[name] = (acc[name] || 0) + value;
+    return acc;
+  }, {});
+
+  return Object.entries(grouped)
+    .sort(([, valueA], [, valueB]) => valueB - valueA)
+    .map(([name, value], index) => ({
+      name,
+      value,
+      color: ANALYTICS_COLORS[index % ANALYTICS_COLORS.length],
+    }));
+}
 
 export function AdminDashboard({ userProfile, onLogout }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -25,6 +76,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
   const [retailers, setRetailers] = useState([]);
   const [cooperatives, setCooperatives] = useState([]);
   const [users, setUsers] = useState([]);
+  const [batches, setBatches] = useState([]);
   const [showUserForm, setShowUserForm] = useState(false);
   const [userQuery, setUserQuery] = useState('');
   const [userRoleFilter, setUserRoleFilter] = useState('all');
@@ -51,12 +103,13 @@ export function AdminDashboard({ userProfile, onLogout }) {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [supplierData, branchData, auditData, transferData, userData] = await Promise.all([
+        const [supplierData, branchData, auditData, transferData, userData, batchData] = await Promise.all([
           fetchSuppliers(),
           fetchBranches(),
           fetchAuditReport(),
           fetchTransfers(),
           fetchUsers(),
+          fetchBatches(),
         ]);
         setSuppliers(
           supplierData.map((supplier) => ({
@@ -94,6 +147,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
         );
         setAudit(auditData);
         setUsers(userData);
+        setBatches(batchData);
       } catch (error) {
         setStatusMessage(error.message);
       }
@@ -102,21 +156,16 @@ export function AdminDashboard({ userProfile, onLogout }) {
   }, []);
 
   const monthlyData = useMemo(() => {
-    return [
-      { month: 'Jan', fertilizer: audit.dispatched * 3, retailers: retailers.length },
-      { month: 'Feb', fertilizer: audit.received * 3, retailers: retailers.length },
-      { month: 'Mar', fertilizer: audit.verified * 3, retailers: retailers.length },
-      { month: 'Apr', fertilizer: audit.dispatched * 4, retailers: retailers.length },
-      { month: 'May', fertilizer: audit.received * 4, retailers: retailers.length },
-    ];
-  }, [audit, retailers.length]);
+    const analyticsSource = transferData.length > 0 ? transferData : batches;
+    return buildMonthlyAnalytics(analyticsSource);
+  }, [batches, transferData]);
 
   const distributionData = useMemo(
-    () => [
-      { name: 'AMCOS', value: cooperatives.length, color: '#16a34a' },
-      { name: 'Retailers', value: retailers.length, color: '#84cc16' },
-    ],
-    [cooperatives.length, retailers.length]
+    () => {
+      const analyticsSource = transferData.length > 0 ? transferData : batches;
+      return buildFertilizerDistribution(analyticsSource);
+    },
+    [batches, transferData]
   );
 
   const regionData = useMemo(() => {
@@ -422,14 +471,14 @@ export function AdminDashboard({ userProfile, onLogout }) {
                         dataKey="fertilizer" 
                         stroke="#16a34a" 
                         strokeWidth={2}
-                        name="Fertilizer (tons)"
+                        name="Fertilizer bags"
                       />
                       <Line 
                         type="monotone" 
-                        dataKey="retailers" 
+                        dataKey="records" 
                         stroke="#ea580c" 
                         strokeWidth={2}
-                        name="Active Retailers"
+                        name="Records"
                       />
                     </LineChart>
                   </ResponsiveContainer>
@@ -446,7 +495,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
                           cx="50%"
                           cy="50%"
                           labelLine={false}
-                          label={({ name, value }) => `${name}: ${value}%`}
+                          label={({ name, value }) => `${name}: ${value} bags`}
                           outerRadius={100}
                           fill="#8884d8"
                           dataKey="value"
@@ -455,7 +504,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
                             <Cell key={`cell-${index}`} fill={entry.color} />
                           ))}
                         </Pie>
-                        <Tooltip />
+                          <Tooltip formatter={(value) => [`${value} bags`, 'Quantity']} />
                       </PieChart>
                     </ResponsiveContainer>
                   </div>
