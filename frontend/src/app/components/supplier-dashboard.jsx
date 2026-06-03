@@ -273,7 +273,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
     setDispatchedIndex(0);
   }, [dispatchedQuery, dispatchedStatusFilter, userProfile?.supplierRecordId]);
 
-  const pageSize = 3;
+  const pageSize = 6;
   const dispatchedPageStart = dispatchedIndex;
   const currentDispatchedTransfers = dispatchedTransfers.slice(
     dispatchedPageStart,
