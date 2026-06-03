@@ -62,7 +62,7 @@ export function useNotifications({ pollMs = 45000, enabled = true } = {}) {
       const data = await fetchNotifications();
       setRaw(Array.isArray(data) ? data : []);
     } catch {
-      // keep last known notifications on transient errors
+      // keep last known notifications on transient errors (auth clears via session event)
     } finally {
       setLoading(false);
     }

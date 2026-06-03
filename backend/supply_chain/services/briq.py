@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from typing import Any
 
 import requests
@@ -15,7 +16,8 @@ logger = logging.getLogger(__name__)
 EXTERNAL_OTP_PLACEHOLDER = "BRQEXT"
 
 _CLIENT_HINT = (
-    "A verification code was sent by SMS. Ask the farmer to check their phone."
+    "A verification code was requested. Ask the farmer to answer their phone "
+    "or check SMS/WhatsApp."
 )
 
 
@@ -64,14 +66,11 @@ def build_otp_message_template(
 
     if bags:
         return (
-            f"CoffeeChain: You received {bags} bag(s) of {ftype}. "
-            f"Your code is {{code}}. It expires in {{expiry}} minutes. "
-            f"Share with your AMCOS agent to confirm delivery."
+            f"CoffeeChain: {bags} bag(s) {ftype}. "
+            f"Code {{code}}. Expires in {{expiry}} min."
         )
-    return (
-        f"CoffeeChain: Your verification code is {{code}}. "
-        f"It expires in {{expiry}} minutes. Share with your AMCOS agent."
-    )
+    # Briq-recommended short template (must include {code} and {expiry})
+    return "Your verification code is {code}. It expires in {expiry} minutes."
 
 
 def _api_headers() -> dict[str, str]:
@@ -160,7 +159,9 @@ def _parse_briq_otp_response(
     if response.ok and data.get("success"):
         expires = (data.get("data") or {}).get("expires_at")
         channel_hint = {
-            "sms": "Verification code sent by SMS. Ask the farmer to check their phone.",
+            "sms": (
+                "A verification code was sent by SMS. Ask the farmer to check their phone."
+            ),
             "call": (
                 "Briq is calling the farmer now to read the verification code aloud. "
                 "Ask them to answer the phone."
@@ -169,14 +170,24 @@ def _parse_briq_otp_response(
                 "Verification code sent on WhatsApp. Ask the farmer to check WhatsApp."
             ),
         }.get(delivery_method, _CLIENT_HINT)
-        return _client_payload(
+        payload = _client_payload(
             delivered=True,
             phone_number=msisdn,
             expires_at=expires,
             otp_code_length=otp_length,
             delivery_method=delivery_method,
             message=channel_hint,
+            briq_http_status=response.status_code,
+            briq_api_message=data.get("message") or "",
+            api_accepted=True,
         )
+        if delivery_method == "sms":
+            payload["handset_note"] = (
+                "Briq accepted the SMS request. If the farmer's phone shows nothing, "
+                "try Phone call in the OTP modal or confirm Sender ID and credits at "
+                "karibu.briq.tz."
+            )
+        return payload
 
     message = (
         data.get("message")
@@ -188,6 +199,8 @@ def _parse_briq_otp_response(
         delivered=False,
         phone_number=msisdn,
         error=str(message),
+        briq_http_status=response.status_code,
+        briq_api_message=data.get("message") or str(message),
     )
 
 
@@ -223,6 +236,7 @@ def request_otp(
 
     timeout = int(getattr(settings, "BRIQ_REQUEST_TIMEOUT", 45))
     method = body["delivery_method"]
+    started = time.monotonic()
 
     try:
         response = requests.post(
@@ -237,11 +251,15 @@ def request_otp(
             otp_length=otp_length,
             delivery_method=method,
         )
+        result["briq_duration_ms"] = int((time.monotonic() - started) * 1000)
         logger.info(
-            "[Briq] request otp to=%s method=%s delivered=%s",
+            "[Briq] request otp to=%s method=%s http=%s delivered=%s duration_ms=%s api_msg=%s",
             msisdn,
             method,
+            response.status_code,
             result.get("delivered"),
+            result.get("briq_duration_ms"),
+            result.get("briq_api_message") or result.get("error"),
         )
         return result
     except requests.Timeout:
@@ -295,6 +313,7 @@ def resend_otp(
 
     timeout = int(getattr(settings, "BRIQ_REQUEST_TIMEOUT", 45))
     method = body["delivery_method"]
+    started = time.monotonic()
 
     try:
         response = requests.post(
@@ -309,11 +328,15 @@ def resend_otp(
             otp_length=otp_length,
             delivery_method=method,
         )
+        result["briq_duration_ms"] = int((time.monotonic() - started) * 1000)
         logger.info(
-            "[Briq] resend otp to=%s method=%s delivered=%s",
+            "[Briq] resend otp to=%s method=%s http=%s delivered=%s duration_ms=%s api_msg=%s",
             msisdn,
             method,
+            response.status_code,
             result.get("delivered"),
+            result.get("briq_duration_ms"),
+            result.get("briq_api_message") or result.get("error"),
         )
         return result
     except requests.Timeout:

@@ -5,7 +5,7 @@ import { SupplierDashboard } from './supplier-dashboard';
 import { RetailerDashboard } from './retailer-dashboard';
 import { CooperativeDashboard } from './cooperative-dashboard';
 import { LanguageProvider } from './language-context';
-import { fetchProfile, getAccessToken, login, logout, setAccessToken } from '../api/client';
+import { fetchProfile, getAccessToken, login, logout } from '../api/client';
 
 export function MainApp() {
   const [userProfile, setUserProfile] = useState(null);
@@ -75,7 +75,7 @@ export function MainApp() {
       try {
         const profile = await fetchProfile();
         setUserProfile(buildProfile(profile));
-      } catch (err) {
+      } catch {
         logout();
       } finally {
         setIsLoading(false);
@@ -84,9 +84,16 @@ export function MainApp() {
     boot();
   }, []);
 
+  useEffect(() => {
+    const onSessionExpired = () => {
+      setUserProfile(null);
+    };
+    window.addEventListener('coffeechain:session-expired', onSessionExpired);
+    return () => window.removeEventListener('coffeechain:session-expired', onSessionExpired);
+  }, []);
+
   const handleLogin = async ({ username, password }) => {
-    const result = await login(username, password);
-    setAccessToken(result.access);
+    await login(username, password);
     const profile = await fetchProfile();
     const mapped = buildProfile(profile);
     setUserProfile(mapped);

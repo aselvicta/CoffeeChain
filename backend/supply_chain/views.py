@@ -62,7 +62,7 @@ from .services.notifications import (
     notify_for_transfer_created,
     notify_for_transfer_received,
 )
-from .services.farmer_otp import dispatch_farmer_otp, verify_farmer_otp
+from .services.farmer_otp import issue_distribution_otp, verify_farmer_otp
 
 import logging
 import uuid
@@ -688,6 +688,19 @@ class TransferViewSet(viewsets.ModelViewSet):
     serializer_class = TransferSerializer
     permission_classes = [IsAuthenticated]
 
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        transfer = serializer.instance
+        payload = TransferSerializer(transfer).data
+        if transfer.transfer_type == Transfer.BRANCH_TO_FARMER and transfer.farmer_id:
+            payload.update(
+                issue_distribution_otp(transfer, user=request.user)
+            )
+        headers = self.get_success_headers(payload)
+        return Response(payload, status=status.HTTP_201_CREATED, headers=headers)
+
     def perform_create(self, serializer):
         batch = serializer.validated_data["batch"]
         transfer_type = serializer.validated_data.get("transfer_type")
@@ -795,60 +808,35 @@ class TransferViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        fertilizer_type = ""
-        if transfer.batch_id:
-            fertilizer_type = transfer.batch.fertilizer_type or ""
-
         is_resend = bool(request.data.get("resend"))
-        delivery_method = (request.data.get("delivery_method") or "sms").strip().lower()
-        if is_resend and delivery_method == "sms":
-            # Voice call is more reliable when SMS does not reach the handset.
-            delivery_method = (
-                getattr(settings, "BRIQ_OTP_RESEND_METHOD", "call") or "call"
-            ).lower()
-        code, sms_payload = dispatch_farmer_otp(
-            transfer.farmer.phone_number,
-            quantity_bags=transfer.quantity_bags,
-            fertilizer_type=fertilizer_type,
+        delivery_method = (request.data.get("delivery_method") or "").strip().lower()
+        logger.info(
+            "send_otp API transfer_id=%s user=%s resend=%s delivery_method=%s",
+            transfer.id,
+            getattr(request.user, "username", None),
+            is_resend,
+            delivery_method or "(default)",
+        )
+        result = issue_distribution_otp(
+            transfer,
+            user=request.user,
             is_resend=is_resend,
             delivery_method=delivery_method,
         )
-        if not code or not sms_payload.get("delivered"):
+        if not result.get("otp_sent"):
             return Response(
                 {
-                    "detail": sms_payload.get("error")
-                    or sms_payload.get("user_message")
-                    or "OTP SMS could not be sent.",
-                    "sms": sms_payload,
+                    "detail": result.get("detail") or "OTP SMS could not be sent.",
+                    "sms": result.get("sms"),
+                    "otp_code_length": result.get("otp_code_length"),
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
-        otp_record, _ = OTPVerification.objects.update_or_create(
-            transfer=transfer,
-            defaults={
-                "phone_number": transfer.farmer.phone_number,
-                "code": code,
-                "status": OTPVerification.SENT,
-                "sent_at": timezone.now(),
-                "verified_at": None,
-                "attempts": 0,
-            },
-        )
-        AuditLog.objects.create(
-            action="otp_sent",
-            user=request.user,
-            transfer=transfer,
-            details={"phone_number": otp_record.phone_number, "provider": sms_payload.get("provider")},
-        )
-        notify_for_otp_sent(transfer)
         return Response(
             {
-                "otp": OTPVerificationSerializer(otp_record).data,
-                "sms": sms_payload,
-                "otp_code_length": int(
-                    sms_payload.get("otp_code_length") or settings.OTP_CODE_LENGTH
-                ),
+                "otp": result.get("otp"),
+                "sms": result.get("sms"),
+                "otp_code_length": result.get("otp_code_length"),
             }
         )
 

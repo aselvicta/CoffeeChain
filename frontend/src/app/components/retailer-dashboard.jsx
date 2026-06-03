@@ -18,6 +18,11 @@ import {
 } from '../api/client';
 import { handleOtpSmsResponse } from '../utils/otp-sms';
 import {
+  farmerHasValidPhone,
+  otpLoadingLabel,
+  requestDistributionOtp,
+} from '../utils/distribution-otp';
+import {
   QuickActionCard,
   ContentListRow,
   PanelPrimaryButton,
@@ -41,6 +46,8 @@ export function RetailerDashboard({ userProfile, onLogout }) {
   const [latestVerification, setLatestVerification] = useState(null);
   const [statusMessage, setStatusMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [savePhase, setSavePhase] = useState('');
+  const [otpSendingTransferId, setOtpSendingTransferId] = useState(null);
   const {
     notifications,
     unreadCount,
@@ -429,8 +436,15 @@ export function RetailerDashboard({ userProfile, onLogout }) {
                       setStatusMessage('Select a customer above, then batch and bags.');
                       return;
                     }
+                    if (!farmerHasValidPhone(saleBuyer)) {
+                      setStatusMessage(
+                        'Customer has no valid phone number. Ministry lookup must include a phone.'
+                      );
+                      return;
+                    }
                     setIsSaving(true);
                     setStatusMessage('');
+                    setSavePhase(otpLoadingLabel('create', 'en'));
                     try {
                       const transfer = await createTransfer({
                         batch_id: Number(distributionForm.batchId),
@@ -443,8 +457,13 @@ export function RetailerDashboard({ userProfile, onLogout }) {
                         ministry_verified: saleBuyer.ministryVerified,
                         discount_percent: saleBuyer.discountPercent,
                       });
-                      const otpResponse = await sendOtp(transfer.id);
+                      setSavePhase(otpLoadingLabel('api', 'en', 'sms'));
+                      const otpResponse = await requestDistributionOtp(transfer, sendOtp);
+                      if (!otpResponse?.sms) {
+                        throw new Error('OTP could not be sent to the farmer phone.');
+                      }
                       if (proofFile) {
+                        setSavePhase('Uploading proof…');
                         await uploadProof(transfer.id, proofFile);
                         setProofFile(null);
                       }
@@ -476,13 +495,24 @@ export function RetailerDashboard({ userProfile, onLogout }) {
                       setStatusMessage(error.message);
                     } finally {
                       setIsSaving(false);
+                      setSavePhase('');
                     }
                   }}
                   className="mt-4"
                   disabled={isSaving || distributableStock.length === 0 || !saleBuyer?.farmerId}
                 >
-                  {isSaving ? 'Processing...' : 'Send Verification SMS'}
+                  {isSaving ? (
+                    <span className="inline-flex items-center gap-2">
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                      {savePhase || 'Processing…'}
+                    </span>
+                  ) : (
+                    'Send Verification SMS'
+                  )}
                 </PanelPrimaryButton>
+                {isSaving && savePhase && (
+                  <p className="mt-2 text-xs text-gray-600">{savePhase}</p>
+                )}
                 {statusMessage && <p className="mt-3 text-sm text-red-600">{statusMessage}</p>}
               </div>
 
@@ -557,7 +587,8 @@ export function RetailerDashboard({ userProfile, onLogout }) {
                                 onClick={async () => {
                                   try {
                                     setStatusMessage('');
-                                    const otpResponse = await sendOtp(record.id);
+                                    setOtpSendingTransferId(record.id);
+                                    const otpResponse = await sendOtp(record.id, { resend: true });
                                     handleOtpSmsResponse(otpResponse.sms, {
                                       onDelivered: (sms) => {
                                         setOtpCodeLength(otpResponse.otp_code_length ?? 6);
@@ -574,10 +605,15 @@ export function RetailerDashboard({ userProfile, onLogout }) {
                                     });
                                   } catch (error) {
                                     setStatusMessage(error.message);
+                                  } finally {
+                                    setOtpSendingTransferId(null);
                                   }
                                 }}
+                                disabled={otpSendingTransferId === record.id}
                               >
-                                Resend &amp; Verify OTP
+                                {otpSendingTransferId === record.id
+                                  ? 'Sending OTP…'
+                                  : 'Resend & Verify OTP'}
                               </PanelOutlineButton>
                             ) : null
                           }
@@ -684,12 +720,14 @@ export function RetailerDashboard({ userProfile, onLogout }) {
               setLatestVerification(result.verification);
             }
           }}
-          onResend={async () => {
-            const response = await sendOtp(pendingTransfer.id, { resend: true });
+          onResend={async (options) => {
+            const response = await requestDistributionOtp(pendingTransfer, sendOtp, {
+              resend: true,
+              ...options,
+            });
             if (!handleOtpSmsResponse(response.sms, {
               onDelivered: (sms) => {
                 setOtpCodeLength(response.otp_code_length ?? 6);
-                setOtpMessage(sms.message || '');
                 setSmsInfo(sms);
               },
               onFailed: (message) => {
@@ -701,7 +739,7 @@ export function RetailerDashboard({ userProfile, onLogout }) {
           }}
           farmerName={pendingFarmer?.name || 'Farmer'}
           farmerId={pendingFarmer?.ministryId || ''}
-          smsMessage={otpMessage}
+          transferId={pendingTransfer?.id}
           smsInfo={smsInfo}
           distributionData={{
             bagsGiven: pendingTransfer.quantity_bags,

@@ -23,6 +23,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "rest_framework",
     "rest_framework_simplejwt",
+    "django_extensions",
     "supply_chain",
 ]
 
@@ -131,7 +132,9 @@ BRIQ_BASE_URL = os.getenv("BRIQ_BASE_URL", "https://karibu.briq.tz")
 BRIQ_OTP_SENDER_ID = os.getenv("BRIQ_OTP_SENDER_ID", "")
 BRIQ_OTP_LANGUAGE = os.getenv("BRIQ_OTP_LANGUAGE", "en")
 BRIQ_OTP_MESSAGE_TEMPLATE = os.getenv("BRIQ_OTP_MESSAGE_TEMPLATE", "")
-BRIQ_OTP_RESEND_METHOD = os.getenv("BRIQ_OTP_RESEND_METHOD", "call")  # sms | call | whatsapp
+BRIQ_OTP_PRIMARY_METHOD = os.getenv("BRIQ_OTP_PRIMARY_METHOD", "sms")  # sms | call | whatsapp
+BRIQ_OTP_RESEND_METHOD = os.getenv("BRIQ_OTP_RESEND_METHOD", "call")  # alternate channel on resend
+BRIQ_OTP_LOCAL_FALLBACK = os.getenv("BRIQ_OTP_LOCAL_FALLBACK", "false").lower() == "true"
 BRIQ_REQUEST_TIMEOUT = int(os.getenv("BRIQ_REQUEST_TIMEOUT", "45"))
 
 # Retailer POS: discount for buyers verified against the Ministry registry

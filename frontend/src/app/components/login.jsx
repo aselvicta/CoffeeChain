@@ -117,6 +117,11 @@ export function Login({ onLogin }) {
                 {language === 'en' ? 'Login to CoffeeChain' : 'Ingia CoffeeChain'}
               </button>
 
+              <p className="text-xs text-gray-500 text-center">
+                {language === 'en'
+                  ? 'Demo: cooperative1 / demo123 (also admin, supplier1, retailer1)'
+                  : 'Majaribio: cooperative1 / demo123'}
+              </p>
             </form>
           </div>
         </div>

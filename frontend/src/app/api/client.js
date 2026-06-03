@@ -11,6 +11,13 @@ export const DEFAULT_FERTILIZER_TYPES = [
 
 let accessToken = null;
 let refreshToken = null;
+let refreshInFlight = null;
+
+const PUBLIC_API_PATHS = ['/api/login/', '/api/token/refresh/'];
+
+function isPublicPath(path) {
+  return PUBLIC_API_PATHS.some((publicPath) => path.startsWith(publicPath));
+}
 
 export function setAccessToken(token) {
   accessToken = token;
@@ -45,43 +52,75 @@ function getRefreshToken() {
 }
 
 async function refreshAccessToken() {
-  const token = getRefreshToken();
-  if (!token) return null;
-  const response = await fetch(`${API_BASE}/api/token/refresh/`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ refresh: token }),
-  });
-  if (!response.ok) return null;
-  const result = await response.json();
-  if (result?.access) {
-    setAccessToken(result.access);
-    return result.access;
+  if (refreshInFlight) return refreshInFlight;
+
+  refreshInFlight = (async () => {
+    const token = getRefreshToken();
+    if (!token) return null;
+    try {
+      const response = await fetch(`${API_BASE}/api/token/refresh/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh: token }),
+      });
+      if (!response.ok) return null;
+      const result = await response.json();
+      if (result?.access) {
+        setAccessToken(result.access);
+        return result.access;
+      }
+      return null;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+
+  return refreshInFlight;
+}
+
+function clearSession() {
+  setAccessToken(null);
+  setRefreshToken(null);
+}
+
+function notifySessionExpired() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('coffeechain:session-expired'));
   }
-  return null;
+}
+
+export class AuthError extends Error {
+  constructor(message, status = 401) {
+    super(message);
+    this.name = 'AuthError';
+    this.status = status;
+  }
 }
 
 async function apiFetch(path, options = {}, retryOnUnauthorized = true) {
-  const token = getAccessToken();
   const headers = {
     'Content-Type': 'application/json',
     ...(options.headers || {}),
   };
-  if (token) {
+  const token = getAccessToken();
+  if (token && !isPublicPath(path)) {
     headers.Authorization = `Bearer ${token}`;
   }
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers,
   });
-  if (response.status === 401 && retryOnUnauthorized) {
+
+  if (response.status === 401 && retryOnUnauthorized && !isPublicPath(path)) {
     const refreshedToken = await refreshAccessToken();
     if (refreshedToken) {
       return apiFetch(path, options, false);
     }
+    clearSession();
+    notifySessionExpired();
+    throw new AuthError('Your session has expired. Please sign in again.', 401);
   }
+
   if (!response.ok) {
     let message = 'Request failed';
     try {
@@ -90,6 +129,12 @@ async function apiFetch(path, options = {}, retryOnUnauthorized = true) {
     } catch {
       // ignore
     }
+    if (response.status === 401) {
+      throw new AuthError(
+        typeof message === 'string' ? message : 'Authentication failed.',
+        401
+      );
+    }
     throw new Error(message);
   }
   if (response.status === 204) return null;
@@ -97,18 +142,29 @@ async function apiFetch(path, options = {}, retryOnUnauthorized = true) {
 }
 
 export async function login(username, password) {
-  const result = await apiFetch('/api/login/', {
+  const response = await fetch(`${API_BASE}/api/login/`, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),
   });
+  if (!response.ok) {
+    let message = 'Invalid username or password';
+    try {
+      const errorData = await response.json();
+      message = errorData.detail || message;
+    } catch {
+      // ignore
+    }
+    throw new AuthError(message, response.status);
+  }
+  const result = await response.json();
   setAccessToken(result.access);
   setRefreshToken(result.refresh);
   return result;
 }
 
 export function logout() {
-  setAccessToken(null);
-  setRefreshToken(null);
+  clearSession();
 }
 
 export function fetchProfile() {
@@ -254,7 +310,7 @@ export function verifyOtp(id, code) {
   });
 }
 
-export async function uploadProof(id, file, meta = {}) {
+export async function uploadProof(id, file, meta = {}, retryOnUnauthorized = true) {
   const token = getAccessToken();
   const formData = new FormData();
   if (file) formData.append('file', file);
@@ -266,6 +322,15 @@ export async function uploadProof(id, file, meta = {}) {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     body: formData,
   });
+  if (response.status === 401 && retryOnUnauthorized) {
+    const refreshedToken = await refreshAccessToken();
+    if (refreshedToken) {
+      return uploadProof(id, file, meta, false);
+    }
+    clearSession();
+    notifySessionExpired();
+    throw new AuthError('Your session has expired. Please sign in again.', 401);
+  }
   if (!response.ok) {
     throw new Error('Failed to upload proof');
   }
