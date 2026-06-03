@@ -790,7 +790,11 @@ class TransferViewSet(viewsets.ModelViewSet):
     def receive(self, request, pk=None):
         transfer = self.get_object()
         transfer.status = Transfer.RECEIVED
-        transfer.save(update_fields=["status"])
+        if transfer.confirmed_at is None:
+            transfer.confirmed_at = timezone.now()
+            transfer.save(update_fields=["status", "confirmed_at"])
+        else:
+            transfer.save(update_fields=["status"])
         AuditLog.objects.create(
             action="transfer_received",
             user=request.user,

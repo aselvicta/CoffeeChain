@@ -164,6 +164,7 @@ class Transfer(models.Model):
     )
     quantity_bags = models.PositiveIntegerField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=DISPATCHED)
+    confirmed_at = models.DateTimeField(null=True, blank=True)
     BUYER_MINISTRY = "MINISTRY"
     BUYER_WALK_IN = "WALK_IN"
     BUYER_TYPES = [

@@ -198,6 +198,7 @@ class TransferSerializer(serializers.ModelSerializer):
             "farmer_id",
             "quantity_bags",
             "status",
+            "confirmed_at",
             "buyer_type",
             "ministry_verified",
             "discount_percent",

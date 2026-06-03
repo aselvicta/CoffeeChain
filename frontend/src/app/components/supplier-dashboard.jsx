@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Package, Send, History, BarChart3, LogOut, TrendingUp } from 'lucide-react';
+import { Package, Send, History, BarChart3, LogOut, TrendingUp, ChevronLeft, ChevronRight } from 'lucide-react';
 import { LineChart, Line, PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import { Logo } from './logo';
 import { NotificationBell } from './notification-bell';
@@ -23,6 +23,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
     warehouseId: '',
   });
   const [dispatches, setDispatches] = useState([]);
+  const [dispatchedIndex, setDispatchedIndex] = useState(0);
   const [batches, setBatches] = useState([]);
   const [branches, setBranches] = useState([]);
   const [warehouseCatalog, setWarehouseCatalog] = useState([]);
@@ -113,6 +114,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
           product: transfer.batch?.fertilizer_type,
           bags: transfer.quantity_bags,
           destination: transfer.to_branch?.name || 'Unknown',
+          recipient: transfer.to_branch?.name || transfer.receiver_name || 'Unknown',
           rawStatus: transfer.status,
           status: getDispatchStatusMeta(transfer.status).label,
           statusTone: getDispatchStatusMeta(transfer.status).tone,
@@ -121,6 +123,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
           supplier: transfer.from_supplier?.name || '—',
           date: transfer.created_at?.slice(0, 10),
           createdAt: transfer.created_at || '',
+          confirmedAt: transfer.confirmed_at || '',
         }))
       );
 
@@ -219,6 +222,23 @@ export function SupplierDashboard({ userProfile, onLogout }) {
 
   const recentDispatches = useMemo(() => dispatches.slice(0, 8), [dispatches]);
 
+  const dispatchedTransfers = useMemo(
+    () =>
+      [...dispatches].sort(
+        (left, right) => new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime()
+      ),
+    [dispatches]
+  );
+
+  const currentDispatchedTransfer = dispatchedTransfers[dispatchedIndex] || null;
+
+  const formatDateTime = (value) => {
+    if (!value) return '—';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return '—';
+    return parsed.toLocaleString();
+  };
+
   const localNotifications = useMemo(() => {
     const inventoryNotifications = inventory
       .filter((item) => item.expiryRisk || item.available <= item.threshold)
@@ -306,6 +326,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
           {[
             { id: 'overview', label: 'Overview', icon: BarChart3 },
             { id: 'dispatch', label: 'Dispatch Batches', icon: Send },
+            { id: 'dispatched', label: 'Dispatched', icon: History },
             { id: 'warehouse', label: 'Warehouse', icon: Package },
             { id: 'inventory', label: 'Inventory', icon: Package },
             { id: 'analytics', label: 'Analytics', icon: TrendingUp },
@@ -638,6 +659,89 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                       </div>
                     ))}
                   </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'dispatched' && (
+            <div className="space-y-6">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <div className="flex items-start justify-between gap-4 mb-5">
+                  <div>
+                    <h2 className="text-xl font-bold text-gray-900">Dispatched</h2>
+                    <p className="text-sm text-gray-600">Browse dispatched batches and track receiver confirmation.</p>
+                  </div>
+                  <div className="text-right text-sm text-gray-500">
+                    <p>
+                      {dispatchedTransfers.length === 0
+                        ? 'No dispatched batches'
+                        : `${dispatchedIndex + 1} of ${dispatchedTransfers.length}`}
+                    </p>
+                  </div>
+                </div>
+
+                {currentDispatchedTransfer ? (
+                  <div className="space-y-5">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="rounded-lg border border-gray-200 p-4">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Batch</p>
+                        <p className="mt-1 text-lg font-bold text-gray-900">{currentDispatchedTransfer.batchCode}</p>
+                        <p className="text-sm text-gray-600">{currentDispatchedTransfer.product} · {currentDispatchedTransfer.bags} bags</p>
+                      </div>
+                      <div className="rounded-lg border border-gray-200 p-4">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">To</p>
+                        <p className="mt-1 text-lg font-bold text-gray-900">{currentDispatchedTransfer.recipient}</p>
+                        <p className="text-sm text-gray-600">Warehouse: {currentDispatchedTransfer.warehouse}</p>
+                      </div>
+                      <div className="rounded-lg border border-gray-200 p-4">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Dispatch Status</p>
+                        <div className="mt-2 flex items-center gap-2">
+                          <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-medium ${currentDispatchedTransfer.statusTone}`}>
+                            {currentDispatchedTransfer.status}
+                          </span>
+                          <span className="text-sm text-gray-600">{currentDispatchedTransfer.statusDescription}</span>
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-gray-200 p-4">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Confirmation Time</p>
+                        <p className="mt-1 text-lg font-bold text-gray-900">
+                          {currentDispatchedTransfer.confirmedAt ? 'Confirmed' : 'Awaiting confirmation'}
+                        </p>
+                        <p className="text-sm text-gray-600">{formatDateTime(currentDispatchedTransfer.confirmedAt)}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setDispatchedIndex((current) => Math.max(current - 1, 0))}
+                        disabled={dispatchedIndex === 0}
+                        className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                        Back
+                      </button>
+                      <div className="text-sm text-gray-500">
+                        {formatDateTime(currentDispatchedTransfer.createdAt)}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setDispatchedIndex((current) =>
+                            Math.min(current + 1, dispatchedTransfers.length - 1)
+                          )
+                        }
+                        disabled={dispatchedIndex >= dispatchedTransfers.length - 1}
+                        className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Next
+                        <ChevronRight className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">No dispatched batches available yet.</p>
                 )}
               </div>
             </div>
