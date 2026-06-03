@@ -20,6 +20,7 @@ from .models import (
     DeliveryProof,
     Farmer,
     FertilizerBatch,
+    Issue,
     Notification,
     Warehouse,
     OTPVerification,
@@ -45,6 +46,7 @@ from .serializers import (
     DeliveryProofSerializer,
     FarmerSerializer,
     FertilizerBatchSerializer,
+    IssueSerializer,
     NotificationSerializer,
     WarehouseSerializer,
     OTPVerificationSerializer,
@@ -1209,6 +1211,77 @@ class DeliveryProofViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = DeliveryProof.objects.all()
     serializer_class = DeliveryProofSerializer
     permission_classes = [IsAuthenticated]
+
+
+class IssueViewSet(viewsets.ModelViewSet):
+    queryset = Issue.objects.select_related(
+        "transfer",
+        "transfer__batch",
+        "transfer__from_supplier",
+        "transfer__from_branch",
+        "transfer__to_branch",
+        "transfer__farmer",
+        "reporter",
+        "resolved_by",
+    )
+    serializer_class = IssueSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        user = self.request.user
+        role = resolve_role(user)
+
+        if role == "admin":
+            return queryset.order_by("-created_at")
+
+        if role == "supplier":
+            supplier = Supplier.objects.filter(user=user).first()
+            if not supplier:
+                return queryset.none()
+            return queryset.filter(transfer__from_supplier=supplier).order_by("-created_at")
+
+        if role in {"retailer", "cooperative"}:
+            return queryset.filter(reporter=user).order_by("-created_at")
+
+        return queryset.none()
+
+    def get_permissions(self):
+        if self.action in ["list", "retrieve", "create"]:
+            return [IsAuthenticated()]
+        if self.action in ["resolve", "partial_update", "update", "destroy"]:
+            return [IsAuthenticated(), SupplierOrAdmin()]
+        return [IsAuthenticated()]
+
+    def perform_create(self, serializer):
+        issue = serializer.save(reporter=self.request.user)
+        supplier = issue.transfer.from_supplier
+        if supplier and supplier.user:
+            Notification.objects.create(
+                user=supplier.user,
+                notification_type=Notification.TYPE_SYSTEM,
+                title=f"New {issue.get_issue_type_display().lower()} reported",
+                message=issue.summary,
+                details=f"Transfer #{issue.transfer_id} • {issue.transfer.batch.batch_code if issue.transfer and issue.transfer.batch else 'Batch'}",
+                priority=Notification.PRIORITY_HIGH,
+                transfer=issue.transfer,
+                metadata={
+                    "issue_id": issue.id,
+                    "issue_type": issue.issue_type,
+                    "tab": "issues",
+                },
+            )
+
+    @action(detail=True, methods=["post"])
+    def resolve(self, request, pk=None):
+        issue = self.get_object()
+        resolution_notes = (request.data.get("resolution_notes") or "").strip()
+        issue.status = Issue.RESOLVED
+        issue.resolution_notes = resolution_notes or issue.resolution_notes
+        issue.resolved_by = request.user
+        issue.resolved_at = timezone.now()
+        issue.save(update_fields=["status", "resolution_notes", "resolved_by", "resolved_at", "updated_at"])
+        return Response(self.get_serializer(issue).data)
 
 
 class OTPVerificationViewSet(viewsets.ReadOnlyModelViewSet):

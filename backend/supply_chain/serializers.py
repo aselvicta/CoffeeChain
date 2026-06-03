@@ -8,6 +8,7 @@ from .models import (
     DeliveryProof,
     Farmer,
     FertilizerBatch,
+    Issue,
     Notification,
     OTPVerification,
     Supplier,
@@ -227,6 +228,67 @@ class DeliveryProofSerializer(serializers.ModelSerializer):
             "uploaded_at",
         ]
         read_only_fields = ["cid", "uploaded_by", "uploaded_at"]
+
+
+class IssueSerializer(serializers.ModelSerializer):
+    transfer = TransferSerializer(read_only=True)
+    transfer_id = serializers.PrimaryKeyRelatedField(
+        queryset=Transfer.objects.all(), source="transfer", write_only=True
+    )
+    reporter = UserSerializer(read_only=True)
+    resolved_by = UserSerializer(read_only=True)
+    evidence_file_url = serializers.SerializerMethodField()
+    reporter_role = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Issue
+        fields = [
+            "id",
+            "transfer",
+            "transfer_id",
+            "issue_type",
+            "summary",
+            "description",
+            "evidence_file",
+            "evidence_file_url",
+            "status",
+            "resolution_notes",
+            "reporter",
+            "reporter_role",
+            "resolved_by",
+            "resolved_at",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "reporter",
+            "reporter_role",
+            "resolved_by",
+            "resolved_at",
+            "created_at",
+            "updated_at",
+            "evidence_file_url",
+        ]
+
+    def get_evidence_file_url(self, obj):
+        request = self.context.get("request")
+        if not obj.evidence_file:
+            return None
+        url = obj.evidence_file.url
+        if request is not None:
+            return request.build_absolute_uri(url)
+        return url
+
+    def get_reporter_role(self, obj):
+        if not obj.reporter:
+            return None
+        if obj.reporter.is_staff:
+            return "admin"
+        group_names = set(obj.reporter.groups.values_list("name", flat=True))
+        for role in ("Supplier", "Retailer", "Cooperative", "Regulator"):
+            if role in group_names:
+                return role.lower()
+        return "user"
 
 
 class OTPVerificationSerializer(serializers.ModelSerializer):
