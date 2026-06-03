@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 import { Login } from './login';
 import { AdminDashboard } from './admin-dashboard';
 import { SupplierDashboard } from './supplier-dashboard';
@@ -6,10 +7,36 @@ import { RetailerDashboard } from './retailer-dashboard';
 import { CooperativeDashboard } from './cooperative-dashboard';
 import { LanguageProvider } from './language-context';
 import { fetchProfile, getAccessToken, login, logout } from '../api/client';
+import { buildDashboardPath, resolveDashboardTab } from '../utils/dashboard-routing';
+
+const DASHBOARD_CONFIG = {
+  admin: {
+    defaultTab: 'overview',
+    validTabs: ['overview', 'suppliers', 'retailers', 'cooperatives', 'users'],
+  },
+  supplier: {
+    defaultTab: 'overview',
+    validTabs: ['overview', 'dispatch', 'dispatched', 'warehouse', 'inventory', 'analytics', 'history'],
+  },
+  retailer: {
+    defaultTab: 'overview',
+    validTabs: ['overview', 'receive', 'distribute', 'customers', 'verification', 'history', 'analytics'],
+  },
+  cooperative: {
+    defaultTab: 'overview',
+    validTabs: ['overview', 'farmers', 'fertilizer-in', 'fertilizer-out', 'verification', 'history', 'analytics'],
+  },
+};
+
+function normalizeRole(role) {
+  return role === 'national' ? 'admin' : role;
+}
 
 export function MainApp() {
   const [userProfile, setUserProfile] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const location = useLocation();
+  const navigate = useNavigate();
 
   const buildProfile = (profile) => {
     const { user, role, supplier, branch } = profile;
@@ -87,10 +114,11 @@ export function MainApp() {
   useEffect(() => {
     const onSessionExpired = () => {
       setUserProfile(null);
+      navigate('/login', { replace: true });
     };
     window.addEventListener('coffeechain:session-expired', onSessionExpired);
     return () => window.removeEventListener('coffeechain:session-expired', onSessionExpired);
-  }, []);
+  }, [navigate]);
 
   const handleLogin = async ({ username, password }) => {
     await login(username, password);
@@ -102,7 +130,36 @@ export function MainApp() {
   const handleLogout = () => {
     logout();
     setUserProfile(null);
+    navigate('/login', { replace: true });
   };
+
+  useEffect(() => {
+    if (isLoading || !userProfile) {
+      return;
+    }
+
+    const role = normalizeRole(userProfile.role);
+    const config = DASHBOARD_CONFIG[role] || DASHBOARD_CONFIG.admin;
+    const currentTab = resolveDashboardTab(location.pathname, role, {
+      defaultTab: config.defaultTab,
+      validTabs: config.validTabs,
+    });
+    const nextPath = buildDashboardPath(role, currentTab);
+
+    if (location.pathname !== nextPath) {
+      navigate(nextPath, { replace: true });
+    }
+  }, [isLoading, location.pathname, navigate, userProfile]);
+
+  useEffect(() => {
+    if (isLoading || userProfile) {
+      return;
+    }
+
+    if (location.pathname.startsWith('/app')) {
+      navigate('/login', { replace: true });
+    }
+  }, [isLoading, location.pathname, navigate, userProfile]);
 
   // If not logged in, show login screen
   if (isLoading) {

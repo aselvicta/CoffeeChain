@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 import { Package, Users, Send, History, LogOut, TrendingUp, ShieldCheck } from 'lucide-react';
 import { NotificationBell } from './notification-bell';
 import { useNotifications } from '../hooks/use-notifications';
@@ -28,8 +29,11 @@ import {
   PanelPrimaryButton,
   PanelOutlineButton,
 } from './ui/dashboard-ui';
+import { buildDashboardPath, resolveDashboardTab } from '../utils/dashboard-routing';
 
 export function RetailerDashboard({ userProfile, onLogout }) {
+  const dashboardRole = 'retailer';
+  const dashboardTabs = ['overview', 'receive', 'distribute', 'customers', 'verification', 'history', 'analytics'];
   const [activeTab, setActiveTab] = useState('overview');
   const [inboundTransfers, setInboundTransfers] = useState([]);
   const [distributionForm, setDistributionForm] = useState({ batchId: '', bags: '' });
@@ -55,6 +59,23 @@ export function RetailerDashboard({ userProfile, onLogout }) {
     markRead,
     markAllRead,
   } = useNotifications();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    setActiveTab(
+      resolveDashboardTab(location.pathname, dashboardRole, {
+        defaultTab: 'overview',
+        validTabs: dashboardTabs,
+      })
+    );
+  }, [location.pathname]);
+
+  const goToTab = (tab) => {
+    const nextTab = dashboardTabs.includes(tab) ? tab : 'overview';
+    setActiveTab(nextTab);
+    navigate(buildDashboardPath(dashboardRole, nextTab));
+  };
 
   const distributionTrends = [
     { week: 'W1', bags: 18, verified: 12 },
@@ -211,7 +232,7 @@ export function RetailerDashboard({ userProfile, onLogout }) {
           ].map((item) => (
             <button
               key={item.id}
-              onClick={() => setActiveTab(item.id)}
+              onClick={() => goToTab(item.id)}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
                 activeTab === item.id
                   ? 'bg-green-600 text-white'
@@ -246,7 +267,7 @@ export function RetailerDashboard({ userProfile, onLogout }) {
                     distribute: 'distribute',
                     verification: 'verification',
                   };
-                  setActiveTab(tabMap[tab] || tab);
+                  goToTab(tabMap[tab] || tab);
                 }}
               />
               <div className="text-right">
@@ -326,14 +347,14 @@ export function RetailerDashboard({ userProfile, onLogout }) {
                         ? `${pendingReceiptCount} awaiting confirmation`
                         : 'Confirm incoming stock'
                     }
-                    onClick={() => setActiveTab('receive')}
+                    onClick={() => goToTab('receive')}
                   />
                   <QuickActionCard
                     icon={Send}
                     tone="green"
                     title="Point of Sale"
                     description="Ministry ID discount or walk-in"
-                    onClick={() => setActiveTab('distribute')}
+                    onClick={() => goToTab('distribute')}
                   />
                 </div>
               </div>

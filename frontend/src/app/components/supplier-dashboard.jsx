@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 import { Package, Send, History, BarChart3, LogOut, TrendingUp, ChevronLeft, ChevronRight, Search } from 'lucide-react';
 import { LineChart, Line, PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import { Logo } from './logo';
@@ -7,8 +8,11 @@ import { useNotifications } from '../hooks/use-notifications';
 import { WarehouseModal } from './warehouse-modal';
 import { createTransfer, createWarehouse, deleteWarehouse, fetchBatches, fetchBranches, fetchTransfers, fetchWarehouseCatalog, fetchWarehouses } from '../api/client';
 import { QuickActionCard, PanelPrimaryButton } from './ui/dashboard-ui';
+import { buildDashboardPath, resolveDashboardTab } from '../utils/dashboard-routing';
 
 export function SupplierDashboard({ userProfile, onLogout }) {
+  const dashboardRole = 'supplier';
+  const dashboardTabs = ['overview', 'dispatch', 'dispatched', 'warehouse', 'inventory', 'analytics', 'history'];
   function createDispatchLineItem() {
     return {
       id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -41,12 +45,29 @@ export function SupplierDashboard({ userProfile, onLogout }) {
   const [isSaving, setIsSaving] = useState(false);
   const [readNotificationIds, setReadNotificationIds] = useState([]);
   const [dispatchItems, setDispatchItems] = useState([createDispatchLineItem()]);
+  const location = useLocation();
+  const navigate = useNavigate();
   const {
     notifications: apiNotifications,
     refresh: refreshNotifications,
     markRead: markApiRead,
     markAllRead: markAllApiRead,
   } = useNotifications();
+
+  useEffect(() => {
+    setActiveTab(
+      resolveDashboardTab(location.pathname, dashboardRole, {
+        defaultTab: 'overview',
+        validTabs: dashboardTabs,
+      })
+    );
+  }, [location.pathname]);
+
+  const goToTab = (tab) => {
+    const nextTab = dashboardTabs.includes(tab) ? tab : 'overview';
+    setActiveTab(nextTab);
+    navigate(buildDashboardPath(dashboardRole, nextTab));
+  };
 
   const getDispatchStatusMeta = (status) => {
     const normalizedStatus = String(status || '').toUpperCase();
@@ -452,7 +473,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
           ].map((item) => (
             <button
               key={item.id}
-              onClick={() => setActiveTab(item.id)}
+              onClick={() => goToTab(item.id)}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
                 activeTab === item.id
                   ? 'bg-green-600 text-white'
@@ -481,9 +502,9 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                 unreadCount={unreadNotificationCount}
                 onMarkRead={handleMarkRead}
                 onMarkAllRead={handleMarkAllRead}
-                onNavigateTab={(tab) => setActiveTab(tab === 'dispatch' ? 'dispatch' : tab)}
-                onOpenInventory={() => setActiveTab('inventory')}
-                onOpenDispatch={() => setActiveTab('dispatch')}
+                onNavigateTab={(tab) => goToTab(tab === 'dispatch' ? 'dispatch' : tab)}
+                onOpenInventory={() => goToTab('inventory')}
+                onOpenDispatch={() => goToTab('dispatch')}
               />
               <div className="text-right">
                 <p className="text-sm font-medium text-gray-900">{userProfile.name}</p>
@@ -532,14 +553,14 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                     tone="green"
                     title="Create New Dispatch"
                     description="Send fertilizer to retailers/AMCOS"
-                    onClick={() => setActiveTab('dispatch')}
+                    onClick={() => goToTab('dispatch')}
                   />
                   <QuickActionCard
                     icon={Package}
                     tone="blue"
                     title="Check Inventory"
                     description="View current stock levels"
-                    onClick={() => setActiveTab('inventory')}
+                    onClick={() => goToTab('inventory')}
                   />
                 </div>
               </div>
