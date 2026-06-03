@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 import { 
   TrendingUp, Users, Package, ShoppingCart, 
   BarChart3, LogOut, Menu, X, ChevronRight, AlertCircle,
@@ -10,6 +11,7 @@ import { createUser, fetchAuditReport, fetchBatches, fetchBranches, fetchSupplie
 import { NotificationBell } from './notification-bell';
 import { useNotifications } from '../hooks/use-notifications';
 import { REGION_LIST, TANZANIA_REGIONS } from '../data/tanzania-locations';
+import { buildDashboardPath, resolveDashboardTab } from '../utils/dashboard-routing';
 
 const ANALYTICS_COLORS = ['#16a34a', '#84cc16', '#0f766e', '#22c55e', '#65a30d', '#15803d'];
 
@@ -63,6 +65,8 @@ function buildFertilizerDistribution(records) {
 }
 
 export function AdminDashboard({ userProfile, onLogout }) {
+  const dashboardRole = 'admin';
+  const dashboardTabs = ['overview', 'suppliers', 'retailers', 'cooperatives', 'users'];
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
   const [supplierQuery, setSupplierQuery] = useState('');
@@ -109,6 +113,23 @@ export function AdminDashboard({ userProfile, onLogout }) {
     markRead,
     markAllRead,
   } = useNotifications();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    setActiveTab(
+      resolveDashboardTab(location.pathname, dashboardRole, {
+        defaultTab: 'overview',
+        validTabs: dashboardTabs,
+      })
+    );
+  }, [location.pathname]);
+
+  const goToTab = (tab) => {
+    const nextTab = dashboardTabs.includes(tab) ? tab : 'overview';
+    setActiveTab(nextTab);
+    navigate(buildDashboardPath(dashboardRole, nextTab));
+  };
 
   useEffect(() => {
     const loadData = async () => {
@@ -360,7 +381,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
           ].map((item) => (
             <button
               key={item.id}
-              onClick={() => setActiveTab(item.id)}
+              onClick={() => goToTab(item.id)}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
                 activeTab === item.id
                   ? 'bg-green-700 text-white'
@@ -402,7 +423,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
                 unreadCount={unreadCount}
                 onMarkRead={markRead}
                 onMarkAllRead={markAllRead}
-                onNavigateTab={() => setActiveTab('overview')}
+                onNavigateTab={() => goToTab('overview')}
               />
               <div className="text-right">
                 <p className="text-sm font-medium text-gray-900">{userProfile.name}</p>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 import { Package, Users, Send, History, LogOut, TrendingUp, ShieldCheck } from 'lucide-react';
 import { NotificationBell } from './notification-bell';
 import { useNotifications } from '../hooks/use-notifications';
@@ -23,6 +24,7 @@ import {
   otpLoadingLabel,
   requestDistributionOtp,
 } from '../utils/distribution-otp';
+import { buildDashboardPath, resolveDashboardTab } from '../utils/dashboard-routing';
 import {
   QuickActionCard,
   ContentListRow,
@@ -31,6 +33,8 @@ import {
 } from './ui/dashboard-ui';
 
 export function CooperativeDashboard({ userProfile, onLogout }) {
+  const dashboardRole = 'cooperative';
+  const dashboardTabs = ['overview', 'farmers', 'fertilizer-in', 'fertilizer-out', 'verification', 'history', 'analytics'];
   const [activeTab, setActiveTab] = useState('overview');
   const [inboundTransfers, setInboundTransfers] = useState([]);
   const [distributionForm, setDistributionForm] = useState({ batchId: '', farmer: '', bags: '', otp: '' });
@@ -57,6 +61,23 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
     markRead,
     markAllRead,
   } = useNotifications();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    setActiveTab(
+      resolveDashboardTab(location.pathname, dashboardRole, {
+        defaultTab: 'overview',
+        validTabs: dashboardTabs,
+      })
+    );
+  }, [location.pathname]);
+
+  const goToTab = (tab) => {
+    const nextTab = dashboardTabs.includes(tab) ? tab : 'overview';
+    setActiveTab(nextTab);
+    navigate(buildDashboardPath(dashboardRole, nextTab));
+  };
   const verificationTrend = [
     { month: 'Jan', verified: 32, pending: 12 },
     { month: 'Feb', verified: 45, pending: 10 },
@@ -206,7 +227,7 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
           ].map((item) => (
             <button
               key={item.id}
-              onClick={() => setActiveTab(item.id)}
+              onClick={() => goToTab(item.id)}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
                 activeTab === item.id
                   ? 'bg-green-600 text-white'
@@ -242,7 +263,7 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                     verification: 'verification',
                     farmers: 'farmers',
                   };
-                  setActiveTab(tabMap[tab] || tab);
+                  goToTab(tabMap[tab] || tab);
                   const transferId =
                     notification?.transferId ||
                     notification?.metadata?.transfer_id ||
@@ -305,7 +326,7 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                     tone="green"
                     title="Distribute Fertilizer"
                     description="Give to farmers with OTP"
-                    onClick={() => setActiveTab('fertilizer-out')}
+                    onClick={() => goToTab('fertilizer-out')}
                   />
                   <QuickActionCard
                     icon={Package}
@@ -316,14 +337,13 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                         ? `${pendingReceiptCount} pending receipt${pendingReceiptCount === 1 ? '' : 's'}`
                         : 'Confirm incoming batches'
                     }
-                    onClick={() => setActiveTab('fertilizer-in')}
+                    onClick={() => goToTab('fertilizer-in')}
                   />
                   <QuickActionCard
-                    icon={Users}
                     tone="blue"
                     title="Farmer Registry"
                     description="Register and view farmers"
-                    onClick={() => setActiveTab('farmers')}
+                    onClick={() => goToTab('farmers')}
                   />
                 </div>
               </div>
@@ -354,7 +374,7 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                     No confirmed fertilizer batches available.
                   </p>
                   <p className="text-xs text-amber-700">
-                    Go to <button type="button" onClick={() => setActiveTab('fertilizer-in')} className="font-semibold underline">Receive Fertilizer</button> to confirm incoming batches before distributing.
+                    Go to <button type="button" onClick={() => goToTab('fertilizer-in')} className="font-semibold underline">Receive Fertilizer</button> to confirm incoming batches before distributing.
                   </p>
                 </div>
               )}
@@ -364,7 +384,7 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                     No farmers registered with this AMCOS.
                   </p>
                   <p className="text-xs text-blue-700">
-                    Go to <button type="button" onClick={() => setActiveTab('farmers')} className="font-semibold underline">Farmer Registry</button> to register farmers from the Ministry registry.
+                    Go to <button type="button" onClick={() => goToTab('farmers')} className="font-semibold underline">Farmer Registry</button> to register farmers from the Ministry registry.
                   </p>
                 </div>
               )}
