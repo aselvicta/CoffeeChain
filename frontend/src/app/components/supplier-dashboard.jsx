@@ -227,24 +227,51 @@ export function SupplierDashboard({ userProfile, onLogout }) {
 
   const recentDispatches = useMemo(() => dispatches.slice(0, 8), [dispatches]);
 
+  const visibleDispatchedTransfers = useMemo(() => {
+    const query = dispatchedQuery.trim().toLowerCase();
+    return dispatchedTransfers.filter((dispatch) => {
+      const matchesQuery =
+        !query ||
+        dispatch.batchCode.toLowerCase().includes(query) ||
+        dispatch.product.toLowerCase().includes(query) ||
+        dispatch.recipient.toLowerCase().includes(query) ||
+        dispatch.warehouse.toLowerCase().includes(query);
+      const matchesStatus =
+        dispatchedStatusFilter === 'all' || dispatch.rawStatus === dispatchedStatusFilter;
+      return matchesQuery && matchesStatus;
+    });
+  }, [dispatchedTransfers, dispatchedQuery, dispatchedStatusFilter]);
+
   const dispatchedStatusOptions = useMemo(() => {
-    const counts = dispatchedTransfers.reduce((acc, dispatch) => {
+    const counts = visibleDispatchedTransfers.reduce((acc, dispatch) => {
       acc[dispatch.rawStatus] = (acc[dispatch.rawStatus] || 0) + 1;
       return acc;
     }, {});
 
     return [
-      { value: 'all', label: 'All statuses', count: dispatchedTransfers.length },
+      { value: 'all', label: 'All statuses', count: visibleDispatchedTransfers.length },
       { value: 'DISPATCHED', label: 'Dispatched', count: counts.DISPATCHED || 0 },
       { value: 'RECEIVED', label: 'Received', count: counts.RECEIVED || 0 },
       { value: 'VERIFIED', label: 'Verified', count: counts.VERIFIED || 0 },
     ];
-  }, [dispatchedTransfers]);
+  }, [visibleDispatchedTransfers]);
+
+  useEffect(() => {
+    const debounceId = setTimeout(() => {
+      const normalizedQuery = dispatchedSearchDraft.trim();
+      if (normalizedQuery !== dispatchedQuery) {
+        setDispatchedQuery(normalizedQuery);
+      }
+    }, 350);
+
+    return () => clearTimeout(debounceId);
+  }, [dispatchedSearchDraft, dispatchedQuery]);
 
   useEffect(() => {
     const loadDispatchedTransfers = async () => {
       if (!userProfile?.supplierRecordId) return;
       try {
+        setDispatchedTransfers([]);
         const params = {
           supplier_id: userProfile.supplierRecordId,
           transfer_type: 'SUPPLIER_TO_BRANCH',
@@ -294,6 +321,14 @@ export function SupplierDashboard({ userProfile, onLogout }) {
     setDispatchedIndex(0);
   };
 
+  const resetDispatchedFilters = () => {
+    setDispatchedSearchDraft('');
+    setDispatchedQuery('');
+    setDispatchedStatusDraft('all');
+    setDispatchedStatusFilter('all');
+    setDispatchedIndex(0);
+  };
+
   const handleDispatchedSearchKeyDown = (event) => {
     if (event.key === 'Enter') {
       event.preventDefault();
@@ -303,17 +338,17 @@ export function SupplierDashboard({ userProfile, onLogout }) {
 
   const pageSize = 6;
   const dispatchedPageStart = dispatchedIndex;
-  const currentDispatchedTransfers = dispatchedTransfers.slice(
+  const currentDispatchedTransfers = visibleDispatchedTransfers.slice(
     dispatchedPageStart,
     dispatchedPageStart + pageSize
   );
-  const dispatchedPageEnd = Math.min(dispatchedPageStart + pageSize, dispatchedTransfers.length);
+  const dispatchedPageEnd = Math.min(dispatchedPageStart + pageSize, visibleDispatchedTransfers.length);
 
   useEffect(() => {
-    if (dispatchedIndex >= dispatchedTransfers.length && dispatchedTransfers.length > 0) {
-      setDispatchedIndex(Math.max(dispatchedTransfers.length - pageSize, 0));
+    if (dispatchedIndex >= visibleDispatchedTransfers.length && visibleDispatchedTransfers.length > 0) {
+      setDispatchedIndex(Math.max(visibleDispatchedTransfers.length - pageSize, 0));
     }
-  }, [dispatchedIndex, dispatchedTransfers.length]);
+  }, [dispatchedIndex, visibleDispatchedTransfers.length]);
 
   const formatDateTime = (value) => {
     if (!value) return '—';
@@ -784,13 +819,25 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                       >
                         <Search className="h-4 w-4" />
                       </button>
+                      <button
+                        type="button"
+                        onClick={resetDispatchedFilters}
+                        className="rounded-lg border border-gray-300 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                      >
+                        Reset
+                      </button>
                     </div>
                   </div>
                   <div>
                     <label className="mb-1 block text-sm font-medium text-gray-700">Filter</label>
                     <select
                       value={dispatchedStatusDraft}
-                      onChange={(e) => setDispatchedStatusDraft(e.target.value)}
+                      onChange={(e) => {
+                        const nextStatus = e.target.value;
+                        setDispatchedStatusDraft(nextStatus);
+                        setDispatchedStatusFilter(nextStatus);
+                        setDispatchedIndex(0);
+                      }}
                       className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:border-transparent focus:ring-2 focus:ring-green-500"
                     >
                         {dispatchedStatusOptions.map((option) => (
@@ -803,7 +850,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                   <div className="rounded-lg border border-gray-200 p-4 flex items-center justify-between">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Results</p>
-                        <p className="text-sm text-gray-600">Showing up to 6 dispatches at a time</p>
+                      <p className="text-sm text-gray-600">Showing up to 6 dispatches at a time</p>
                     </div>
                     <p className="text-lg font-bold text-gray-900">{dispatchedTransfers.length}</p>
                   </div>
