@@ -1,4 +1,7 @@
 import { useMemo, useState } from 'react';
+import { sortByDateDesc, HISTORY_PAGE_SIZE } from '../utils/list-limits';
+import { usePaginatedList } from '../hooks/use-paginated-list';
+import { PaginationBar } from './ui/pagination-bar';
 import {
   FileWarning,
   Package,
@@ -11,6 +14,7 @@ import {
 } from 'lucide-react';
 import { createIssue, receiveTransfer } from '../api/client';
 import { ContentListRow, PanelOutlineButton } from './ui/dashboard-ui';
+import { getUserMessage } from '../utils/user-messages';
 
 const STATUS_BADGES = {
   DISPATCHED: {
@@ -45,9 +49,13 @@ export function ReceiveFertilizerPanel({ inboundTransfers, onRefresh, highlightT
     [inboundTransfers]
   );
   const completed = useMemo(
-    () => inboundTransfers.filter((transfer) => transfer.status !== 'DISPATCHED'),
+    () =>
+      sortByDateDesc(
+        inboundTransfers.filter((transfer) => transfer.status !== 'DISPATCHED')
+      ),
     [inboundTransfers]
   );
+  const receiptHistoryPagination = usePaginatedList(completed, HISTORY_PAGE_SIZE);
 
   const closeIssueForm = () => {
     setSelectedTransfer(null);
@@ -70,7 +78,7 @@ export function ReceiveFertilizerPanel({ inboundTransfers, onRefresh, highlightT
       );
       await onRefresh?.();
     } catch (error) {
-      setErrorMessage(error.message || 'Failed to confirm receipt.');
+      setErrorMessage(getUserMessage(error, 'Could not confirm receipt. Please try again.'));
     } finally {
       setBusyId(null);
     }
@@ -109,7 +117,7 @@ export function ReceiveFertilizerPanel({ inboundTransfers, onRefresh, highlightT
       closeIssueForm();
       await onRefresh?.();
     } catch (error) {
-      setErrorMessage(error.message || 'Failed to submit issue.');
+      setErrorMessage(getUserMessage(error, 'Could not submit issue. Please try again.'));
     } finally {
       setIssueBusy(false);
     }
@@ -332,7 +340,7 @@ export function ReceiveFertilizerPanel({ inboundTransfers, onRefresh, highlightT
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200 bg-white">
-                {completed.map((transfer) => {
+                {receiptHistoryPagination.pageItems.map((transfer) => {
                   const badge =
                     STATUS_BADGES[transfer.status] || STATUS_BADGES.RECEIVED;
                   return (
@@ -365,6 +373,18 @@ export function ReceiveFertilizerPanel({ inboundTransfers, onRefresh, highlightT
                 })}
               </tbody>
             </table>
+            <PaginationBar
+              page={receiptHistoryPagination.page}
+              totalPages={receiptHistoryPagination.totalPages}
+              total={receiptHistoryPagination.total}
+              rangeStart={receiptHistoryPagination.rangeStart}
+              rangeEnd={receiptHistoryPagination.rangeEnd}
+              onPrev={receiptHistoryPagination.goPrev}
+              onNext={receiptHistoryPagination.goNext}
+              canPrev={receiptHistoryPagination.canPrev}
+              canNext={receiptHistoryPagination.canNext}
+              className="px-4 pb-4"
+            />
           </div>
         )}
       </div>

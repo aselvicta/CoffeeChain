@@ -334,3 +334,104 @@ def notify_for_farmer_registered(farmer, branch: Branch, actor=None):
         details=farmer.ministry_id,
         priority=Notification.PRIORITY_LOW,
     )
+
+
+def notify_for_integrity_mismatch(result) -> bool:
+    """Alert admins when a verified transfer fails integrity checks.
+
+    Returns True if a new notification was created.
+    """
+    transfer_id = getattr(result, "transfer_id", None) or result.get("transfer_id")
+    if not transfer_id:
+        return False
+
+    recent_cutoff = timezone.now() - timezone.timedelta(hours=24)
+    already_notified = Notification.objects.filter(
+        notification_type=Notification.TYPE_SYSTEM,
+        transfer_id=transfer_id,
+        metadata__integrity_alert=True,
+        created_at__gte=recent_cutoff,
+    ).exists()
+    if already_notified:
+        return False
+
+    batch_code = getattr(result, "batch_code", None) or result.get("batch_code") or "Unknown batch"
+    branch_name = getattr(result, "branch_name", None) or result.get("branch_name") or ""
+    changes = getattr(result, "changes", None) or result.get("changes") or []
+    issues = getattr(result, "issues", None) or result.get("issues") or []
+    explorer_url = getattr(result, "explorer_url", None) or result.get("explorer_url")
+    transfer = Transfer.objects.filter(pk=transfer_id).first()
+
+    change_lines = []
+    for change in changes:
+        field = change.get("field", "field")
+        db_val = change.get("database")
+        receipt_val = change.get("receipt")
+        if field == "data hash":
+            change_lines.append(
+                f"Hash changed: DB {str(db_val)[:16]}… vs receipt {str(receipt_val)[:16]}…"
+            )
+        else:
+            change_lines.append(f"{field.title()}: DB={db_val!s} → Receipt={receipt_val!s}")
+
+    issue_summary = change_lines[0] if change_lines else (issues[0] if issues else "Data mismatch detected.")
+
+    details_lines = [
+        issue_summary,
+        f"Transfer #{transfer_id} · {batch_code}",
+    ]
+    if branch_name:
+        details_lines.append(f"Branch: {branch_name}")
+    last_mod = getattr(result, "last_api_modification", None) or result.get("last_api_modification")
+    if last_mod and last_mod.get("username"):
+        details_lines.append(
+            f"Last modified via API by: {last_mod['username']} "
+            f"({last_mod.get('modified_at', '')[:19].replace('T', ' ')})"
+        )
+        for change in last_mod.get("changes") or []:
+            details_lines.append(
+                f"  · {change.get('field')}: {change.get('old')!s} → {change.get('new')!s}"
+            )
+    elif changes:
+        details_lines.append(
+            "Last modified via API by: unknown (possible direct database edit)"
+        )
+    if len(change_lines) > 1:
+        details_lines.extend(change_lines[1:])
+    if explorer_url:
+        details_lines.append(f"Polygon: {explorer_url}")
+
+    notify_admins(
+        notification_type=Notification.TYPE_SYSTEM,
+        title=f"Critical: data tampering — Transfer #{transfer_id}",
+        message=(
+            f"Database no longer matches the stored receipt for {batch_code}"
+            + (f" at {branch_name}." if branch_name else ".")
+        ),
+        details="\n".join(details_lines),
+        priority=Notification.PRIORITY_HIGH,
+        transfer=transfer,
+        metadata={
+            "integrity_alert": True,
+            "tab": "integrity",
+            "transfer_id": transfer_id,
+            "explorer_url": explorer_url,
+            "changes": changes,
+            "last_api_modification": last_mod,
+        },
+    )
+    notify_regulators(
+        notification_type=Notification.TYPE_SYSTEM,
+        title=f"Integrity alert — Transfer #{transfer_id}",
+        message=f"Possible tampering at {branch_name or batch_code}.",
+        details="\n".join(details_lines[:4]),
+        priority=Notification.PRIORITY_HIGH,
+        transfer=transfer,
+        metadata={
+            "integrity_alert": True,
+            "tab": "integrity",
+            "transfer_id": transfer_id,
+            "changes": changes,
+        },
+    )
+    return True

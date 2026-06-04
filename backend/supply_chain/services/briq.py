@@ -43,21 +43,34 @@ def build_otp_message_template(
     language: str = "en",
     quantity_bags: int | None = None,
     fertilizer_type: str = "",
+    farmer_name: str = "",
+    branch_name: str = "",
+    batch_code: str = "",
 ) -> str:
+    """Build the SMS OTP template sent to the farmer (must include {code} and {expiry})."""
+
     custom = (getattr(settings, "BRIQ_OTP_MESSAGE_TEMPLATE", "") or "").strip()
     if custom and "{code}" in custom:
-        return custom
+        return _substitute_template_vars(
+            custom,
+            bags=quantity_bags or 0,
+            fertilizer=(fertilizer_type or "fertilizer").strip(),
+            farmer_name=(farmer_name or "farmer").strip(),
+            branch=(branch_name or "your branch").strip(),
+            batch=(batch_code or "").strip(),
+        )
 
     bags = quantity_bags or 0
-    ftype = fertilizer_type or "fertilizer"
-    expiry = getattr(settings, "OTP_EXPIRY_MINUTES", 10)
+    ftype = (fertilizer_type or "fertilizer").strip()
+    farmer = (farmer_name or "farmer").strip()
+    branch = (branch_name or "your branch").strip()
+    sw = (language or "en").lower().startswith("sw")
 
-    if (language or "en").lower().startswith("sw"):
+    if sw:
         if bags:
             return (
-                f"CoffeeChain: Umepokea mifuko {bags} ya {ftype}. "
-                f"Nambari yako ni {{code}}. Inaisha baada ya dakika {{expiry}}. "
-                f"Shiriki na wakala wako wa AMCOS."
+                f"CoffeeChain: Habari {farmer}, thibitisha kupokea mifuko {bags} ya {ftype} "
+                f"kutoka {branch}. Nambari yako ni {{code}}. Inaisha baada ya dakika {{expiry}}."
             )
         return (
             f"CoffeeChain: Nambari yako ya uthibitisho ni {{code}}. "
@@ -66,11 +79,66 @@ def build_otp_message_template(
 
     if bags:
         return (
-            f"CoffeeChain: {bags} bag(s) {ftype}. "
-            f"Code {{code}}. Expires in {{expiry}} min."
+            f"CoffeeChain: Hi {farmer}, confirm receipt of {bags} bag(s) of {ftype} "
+            f"from {branch}. Your code is {{code}}. Expires in {{expiry}} min."
         )
-    # Briq-recommended short template (must include {code} and {expiry})
-    return "Your verification code is {code}. It expires in {expiry} minutes."
+    return (
+        "CoffeeChain: Confirm your fertilizer receipt. "
+        "Your code is {code}. Expires in {expiry} min."
+    )
+
+
+def build_channel_delivery_hint(
+    *,
+    delivery_method: str,
+    language: str = "en",
+    quantity_bags: int | None = None,
+    fertilizer_type: str = "",
+    farmer_name: str = "",
+) -> str:
+    """Staff-facing hint describing what the farmer received on each channel."""
+
+    bags = quantity_bags or 0
+    ftype = (fertilizer_type or "fertilizer").strip()
+    farmer = (farmer_name or "the farmer").strip()
+    sw = (language or "en").lower().startswith("sw")
+    method = (delivery_method or "sms").lower().strip()
+
+    if method == "call":
+        if sw:
+            return (
+                f"Briq inapiga simu {farmer} kusoma nambari ya uthibitisho "
+                f"wa mifuko {bags} ya {ftype}."
+            )
+        return (
+            f"Briq is calling {farmer} to read the verification code "
+            f"for {bags} bag(s) of {ftype}."
+        )
+
+    if method == "whatsapp":
+        if sw:
+            return (
+                f"Nambari ya uthibitisho wa mifuko {bags} ya {ftype} "
+                f"imetumwa WhatsApp kwa {farmer}."
+            )
+        return (
+            f"Verification code for {bags} bag(s) of {ftype} "
+            f"sent to {farmer} on WhatsApp."
+        )
+
+    if sw:
+        return (
+            f"Ujumbe wa uthibitisho wa mifuko {bags} ya {ftype} "
+            f"umetumwa SMS kwa {farmer}."
+        )
+    return f"Receipt confirmation for {bags} bag(s) of {ftype} sent by SMS to {farmer}."
+
+
+def _substitute_template_vars(template: str, **values: str | int) -> str:
+    result = template
+    for key, value in values.items():
+        result = result.replace(f"{{{key}}}", str(value))
+    return result
 
 
 def _api_headers() -> dict[str, str]:
@@ -109,6 +177,9 @@ def _otp_request_body(
     *,
     quantity_bags: int | None = None,
     fertilizer_type: str = "",
+    farmer_name: str = "",
+    branch_name: str = "",
+    batch_code: str = "",
     delivery_method: str = "sms",
 ) -> tuple[str, dict[str, Any], int]:
     msisdn = normalize_phone_digits(phone_number)
@@ -130,6 +201,9 @@ def _otp_request_body(
             language=language,
             quantity_bags=quantity_bags,
             fertilizer_type=fertilizer_type,
+            farmer_name=farmer_name,
+            branch_name=branch_name,
+            batch_code=batch_code,
         )
         if sender_id:
             body["sender_id"] = sender_id
@@ -142,6 +216,9 @@ def _parse_briq_otp_response(
     msisdn: str,
     otp_length: int,
     delivery_method: str,
+    quantity_bags: int | None = None,
+    fertilizer_type: str = "",
+    farmer_name: str = "",
 ) -> dict[str, Any]:
     data: dict[str, Any] = {}
     try:
@@ -153,23 +230,19 @@ def _parse_briq_otp_response(
         return _client_payload(
             delivered=False,
             phone_number=msisdn,
-            error="Briq wallet has insufficient credits. Top up at karibu.briq.tz.",
+            error="SMS credits are low. Please contact your administrator.",
         )
 
     if response.ok and data.get("success"):
         expires = (data.get("data") or {}).get("expires_at")
-        channel_hint = {
-            "sms": (
-                "A verification code was sent by SMS. Ask the farmer to check their phone."
-            ),
-            "call": (
-                "Briq is calling the farmer now to read the verification code aloud. "
-                "Ask them to answer the phone."
-            ),
-            "whatsapp": (
-                "Verification code sent on WhatsApp. Ask the farmer to check WhatsApp."
-            ),
-        }.get(delivery_method, _CLIENT_HINT)
+        language = getattr(settings, "BRIQ_OTP_LANGUAGE", "en")
+        channel_hint = build_channel_delivery_hint(
+            delivery_method=delivery_method,
+            language=language,
+            quantity_bags=quantity_bags,
+            fertilizer_type=fertilizer_type,
+            farmer_name=farmer_name,
+        )
         payload = _client_payload(
             delivered=True,
             phone_number=msisdn,
@@ -183,9 +256,13 @@ def _parse_briq_otp_response(
         )
         if delivery_method == "sms":
             payload["handset_note"] = (
-                "Briq accepted the SMS request. If the farmer's phone shows nothing, "
-                "try Phone call in the OTP modal or confirm Sender ID and credits at "
-                "karibu.briq.tz."
+                "The SMS includes the bag count and fertilizer type. "
+                "If nothing arrives within a minute, try Phone call or WhatsApp."
+            )
+        elif delivery_method == "whatsapp":
+            payload["handset_note"] = (
+                "WhatsApp uses Briq's approved OTP template. "
+                "Ask the farmer to confirm the bag count shown on this screen."
             )
         return payload
 
@@ -209,6 +286,9 @@ def request_otp(
     *,
     quantity_bags: int | None = None,
     fertilizer_type: str = "",
+    farmer_name: str = "",
+    branch_name: str = "",
+    batch_code: str = "",
     delivery_method: str = "sms",
 ) -> dict[str, Any]:
     """Request Briq to generate and deliver an OTP. Returns API-safe metadata (no code)."""
@@ -218,13 +298,16 @@ def request_otp(
         return _client_payload(
             delivered=False,
             phone_number=normalize_phone_digits(phone_number),
-            error="BRIQ_API_KEY and BRIQ_APP_KEY must be configured in backend/.env",
+            error="SMS verification is not configured.",
         )
 
     msisdn, body, otp_length = _otp_request_body(
         phone_number,
         quantity_bags=quantity_bags,
         fertilizer_type=fertilizer_type,
+        farmer_name=farmer_name,
+        branch_name=branch_name,
+        batch_code=batch_code,
         delivery_method=delivery_method,
     )
     if not msisdn or len(msisdn) < 11:
@@ -250,6 +333,9 @@ def request_otp(
             msisdn=msisdn,
             otp_length=otp_length,
             delivery_method=method,
+            quantity_bags=quantity_bags,
+            fertilizer_type=fertilizer_type,
+            farmer_name=farmer_name,
         )
         result["briq_duration_ms"] = int((time.monotonic() - started) * 1000)
         logger.info(
@@ -286,6 +372,9 @@ def resend_otp(
     *,
     quantity_bags: int | None = None,
     fertilizer_type: str = "",
+    farmer_name: str = "",
+    branch_name: str = "",
+    batch_code: str = "",
     delivery_method: str = "sms",
 ) -> dict[str, Any]:
     """Resend the active Briq OTP (invalidates the previous code)."""
@@ -295,13 +384,16 @@ def resend_otp(
         return _client_payload(
             delivered=False,
             phone_number=normalize_phone_digits(phone_number),
-            error="BRIQ_API_KEY and BRIQ_APP_KEY must be configured in backend/.env",
+            error="SMS verification is not configured.",
         )
 
     msisdn, body, otp_length = _otp_request_body(
         phone_number,
         quantity_bags=quantity_bags,
         fertilizer_type=fertilizer_type,
+        farmer_name=farmer_name,
+        branch_name=branch_name,
+        batch_code=batch_code,
         delivery_method=delivery_method,
     )
     if not msisdn or len(msisdn) < 11:
@@ -327,6 +419,9 @@ def resend_otp(
             msisdn=msisdn,
             otp_length=otp_length,
             delivery_method=method,
+            quantity_bags=quantity_bags,
+            fertilizer_type=fertilizer_type,
+            farmer_name=farmer_name,
         )
         result["briq_duration_ms"] = int((time.monotonic() - started) * 1000)
         logger.info(

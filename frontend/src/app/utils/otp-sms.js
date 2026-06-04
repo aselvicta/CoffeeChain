@@ -1,4 +1,6 @@
-/** Strip legacy simulated / Africa's Talking hints from SMS payloads. */
+import { getOtpFailureMessage } from './user-messages';
+
+/** Strip legacy simulated hints and internal-only SMS fields before UI use. */
 export function sanitizeSmsPayload(sms) {
   if (!sms || typeof sms !== 'object') return sms;
   const note = String(sms.note || '');
@@ -17,6 +19,16 @@ export function sanitizeSmsPayload(sms) {
   if (clean.provider === 'simulated') {
     clean.provider = 'briq';
   }
+
+  delete clean.agent_code;
+  delete clean.briq_http_status;
+  delete clean.briq_duration_ms;
+  delete clean.briq_api_message;
+  delete clean.briq_error;
+  delete clean.briq_attempted;
+  delete clean.backend_reached;
+  delete clean.api_accepted;
+
   return clean;
 }
 
@@ -24,17 +36,12 @@ export function sanitizeSmsPayload(sms) {
  * Open the farmer OTP modal after Briq accepts the OTP delivery request.
  * On failure, show a dashboard status message instead of the OTP modal.
  */
-export function handleOtpSmsResponse(sms, { onDelivered, onFailed }) {
+export function handleOtpSmsResponse(sms, { onDelivered, onFailed, language = 'en' }) {
   const payload = sanitizeSmsPayload(sms);
   if (payload?.delivered) {
     onDelivered(payload);
     return true;
   }
-  onFailed(
-    payload?.user_message ||
-      payload?.note ||
-      payload?.error ||
-      'SMS could not be sent. Check Briq settings in backend/.env and try again.'
-  );
+  onFailed(getOtpFailureMessage(payload, language));
   return false;
 }

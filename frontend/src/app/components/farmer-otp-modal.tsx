@@ -1,35 +1,25 @@
-import { useState, useEffect } from 'react';
-import {
-  ShieldCheck,
-  CheckCircle2,
-  AlertCircle,
-  RefreshCw,
-  Lock,
-  X,
-} from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { AlertCircle, CheckCircle2, Phone, RefreshCw } from 'lucide-react';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from './ui/input-otp';
 import { useLanguage } from './language-context';
 import { Logo } from './logo';
-import { formatOtpDeliveryStatus, otpLoadingLabel } from '../utils/distribution-otp';
+import { otpLoadingLabel } from '../utils/distribution-otp';
+import { getUserMessage } from '../utils/user-messages';
+
+function WhatsAppIcon({ className = 'h-5 w-5' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
+      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.435 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+    </svg>
+  );
+}
 
 interface SmsInfo {
-  provider?: string;
-  delivered?: boolean;
   delivery_method?: string;
   phone_number?: string;
   message?: string;
-  note?: string;
-  error?: string;
-  transfer_id?: number;
-  sent_at?: string;
-  backend_reached?: boolean;
-  briq_duration_ms?: number;
-  briq_http_status?: number;
-  briq_api_message?: string;
+  user_message?: string;
   handset_note?: string;
-  agent_code?: string;
-  briq_attempted?: boolean;
-  is_resend?: boolean;
 }
 
 interface FarmerOTPModalProps {
@@ -49,6 +39,13 @@ interface FarmerOTPModalProps {
   otpLength?: number;
 }
 
+function formatPhoneDisplay(phone?: string) {
+  if (!phone) return '';
+  const digits = phone.replace(/\D/g, '');
+  if (!digits) return '';
+  return digits.startsWith('255') ? `+${digits}` : `+${digits}`;
+}
+
 export function FarmerOTPModal({
   isOpen,
   onClose,
@@ -56,8 +53,6 @@ export function FarmerOTPModal({
   onVerify,
   onResend,
   farmerName,
-  farmerId,
-  transferId,
   smsInfo,
   distributionData,
   otpLength = 6,
@@ -70,19 +65,12 @@ export function FarmerOTPModal({
   >('idle');
   const [error, setError] = useState('');
   const [isResending, setIsResending] = useState(false);
-  const [resendMethod, setResendMethod] = useState<string | null>(null);
-
-  const otpLabel =
-    language === 'en'
-      ? `Enter ${otpLength}-digit OTP code`
-      : `Weka nambari ya OTP ya tarakimu ${otpLength}`;
 
   useEffect(() => {
     if (isOpen) {
       setOtp('');
       setVerificationStatus('idle');
       setError('');
-      setResendMethod(null);
     }
   }, [isOpen, farmerName, otpLength]);
 
@@ -99,10 +87,10 @@ export function FarmerOTPModal({
     try {
       await onVerify(code);
       setVerificationStatus('success');
-      setTimeout(() => onVerified(), 900);
+      setTimeout(() => onVerified(), 700);
     } catch (err) {
       setVerificationStatus('error');
-      setError(err instanceof Error ? err.message : t('invalidOtp'));
+      setError(getUserMessage(err, t('invalidOtp')));
       setOtp('');
     } finally {
       setIsVerifying(false);
@@ -114,14 +102,12 @@ export function FarmerOTPModal({
     setError('');
     setVerificationStatus('idle');
     setIsResending(true);
-    setResendMethod(deliveryMethod || 'sms');
     try {
       await onResend(deliveryMethod ? { delivery_method: deliveryMethod } : undefined);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('invalidOtp'));
+      setError(getUserMessage(err, t('invalidOtp')));
     } finally {
       setIsResending(false);
-      setResendMethod(null);
     }
   };
 
@@ -133,139 +119,62 @@ export function FarmerOTPModal({
     !isResending &&
     verificationStatus !== 'success';
 
-  const activeMethod = isResending
-    ? resendMethod || 'sms'
-    : smsInfo?.delivery_method || 'sms';
+  const phoneDisplay = formatPhoneDisplay(smsInfo?.phone_number);
+  const deliveryMethod = smsInfo?.delivery_method || 'sms';
 
-  const deliveryHint =
-    smsInfo?.message ||
-    (activeMethod === 'call'
+  const channelLabel =
+    deliveryMethod === 'call'
       ? language === 'en'
-        ? 'Answer the incoming call — Briq will read the code aloud.'
-        : 'Kubali simu inayoingia — Briq itasoma nambari kwa sauti.'
-      : activeMethod === 'whatsapp'
-        ? language === 'en'
-          ? 'Check WhatsApp on the farmer phone for the code.'
-          : 'Angalia WhatsApp kwenye simu ya mkulima kwa nambari.'
-        : language === 'en'
-          ? `Check SMS on the farmer phone for the ${otpLength}-digit code.`
-          : `Angalia SMS kwenye simu ya mkulima kwa nambari ya tarakimu ${otpLength}.`);
+        ? 'Call'
+        : 'Simu'
+      : deliveryMethod === 'whatsapp'
+        ? 'WhatsApp'
+        : 'SMS';
 
-  const deliveryStatusLine = formatOtpDeliveryStatus(smsInfo, language);
+  const summaryLine =
+    language === 'en'
+      ? `${farmerName} · ${distributionData.bagsGiven} bags ${distributionData.fertilizerType}`
+      : `${farmerName} · mifuko ${distributionData.bagsGiven} ${distributionData.fertilizerType}`;
+
+  const deliveryLine = phoneDisplay
+    ? language === 'en'
+      ? `${channelLabel} → ${phoneDisplay}`
+      : `${channelLabel} → ${phoneDisplay}`
+    : language === 'en'
+      ? `Code sent via ${channelLabel}`
+      : `Nambari imetumwa kupitia ${channelLabel}`;
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-gray-500/25 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4 backdrop-blur-[1px]"
       role="dialog"
       aria-modal="true"
       aria-labelledby="farmer-otp-title"
     >
-      <div className="relative w-full max-w-[400px] rounded-2xl border border-gray-100 bg-white p-8 shadow-sm">
+      <div className="relative w-full max-w-[380px] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl">
         {isResending && (
-          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-2xl bg-white/90 px-6 text-center">
-            <RefreshCw className="mb-3 h-8 w-8 animate-spin text-green-600" />
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-white/95 px-6 text-center">
+            <RefreshCw className="mb-2 h-6 w-6 animate-spin text-green-600" />
             <p className="text-sm font-medium text-gray-900">
-              {otpLoadingLabel('api', language, activeMethod)}
-            </p>
-            <p className="mt-2 text-xs text-gray-500">
-              {language === 'en'
-                ? 'Waiting for CoffeeChain backend and Briq…'
-                : 'Inasubiri backend na Briq…'}
+              {otpLoadingLabel('api', language, deliveryMethod)}
             </p>
           </div>
         )}
 
-        <div className="mb-6 flex flex-col items-center text-center">
-          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-gray-200 bg-gray-50">
+        <div className="px-6 pb-4 pt-6 text-center">
+          <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-green-50 ring-1 ring-green-100">
             <Logo size="sm" showText={false} theme="dark" />
           </div>
-          <h2 id="farmer-otp-title" className="text-lg font-semibold text-gray-900">
+
+          <h2 id="farmer-otp-title" className="text-lg font-semibold tracking-tight text-gray-900">
             {t('otpVerification')}
           </h2>
-          <p className="mt-1 text-sm text-gray-500">{otpLabel}</p>
-          {(transferId || smsInfo?.transfer_id) && (
-            <p className="mt-1 text-xs text-gray-400">
-              Transfer #{transferId || smsInfo?.transfer_id}
-            </p>
-          )}
+
+          <p className="mt-1.5 text-sm font-medium text-gray-800">{summaryLine}</p>
+          <p className="mt-0.5 text-xs text-gray-500">{deliveryLine}</p>
         </div>
 
-        <div className="mb-5 rounded-xl border border-gray-200 bg-gray-50 p-4">
-          <dl className="grid grid-cols-2 gap-3 text-sm">
-            <div>
-              <dt className="text-xs text-gray-500">{t('farmerName')}</dt>
-              <dd className="font-medium text-gray-900">{farmerName}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-gray-500">{t('farmerId')}</dt>
-              <dd className="font-medium text-gray-900">{farmerId}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-gray-500">{t('fertilizerType')}</dt>
-              <dd className="font-medium text-gray-900">{distributionData.fertilizerType}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-gray-500">{t('bagsGiven')}</dt>
-              <dd className="font-medium text-green-700">
-                {distributionData.bagsGiven}{' '}
-                {language === 'en' ? 'bags' : 'mifuko'}
-              </dd>
-            </div>
-          </dl>
-        </div>
-
-        <div
-          className={`mb-5 flex items-start gap-2 rounded-xl border p-3 ${
-            isResending
-              ? 'border-blue-200 bg-blue-50'
-              : 'border-green-200 bg-green-50'
-          }`}
-        >
-          {isResending ? (
-            <RefreshCw className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-blue-600" />
-          ) : (
-            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-600" />
-          )}
-          <div className="text-sm text-gray-800">
-            <p className="font-medium text-gray-900">
-              {isResending
-                ? otpLoadingLabel('api', language, activeMethod)
-                : `${t('otpSentTo')}${
-                    smsInfo?.phone_number
-                      ? ` +${smsInfo.phone_number.replace(/^\+/, '')}`
-                      : ''
-                  }`}
-            </p>
-            {!isResending && <p className="mt-1 text-xs">{deliveryHint}</p>}
-            {deliveryStatusLine && !isResending && (
-              <p className="mt-2 text-xs font-medium text-green-800">{deliveryStatusLine}</p>
-            )}
-            {smsInfo?.briq_api_message && !isResending && (
-              <p className="mt-1 text-xs text-gray-600">Briq: {smsInfo.briq_api_message}</p>
-            )}
-            {smsInfo?.handset_note && !isResending && smsInfo?.delivery_method === 'sms' && (
-              <p className="mt-2 text-xs text-amber-800">{smsInfo.handset_note}</p>
-            )}
-          </div>
-        </div>
-
-        {smsInfo?.agent_code && !isResending && (
-          <div className="mb-5 rounded-xl border-2 border-green-600 bg-green-50 p-4 text-center">
-            <p className="text-xs font-medium uppercase tracking-wide text-green-800">
-              {language === 'en' ? 'Agent verification code' : 'Nambari ya wakala'}
-            </p>
-            <p className="mt-2 font-mono text-3xl font-bold tracking-[0.35em] text-green-900">
-              {smsInfo.agent_code}
-            </p>
-            <p className="mt-2 text-xs text-green-800">
-              {language === 'en'
-                ? 'Share with the farmer if SMS/call did not arrive, then enter it above.'
-                : 'Shiriki na mkulima kama SMS haikufika, kisha weka hapa.'}
-            </p>
-          </div>
-        )}
-
-        <div className="mb-5">
+        <div className="px-6 pb-2">
           <div className="flex justify-center">
             <InputOTP
               maxLength={otpLength}
@@ -282,101 +191,88 @@ export function FarmerOTPModal({
                   <InputOTPSlot
                     key={index}
                     index={index}
-                    className="h-12 w-10 rounded-lg border-2 border-gray-300 bg-white text-lg font-semibold text-gray-900 first:rounded-lg last:rounded-lg data-[active=true]:border-green-500 data-[active=true]:ring-2 data-[active=true]:ring-green-500/20"
+                    className="h-12 w-10 rounded-lg border border-gray-200 bg-white text-lg font-semibold text-gray-900 shadow-sm first:rounded-lg last:rounded-lg data-[active=true]:border-green-500 data-[active=true]:ring-2 data-[active=true]:ring-green-500/20"
                   />
                 ))}
               </InputOTPGroup>
             </InputOTP>
           </div>
 
+          <p className="mt-4 text-center text-xs text-gray-500">
+            {language === 'en' ? "No code? " : 'Hakuna nambari? '}
+            <button
+              type="button"
+              onClick={() => handleResendOtp()}
+              disabled={isVerifying || isResending || verificationStatus === 'success'}
+              className="font-semibold text-gray-800 underline-offset-2 hover:underline disabled:opacity-50"
+            >
+              {language === 'en' ? 'Resend SMS' : 'Tuma tena'}
+            </button>
+          </p>
+
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => handleResendOtp('call')}
+              disabled={isVerifying || isResending || verificationStatus === 'success'}
+              className="flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-2 py-2.5 text-xs font-medium text-gray-900 transition-colors hover:border-green-300 hover:bg-green-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Phone className="h-4 w-4 text-green-700" />
+              <span>{language === 'en' ? 'Phone call' : 'Simu'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleResendOtp('whatsapp')}
+              disabled={isVerifying || isResending || verificationStatus === 'success'}
+              className="flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-2 py-2.5 text-xs font-medium text-gray-900 transition-colors hover:border-[#25D366]/40 hover:bg-[#25D366]/5 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <WhatsAppIcon className="h-4 w-4 text-[#25D366]" />
+              <span>WhatsApp</span>
+            </button>
+          </div>
+
           {error && (
-            <div className="mt-3 flex items-center gap-2 text-sm text-red-600">
+            <div className="mt-4 flex items-center justify-center gap-2 text-sm text-red-600">
               <AlertCircle className="h-4 w-4 shrink-0" />
               <span>{error}</span>
             </div>
           )}
 
           {verificationStatus === 'success' && (
-            <div className="mt-3 flex items-center gap-2 text-sm text-green-700">
-              <Lock className="h-4 w-4" />
+            <div className="mt-4 flex items-center justify-center gap-2 text-sm text-green-700">
+              <CheckCircle2 className="h-4 w-4" />
               <span>{t('otpSuccess')}</span>
             </div>
           )}
         </div>
 
-        <div className="flex flex-col gap-3">
-          <button
-            type="button"
-            onClick={() => handleVerify(otp)}
-            disabled={!canVerify}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-green-600 py-3 text-sm font-medium text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
-          >
-            {isVerifying ? (
-              <RefreshCw className="h-4 w-4 animate-spin" />
-            ) : verificationStatus === 'success' ? (
-              <CheckCircle2 className="h-4 w-4" />
-            ) : (
-              <ShieldCheck className="h-4 w-4" />
-            )}
-            {isVerifying
-              ? t('verifying')
-              : verificationStatus === 'success'
-                ? t('verified')
-                : t('verifyAndDistribute')}
-          </button>
-
-          <div className="space-y-2 text-sm">
-            <p className="text-xs text-gray-500">
-              {language === 'en'
-                ? 'No code yet? Try another delivery method:'
-                : 'Hakuna nambari? Jaribu njia nyingine:'}
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => handleResendOtp('sms')}
-                disabled={isVerifying || isResending || verificationStatus === 'success'}
-                className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-              >
-                SMS
-              </button>
-              <button
-                type="button"
-                onClick={() => handleResendOtp('call')}
-                disabled={isVerifying || isResending || verificationStatus === 'success'}
-                className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-              >
-                {language === 'en' ? 'Phone call' : 'Simu'}
-              </button>
-              <button
-                type="button"
-                onClick={() => handleResendOtp('whatsapp')}
-                disabled={isVerifying || isResending || verificationStatus === 'success'}
-                className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-              >
-                WhatsApp
-              </button>
-            </div>
-            <div className="flex items-center justify-between pt-1">
-              <button
-                type="button"
-                onClick={() => handleResendOtp()}
-                disabled={isVerifying || isResending || verificationStatus === 'success'}
-                className="inline-flex items-center gap-1.5 font-medium text-green-700 hover:text-green-800 disabled:opacity-50"
-              >
-                <RefreshCw className={`h-4 w-4 ${isResending ? 'animate-spin' : ''}`} />
-                {t('resendOtp')}
-              </button>
-              <button
-                type="button"
-                onClick={onClose}
-                disabled={isVerifying || isResending}
-                className="inline-flex items-center gap-1 text-gray-500 hover:text-gray-700"
-              >
-                <X className="h-4 w-4" />
-                {t('cancel')}
-              </button>
-            </div>
+        <div className="mt-4 border-t border-gray-100 px-5 py-3">
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={isVerifying || isResending}
+              className="flex-1 rounded-lg border border-gray-200 bg-white py-2 text-sm font-medium text-gray-900 transition-colors hover:bg-gray-50 disabled:opacity-50"
+            >
+              {t('cancel')}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleVerify(otp)}
+              disabled={!canVerify}
+              className="flex-1 rounded-lg bg-green-600 py-2 text-sm font-medium text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
+            >
+              {isVerifying ? (
+                <span className="inline-flex items-center justify-center gap-2">
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  {t('verifying')}
+                </span>
+              ) : verificationStatus === 'success' ? (
+                t('verified')
+              ) : (
+                t('verifyCode')
+              )}
+            </button>
           </div>
         </div>
       </div>

@@ -43,6 +43,22 @@ class AdminUserCreateSerializer(serializers.Serializer):
     region = serializers.CharField(required=False, allow_blank=True)
 
 
+class AdminUserUpdateSerializer(serializers.Serializer):
+    password = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    first_name = serializers.CharField(required=False, allow_blank=True)
+    last_name = serializers.CharField(required=False, allow_blank=True)
+    email = serializers.EmailField(required=False, allow_blank=True)
+    supplier_name = serializers.CharField(required=False, allow_blank=True)
+    supplier_region = serializers.CharField(required=False, allow_blank=True)
+    contact_phone = serializers.CharField(required=False, allow_blank=True)
+    branch_name = serializers.CharField(required=False, allow_blank=True)
+    branch_type = serializers.ChoiceField(
+        choices=["RETAILER", "COOPERATIVE", "REGULATOR"], required=False
+    )
+    district = serializers.CharField(required=False, allow_blank=True)
+    region = serializers.CharField(required=False, allow_blank=True)
+
+
 class SupplierSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
 
@@ -87,6 +103,12 @@ class FarmerSerializer(serializers.ModelSerializer):
             "cooperative_id",
             "created_at",
         ]
+
+    def to_representation(self, instance):
+        from .services.ministry_of_agriculture import refresh_farmer_from_registry
+
+        instance = refresh_farmer_from_registry(instance)
+        return super().to_representation(instance)
 
 
 class WarehouseSerializer(serializers.ModelSerializer):
@@ -211,6 +233,13 @@ class TransferSerializer(serializers.ModelSerializer):
             "ministry_verified": {"required": False},
             "discount_percent": {"required": False},
         }
+
+    def validate_discount_percent(self, value):
+        if value is None:
+            return value
+        if value < 0 or value > 100:
+            raise serializers.ValidationError("Discount must be between 0 and 100.")
+        return value
 
 
 class DeliveryProofSerializer(serializers.ModelSerializer):

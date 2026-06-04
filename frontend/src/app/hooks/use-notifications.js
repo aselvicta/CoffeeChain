@@ -3,6 +3,7 @@ import {
   fetchNotifications,
   markAllNotificationsRead,
   markNotificationRead,
+  deleteNotification,
 } from '../api/client';
 
 const BADGE_TONES = {
@@ -33,19 +34,23 @@ function formatTimeLabel(iso) {
 
 export function mapApiNotification(item) {
   const type = item.notification_type || 'system';
+  const isIntegrityAlert = Boolean(item.metadata?.integrity_alert);
   return {
     id: item.id,
-    type,
+    type: isIntegrityAlert ? 'integrity' : type,
     title: item.title,
     message: item.message,
     details: item.details || '',
     timeLabel: formatTimeLabel(item.created_at),
     meta: item.transfer_id ? `Transfer #${item.transfer_id}` : '',
     priority: item.priority || 'medium',
-    badgeTone: BADGE_TONES[type] || BADGE_TONES.system,
+    badgeTone: isIntegrityAlert
+      ? 'bg-red-100 text-red-700'
+      : BADGE_TONES[type] || BADGE_TONES.system,
     unread: !item.is_read,
     transferId: item.transfer_id ?? item.transfer ?? null,
     tab: item.metadata?.tab,
+    metadata: item.metadata || {},
     actionLabel: item.metadata?.tab ? 'Go to section' : 'View details',
     source: 'api',
   };
@@ -115,6 +120,17 @@ export function useNotifications({ pollMs = 45000, enabled = true } = {}) {
     );
   }, []);
 
+  const dismiss = useCallback(async (notificationId) => {
+    const id = Number(notificationId);
+    if (!Number.isFinite(id)) return;
+    setRaw((current) => current.filter((item) => item.id !== id));
+    try {
+      await deleteNotification(id);
+    } catch {
+      await refresh();
+    }
+  }, [refresh]);
+
   return {
     notifications,
     unreadCount,
@@ -122,5 +138,6 @@ export function useNotifications({ pollMs = 45000, enabled = true } = {}) {
     refresh,
     markRead,
     markAllRead,
+    dismiss,
   };
 }

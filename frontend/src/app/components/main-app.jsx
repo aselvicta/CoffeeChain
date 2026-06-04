@@ -12,11 +12,11 @@ import { buildDashboardPath, resolveDashboardTab } from '../utils/dashboard-rout
 const DASHBOARD_CONFIG = {
   admin: {
     defaultTab: 'overview',
-    validTabs: ['overview', 'suppliers', 'retailers', 'cooperatives', 'users'],
+    validTabs: ['overview', 'suppliers', 'retailers', 'cooperatives', 'users', 'integrity'],
   },
   supplier: {
     defaultTab: 'overview',
-    validTabs: ['overview', 'dispatch', 'dispatched', 'warehouse', 'inventory', 'issues', 'analytics', 'history'],
+    validTabs: ['overview', 'dispatch', 'dispatched', 'warehouse', 'issues', 'analytics', 'history'],
   },
   retailer: {
     defaultTab: 'overview',

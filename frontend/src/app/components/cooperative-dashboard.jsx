@@ -3,12 +3,13 @@ import { useLocation, useNavigate } from 'react-router';
 import { Package, Users, Send, History, LogOut, TrendingUp, ShieldCheck } from 'lucide-react';
 import { NotificationBell } from './notification-bell';
 import { useNotifications } from '../hooks/use-notifications';
-import { LineChart, Line, PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
+import { BarChart, Bar, PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { Logo } from './logo';
 import { FarmerOTPModal } from './farmer-otp-modal';
 import { FarmerRegistryPanel } from './farmer-registry-panel';
 import { ReceiveFertilizerPanel } from './receive-fertilizer-panel';
 import { CooperativeHistoryPanel } from './cooperative-history-panel';
+import { StockBatchPicker } from './stock-batch-picker';
 import { VerificationTrustSeal } from './verification-trust-seal';
 import {
   createTransfer,
@@ -25,6 +26,11 @@ import {
   requestDistributionOtp,
 } from '../utils/distribution-otp';
 import { buildDashboardPath, resolveDashboardTab } from '../utils/dashboard-routing';
+import { buildMonthlyTrend } from '../utils/chart-trends';
+import { getUserMessage } from '../utils/user-messages';
+import { takeRecent, RECENT_LIST_LIMIT, HISTORY_PAGE_SIZE } from '../utils/list-limits';
+import { usePaginatedList } from '../hooks/use-paginated-list';
+import { PaginationBar, RecentListNote } from './ui/pagination-bar';
 import {
   QuickActionCard,
   ContentListRow,
@@ -37,7 +43,12 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
   const dashboardTabs = ['overview', 'farmers', 'fertilizer-in', 'fertilizer-out', 'verification', 'history', 'analytics'];
   const [activeTab, setActiveTab] = useState('overview');
   const [inboundTransfers, setInboundTransfers] = useState([]);
-  const [distributionForm, setDistributionForm] = useState({ batchId: '', farmer: '', bags: '', otp: '' });
+  const [distributionForm, setDistributionForm] = useState({
+    batchId: '',
+    farmer: '',
+    bags: '',
+    discountPercent: 10,
+  });
   const [proofFile, setProofFile] = useState(null);
   const [distributions, setDistributions] = useState([]);
   const [verificationList, setVerificationList] = useState([]);
@@ -46,7 +57,6 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
   const [pendingFarmer, setPendingFarmer] = useState(null);
   const [selectedReceiveTransferId, setSelectedReceiveTransferId] = useState('');
   const [isOtpOpen, setIsOtpOpen] = useState(false);
-  const [otpMessage, setOtpMessage] = useState('');
   const [smsInfo, setSmsInfo] = useState(null);
   const [otpCodeLength, setOtpCodeLength] = useState(6);
   const [latestVerification, setLatestVerification] = useState(null);
@@ -60,6 +70,7 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
     refresh: refreshNotifications,
     markRead,
     markAllRead,
+    dismiss,
   } = useNotifications();
   const location = useLocation();
   const navigate = useNavigate();
@@ -78,11 +89,21 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
     setActiveTab(nextTab);
     navigate(buildDashboardPath(dashboardRole, nextTab));
   };
-  const verificationTrend = [
-    { month: 'Jan', verified: 32, pending: 12 },
-    { month: 'Feb', verified: 45, pending: 10 },
-    { month: 'Mar', verified: 58, pending: 8 },
-  ];
+  const verificationTrend = useMemo(
+    () =>
+      buildMonthlyTrend(verificationList, {
+        dateKey: 'date',
+        countKeys: {
+          verified: (item) => (item.status === 'verified' ? Number(item.bags) || 1 : 0),
+          pending: (item) => (item.status === 'verified' ? 0 : Number(item.bags) || 1),
+        },
+      }),
+    [verificationList]
+  );
+  const hasVerificationTrend = useMemo(
+    () => verificationTrend.some((entry) => entry.verified > 0 || entry.pending > 0),
+    [verificationTrend]
+  );
   const distributionMix = useMemo(() => {
     const verified = distributions.filter((dist) => dist.otp.toLowerCase() === 'verified').length;
     const pending = Math.max(distributions.length - verified, 0);
@@ -124,6 +145,13 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
     () => inboundTransfers.filter((transfer) => transfer.status === 'DISPATCHED').length,
     [inboundTransfers]
   );
+
+  const recentDistributions = useMemo(
+    () => takeRecent(distributions, RECENT_LIST_LIMIT),
+    [distributions]
+  );
+
+  const verificationPagination = usePaginatedList(verificationList, HISTORY_PAGE_SIZE);
 
   const refreshData = async () => {
     try {
@@ -197,7 +225,7 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
       );
       await refreshNotifications();
     } catch (error) {
-      setStatusMessage(error.message);
+      setStatusMessage(getUserMessage(error));
     }
   };
 
@@ -256,6 +284,7 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                 unreadCount={unreadCount}
                 onMarkRead={markRead}
                 onMarkAllRead={markAllRead}
+                onDismiss={dismiss}
                 onNavigateTab={(tab, notification) => {
                   const tabMap = {
                     receive: 'fertilizer-in',
@@ -389,49 +418,82 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                   </p>
                 </div>
               )}
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                <h2 className="text-xl font-bold text-gray-900 mb-1">Distribute Fertilizer</h2>
-                <p className="text-sm text-gray-600 mb-4">
-                  Select a confirmed batch, choose a registered farmer, then send an OTP to verify delivery.
-                </p>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <select
-                    value={distributionForm.batchId}
-                    onChange={(e) =>
-                      setDistributionForm({ ...distributionForm, batchId: e.target.value })
-                    }
-                    disabled={distributableStock.length === 0}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
-                  >
-                    <option value="">Select Batch</option>
-                    {distributableStock.map((batch) => (
-                      <option key={batch.batchId} value={batch.batchId}>
-                        {batch.batchCode || `Batch ${batch.batchId}`} ({batch.bagsAvailable} bags available{batch.fertilizerType ? ` • ${batch.fertilizerType}` : ''})
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    value={distributionForm.farmer}
-                    onChange={(e) => setDistributionForm({ ...distributionForm, farmer: e.target.value })}
-                    disabled={farmers.length === 0}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
-                  >
-                    <option value="">Select Farmer</option>
-                    {farmers.map((farmer) => (
-                      <option key={farmer.id} value={farmer.id}>
-                        {farmer.name} ({farmer.ministryId})
-                        {farmer.phone ? ` — ${farmer.phone}` : ' — no phone'}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="number"
-                    min="1"
-                    placeholder="Bags"
-                    value={distributionForm.bags}
-                    onChange={(e) => setDistributionForm({ ...distributionForm, bags: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  />
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-5">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900 mb-1">Distribute Fertilizer</h2>
+                  <p className="text-sm text-gray-600">
+                    Choose a batch, farmer, bags, and subsidy discount, then verify with OTP.
+                  </p>
+                </div>
+
+                <StockBatchPicker
+                  batches={distributableStock}
+                  selectedBatchId={distributionForm.batchId}
+                  onSelect={(batchId) =>
+                    setDistributionForm({ ...distributionForm, batchId: String(batchId) })
+                  }
+                  disabled={distributableStock.length === 0}
+                  emptyMessage="Confirm incoming batches under Receive Fertilizer first."
+                />
+
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">Farmer</label>
+                    <select
+                      value={distributionForm.farmer}
+                      onChange={(e) =>
+                        setDistributionForm({ ...distributionForm, farmer: e.target.value })
+                      }
+                      disabled={farmers.length === 0}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
+                    >
+                      <option value="">Select farmer</option>
+                      {farmers.map((farmer) => (
+                        <option key={farmer.id} value={farmer.id}>
+                          {farmer.name} ({farmer.ministryId})
+                          {farmer.phone ? ` — ${farmer.phone}` : ' — no phone'}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">Bags</label>
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="Bags"
+                      value={distributionForm.bags}
+                      onChange={(e) =>
+                        setDistributionForm({ ...distributionForm, bags: e.target.value })
+                      }
+                      disabled={!distributionForm.batchId}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent disabled:bg-gray-100"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">
+                      Subsidy discount
+                    </label>
+                    <div className="flex items-center rounded-lg border border-gray-300 bg-white focus-within:ring-2 focus-within:ring-green-500">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={distributionForm.discountPercent}
+                        onChange={(e) =>
+                          setDistributionForm({
+                            ...distributionForm,
+                            discountPercent: Math.min(
+                              100,
+                              Math.max(0, Number(e.target.value) || 0)
+                            ),
+                          })
+                        }
+                        className="min-w-0 flex-1 rounded-lg border-0 bg-transparent px-4 py-3 text-gray-900"
+                      />
+                      <span className="pr-4 text-sm font-medium text-gray-600">% off</span>
+                    </div>
+                  </div>
                 </div>
                 <div className="mt-4">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -467,6 +529,8 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                         farmer_id: Number(distributionForm.farmer),
                         quantity_bags: Number(distributionForm.bags),
                         status: 'DISPATCHED',
+                        ministry_verified: true,
+                        discount_percent: Number(distributionForm.discountPercent) || 0,
                       });
                       setSavePhase(otpLoadingLabel('api', 'en', 'sms'));
                       const otpResponse = await requestDistributionOtp(transfer, sendOtp);
@@ -483,10 +547,14 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                           setOtpCodeLength(otpResponse.otp_code_length ?? 6);
                           setPendingTransfer(transfer);
                           setPendingFarmer(selectedFarmer || null);
-                          setOtpMessage(sms.message || '');
                           setSmsInfo(sms);
                           setIsOtpOpen(true);
-                          setDistributionForm({ batchId: '', farmer: '', bags: '', otp: '' });
+                          setDistributionForm({
+                            batchId: '',
+                            farmer: '',
+                            bags: '',
+                            discountPercent: 10,
+                          });
                         },
                         onFailed: (message) => setStatusMessage(message),
                       });
@@ -494,12 +562,12 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                         setStatusMessage(
                           (current) =>
                             current ||
-                            'Distribution saved. Briq OTP failed — check backend/.env, then use Verify Distribution to resend.'
+                            'Distribution saved but the verification code could not be sent. Use Verify Distribution to resend.'
                         );
                       }
                       await refreshData();
                     } catch (error) {
-                      setStatusMessage(error.message);
+                      setStatusMessage(getUserMessage(error));
                     } finally {
                       setIsSaving(false);
                       setSavePhase('');
@@ -524,17 +592,28 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
               </div>
 
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-4">Recent Distributions</h3>
+                <div className="mb-4 flex items-center justify-between gap-2">
+                  <h3 className="text-lg font-bold text-gray-900">Recent Distributions</h3>
+                  <RecentListNote
+                    shown={recentDistributions.length}
+                    total={distributions.length}
+                    label="distributions"
+                  />
+                </div>
                 <div className="space-y-3">
-                  {distributions.map((dist) => (
-                    <div key={dist.id} className="flex items-center justify-between border border-gray-100 rounded-lg p-4">
-                      <div>
-                        <p className="font-semibold text-gray-900">{dist.farmer}</p>
-                        <p className="text-sm text-gray-600">{dist.bags} bags • OTP {dist.otp}</p>
+                  {distributions.length === 0 ? (
+                    <p className="text-sm text-gray-500">No distributions yet.</p>
+                  ) : (
+                    recentDistributions.map((dist) => (
+                      <div key={dist.id} className="flex items-center justify-between border border-gray-100 rounded-lg p-4">
+                        <div>
+                          <p className="font-semibold text-gray-900">{dist.farmer}</p>
+                          <p className="text-sm text-gray-600">{dist.bags} bags • OTP {dist.otp}</p>
+                        </div>
+                        <span className="text-sm text-gray-500">{dist.date}</span>
                       </div>
-                      <span className="text-sm text-gray-500">{dist.date}</span>
-                    </div>
-                  ))}
+                    ))
+                  )}
                 </div>
               </div>
             </div>
@@ -574,8 +653,9 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                     </p>
                   </div>
                 ) : (
-                  <div className="space-y-3">
-                    {verificationList.map((record) => {
+                  <>
+                    <div className="space-y-3">
+                      {verificationPagination.pageItems.map((record) => {
                       const isVerified = record.status === 'verified';
                       return (
                         <ContentListRow
@@ -601,14 +681,13 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                                         name: record.farmer,
                                         ministryId: record.farmerMinistryId,
                                       });
-                                      setOtpMessage(sms.message || '');
-                                      setSmsInfo(sms);
+                                        setSmsInfo(sms);
                                       setIsOtpOpen(true);
                                     },
                                       onFailed: (message) => setStatusMessage(message),
                                     });
                                   } catch (error) {
-                                    setStatusMessage(error.message);
+                                    setStatusMessage(getUserMessage(error));
                                   } finally {
                                     setOtpSendingTransferId(null);
                                   }
@@ -649,7 +728,20 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                         </ContentListRow>
                       );
                     })}
-                  </div>
+                    </div>
+                    <PaginationBar
+                      page={verificationPagination.page}
+                      totalPages={verificationPagination.totalPages}
+                      total={verificationPagination.total}
+                      rangeStart={verificationPagination.rangeStart}
+                      rangeEnd={verificationPagination.rangeEnd}
+                      onPrev={verificationPagination.goPrev}
+                      onNext={verificationPagination.goNext}
+                      canPrev={verificationPagination.canPrev}
+                      canNext={verificationPagination.canNext}
+                      className="mt-4"
+                    />
+                  </>
                 )}
                 {statusMessage && (
                   <p className="mt-3 text-sm text-red-600">{statusMessage}</p>
@@ -687,19 +779,31 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
               </div>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <div className="border border-gray-200 rounded-lg p-4">
-                  <div className="flex items-center justify-between mb-3">
+                  <div className="mb-3">
                     <p className="text-sm font-medium text-gray-700">Verification Trend</p>
-                    <button className="text-sm font-medium text-green-700">Export Report</button>
+                    <p className="text-xs text-gray-500">Verified vs pending bags by month</p>
                   </div>
                   <div className="h-56">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={verificationTrend}>
-                        <Tooltip />
-                        <Legend />
-                        <Line type="monotone" dataKey="verified" stroke="#16a34a" strokeWidth={2} name="Verified" />
-                        <Line type="monotone" dataKey="pending" stroke="#f59e0b" strokeWidth={2} name="Pending" />
-                      </LineChart>
-                    </ResponsiveContainer>
+                    {!hasVerificationTrend ? (
+                      <div className="flex h-full items-center justify-center text-sm text-gray-500">
+                        No verification activity yet.
+                      </div>
+                    ) : (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={verificationTrend} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+                          <XAxis dataKey="month" stroke="#6b7280" tick={{ fontSize: 12 }} />
+                          <YAxis allowDecimals={false} stroke="#6b7280" tick={{ fontSize: 12 }} />
+                          <Tooltip
+                            formatter={(value, name) => [`${value} bags`, name === 'verified' ? 'Verified' : 'Pending']}
+                            labelFormatter={(label) => `Month: ${label}`}
+                          />
+                          <Legend formatter={(value) => (value === 'verified' ? 'Verified' : 'Pending')} />
+                          <Bar dataKey="verified" stackId="bags" fill="#16a34a" name="verified" radius={[0, 0, 0, 0]} />
+                          <Bar dataKey="pending" stackId="bags" fill="#f59e0b" name="pending" radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    )}
                   </div>
                 </div>
                 <div className="border border-gray-200 rounded-lg p-4">
@@ -744,7 +848,6 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
             if (!handleOtpSmsResponse(response.sms, {
               onDelivered: (sms) => {
                 setOtpCodeLength(response.otp_code_length ?? 6);
-                setOtpMessage(sms.message || '');
                 setSmsInfo(sms);
               },
               onFailed: (message) => {

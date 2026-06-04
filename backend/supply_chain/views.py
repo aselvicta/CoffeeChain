@@ -1,12 +1,13 @@
 import re
 
 from django.conf import settings
+from django.shortcuts import get_object_or_404
 from django.contrib.auth.models import Group, User
 from django.core.mail import send_mail
 from django.db import transaction
 from django.db.models import F, Q, Sum
 from django.utils import timezone
-from rest_framework import status, viewsets
+from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
@@ -41,6 +42,7 @@ from .permissions import (
 )
 from .serializers import (
     AdminUserCreateSerializer,
+    AdminUserUpdateSerializer,
     AuditLogSerializer,
     BlockchainAnchorSerializer,
     BranchSerializer,
@@ -55,17 +57,28 @@ from .serializers import (
     TransferSerializer,
     UserSerializer,
 )
-from .services.blockchain import anchor_to_polygon, build_hash
-from .services.ipfs import store_file, store_json
+from .services.blockchain import anchor_to_polygon, build_hash, build_payload_signature
+from .services.ipfs import normalize_receipt_access, save_receipt_local, store_file, store_json
+from .services.integrity import (
+    compare_transfers,
+    list_verified_transfers,
+    verify_transfer_integrity,
+)
 from .services.ministry_of_agriculture import fetch_farmer
 from .services.notifications import (
     notify_for_farmer_registered,
+    notify_for_integrity_mismatch,
     notify_for_otp_sent,
     notify_for_otp_verified,
     notify_for_transfer_created,
     notify_for_transfer_received,
 )
 from .services.farmer_otp import issue_distribution_otp, verify_farmer_otp
+from .services.record_audit import (
+    build_saved_field_changes,
+    log_transfer_modification,
+    snapshot_transfer,
+)
 
 import logging
 import uuid
@@ -283,6 +296,59 @@ class AdminUserViewSet(viewsets.ViewSet):
                 )
 
         return Response(build_user_payload(user), status=status.HTTP_201_CREATED)
+
+    def retrieve(self, request, pk=None):
+        user = get_object_or_404(User, pk=pk)
+        return Response(build_user_payload(user))
+
+    def partial_update(self, request, pk=None):
+        return self._update_user(request, pk)
+
+    def update(self, request, pk=None):
+        return self._update_user(request, pk)
+
+    def _update_user(self, request, pk):
+        user = get_object_or_404(User, pk=pk)
+        serializer = AdminUserUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        with transaction.atomic():
+            if "first_name" in data:
+                user.first_name = data["first_name"]
+            if "last_name" in data:
+                user.last_name = data["last_name"]
+            if "email" in data:
+                user.email = data["email"]
+            if data.get("password"):
+                user.set_password(data["password"])
+            user.save()
+
+            role = resolve_role(user)
+            if role == "supplier":
+                supplier = Supplier.objects.filter(user=user).first()
+                if supplier:
+                    if data.get("supplier_name"):
+                        supplier.name = data["supplier_name"]
+                    if "supplier_region" in data:
+                        supplier.region = data["supplier_region"]
+                    if "contact_phone" in data:
+                        supplier.contact_phone = data["contact_phone"]
+                    supplier.save()
+            elif role in {"retailer", "cooperative", "regulator"}:
+                branch = Branch.objects.filter(user=user).first()
+                if branch:
+                    if data.get("branch_name"):
+                        branch.name = data["branch_name"]
+                    if "branch_type" in data:
+                        branch.branch_type = data["branch_type"]
+                    if "region" in data:
+                        branch.region = data["region"]
+                    if "district" in data:
+                        branch.district = data["district"]
+                    branch.save()
+
+        return Response(build_user_payload(user))
 
 
 class MeView(APIView):
@@ -718,7 +784,7 @@ class TransferViewSet(viewsets.ModelViewSet):
                 | Q(warehouse__name__icontains=search)
             )
 
-        return queryset
+        return queryset.order_by("-created_at")
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -818,19 +884,42 @@ class TransferViewSet(viewsets.ModelViewSet):
         )
         notify_for_transfer_created(transfer, actor=self.request.user)
 
+    def perform_update(self, serializer):
+        transfer = serializer.instance
+        before = snapshot_transfer(transfer)
+        transfer = serializer.save()
+        changes = build_saved_field_changes(before, transfer)
+        request = self.request
+        endpoint = getattr(request, "path", "") if request else ""
+        log_transfer_modification(
+            user=getattr(request, "user", None),
+            transfer=transfer,
+            changes=changes,
+            action="transfer_updated",
+            endpoint=endpoint,
+        )
+
     @action(detail=True, methods=["post"])
     def receive(self, request, pk=None):
         transfer = self.get_object()
+        before = snapshot_transfer(transfer)
         transfer.status = Transfer.RECEIVED
         if transfer.confirmed_at is None:
             transfer.confirmed_at = timezone.now()
             transfer.save(update_fields=["status", "confirmed_at"])
         else:
             transfer.save(update_fields=["status"])
+        changes = build_saved_field_changes(before, transfer)
         AuditLog.objects.create(
             action="transfer_received",
             user=request.user,
             transfer=transfer,
+            details={
+                "via": "api",
+                "endpoint": request.path,
+                "model": "transfer",
+                "changes": changes,
+            },
         )
         notify_for_transfer_received(transfer, actor=request.user)
         return Response(TransferSerializer(transfer).data)
@@ -948,16 +1037,25 @@ class TransferViewSet(viewsets.ModelViewSet):
         """
         if hasattr(transfer, "blockchain_anchor"):
             existing = transfer.blockchain_anchor
+            cid = existing.payload.get("cid", "")
+            storage_url = existing.payload.get("storage_url") or ""
+            storage_is_remote = existing.payload.get("storage_is_remote", False)
+            storage_url, storage_is_remote = normalize_receipt_access(
+                transfer.id, cid, storage_url, storage_is_remote
+            )
+            storacha_ok = existing.payload.get("storacha_ok", False)
+            if cid.startswith("local-"):
+                storacha_ok = False
+            elif storage_is_remote:
+                storacha_ok = existing.payload.get("storacha_ok", True)
             return {
-                "cid": existing.payload.get("cid", ""),
+                "cid": cid,
                 "tx_hash": existing.tx_hash,
                 "data_hash": existing.data_hash,
                 "network": existing.network,
-                "storage_url": existing.payload.get("storage_url"),
-                "storage_is_remote": existing.payload.get("storage_is_remote", False),
-                "storacha_ok": existing.payload.get(
-                    "storacha_ok", bool(existing.payload.get("cid"))
-                ),
+                "storage_url": storage_url,
+                "storage_is_remote": storage_is_remote,
+                "storacha_ok": storacha_ok,
                 "blockchain_ok": existing.payload.get(
                     "blockchain_ok", bool(existing.tx_hash)
                 ),
@@ -1020,12 +1118,12 @@ class TransferViewSet(viewsets.ModelViewSet):
         storacha_ok = storage_result.is_remote
         storacha_error = storage_result.error
 
-        payload_signature = (
-            f"{receipt['batch'].get('code') or ''}|"
-            f"{transfer.quantity_bags}|"
-            f"{cid}|"
-            f"{transfer.id}|"
-            f"{receipt['verified_at']}"
+        payload_signature = build_payload_signature(
+            batch_code=receipt["batch"].get("code") or "",
+            quantity_bags=transfer.quantity_bags,
+            content_cid=cid,
+            transfer_id=transfer.id,
+            verified_at=receipt["verified_at"],
         )
         data_hash = build_hash(payload_signature)
 
@@ -1072,6 +1170,33 @@ class TransferViewSet(viewsets.ModelViewSet):
             network="polygon-amoy",
             payload=anchor_payload,
         )
+
+        explorer_url = (
+            f"https://amoy.polygonscan.com/tx/{tx_hash}" if tx_hash else None
+        )
+        receipt["data_hash"] = data_hash
+        receipt["payload_signature"] = payload_signature
+        receipt["content_cid"] = cid
+        receipt["tx_hash"] = tx_hash
+        receipt["network"] = "polygon-amoy"
+        receipt["integrity"] = {
+            "payload_signature": payload_signature,
+            "data_hash": data_hash,
+            "content_cid": cid,
+            "tx_hash": tx_hash,
+            "network": "polygon-amoy",
+            "explorer_url": explorer_url,
+        }
+        try:
+            local_url = save_receipt_local(f"transfer-{transfer.id}-receipt", receipt)
+            if not storage_result.is_remote:
+                anchor_payload["storage_url"] = local_url
+        except Exception as exc:
+            logger.warning(
+                "Could not update local receipt with integrity metadata for transfer %s: %s",
+                transfer.id,
+                exc,
+            )
 
         return {
             "cid": cid,
@@ -1305,7 +1430,12 @@ class BlockchainAnchorViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
 
 
-class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
+class NotificationViewSet(
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.DestroyModelMixin,
+    viewsets.GenericViewSet,
+):
     serializer_class = NotificationSerializer
     permission_classes = [IsAuthenticated]
 
@@ -1351,5 +1481,120 @@ class AuditReportView(APIView):
                 "received": received,
                 "verified": verified,
                 "gap": max(received - verified, 0),
+            }
+        )
+
+
+class IntegrityCheckView(APIView):
+    permission_classes = [IsAuthenticated, RegulatorOrAdmin]
+
+    def get(self, request):
+        branch_id = request.query_params.get("branch_id")
+        branch_type = (request.query_params.get("branch_type") or "").strip().upper()
+        search = (request.query_params.get("search") or request.query_params.get("q") or "").strip()
+        transfer_id = request.query_params.get("transfer_id")
+
+        parsed_branch_id = int(branch_id) if branch_id and str(branch_id).isdigit() else None
+        parsed_transfer_id = (
+            int(transfer_id) if transfer_id and str(transfer_id).isdigit() else None
+        )
+
+        if not parsed_branch_id and not search and not parsed_transfer_id:
+            return Response(
+                {
+                    "summary": {"total": 0},
+                    "results": [],
+                    "message": "Select a retailer or AMCOS, or search by name, batch, or transfer ID.",
+                }
+            )
+
+        results = list_verified_transfers(
+            branch_id=parsed_branch_id,
+            branch_type=branch_type or None,
+            search=search or None,
+            transfer_id=parsed_transfer_id,
+        )
+        return Response(
+            {
+                "summary": {"total": len(results)},
+                "results": results,
+            }
+        )
+
+
+class IntegrityTransferView(APIView):
+    permission_classes = [IsAuthenticated, RegulatorOrAdmin]
+
+    def get(self, request, transfer_id):
+        transfer = (
+            Transfer.objects.select_related(
+                "batch", "farmer", "from_branch", "blockchain_anchor"
+            )
+            .filter(pk=transfer_id)
+            .first()
+        )
+        if not transfer:
+            return Response({"detail": "Transfer not found."}, status=status.HTTP_404_NOT_FOUND)
+        result = verify_transfer_integrity(transfer, check_chain=False)
+        return Response(result.to_dict())
+
+    def post(self, request, transfer_id):
+        notify = request.data.get("notify", True)
+        transfer = (
+            Transfer.objects.select_related(
+                "batch", "farmer", "from_branch", "blockchain_anchor"
+            )
+            .filter(pk=transfer_id)
+            .first()
+        )
+        if not transfer:
+            return Response({"detail": "Transfer not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        result = verify_transfer_integrity(transfer, check_chain=False)
+        payload = result.to_dict()
+        payload["notified"] = False
+        if notify and result.status == "mismatch":
+            payload["notified"] = notify_for_integrity_mismatch(result)
+        return Response(payload)
+
+
+class IntegrityScanView(APIView):
+    permission_classes = [IsAuthenticated, RegulatorOrAdmin]
+
+    def post(self, request):
+        notify = request.data.get("notify", True)
+        branch_id = request.data.get("branch_id")
+        branch_type = (request.data.get("branch_type") or "").strip().upper()
+        search = (request.data.get("search") or "").strip()
+        transfer_ids = request.data.get("transfer_ids") or []
+
+        if transfer_ids:
+            ids = [int(item) for item in transfer_ids if str(item).isdigit()]
+            results = compare_transfers(ids, check_chain=False)
+        else:
+            listed = list_verified_transfers(
+                branch_id=int(branch_id) if branch_id and str(branch_id).isdigit() else None,
+                branch_type=branch_type or None,
+                search=search or None,
+            )
+            ids = [item["transfer_id"] for item in listed]
+            results = compare_transfers(ids, check_chain=False)
+
+        mismatches = [item for item in results if item.status == "mismatch"]
+        alerts_sent = 0
+        if notify:
+            for item in mismatches:
+                if notify_for_integrity_mismatch(item):
+                    alerts_sent += 1
+
+        return Response(
+            {
+                "summary": {
+                    "total": len(results),
+                    "ok": sum(1 for item in results if item.status == "ok"),
+                    "mismatch": len(mismatches),
+                    "alerts_sent": alerts_sent,
+                },
+                "results": [item.to_dict() for item in results],
             }
         )

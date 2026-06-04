@@ -11,6 +11,9 @@ from .views import (
     FarmerViewSet,
     FertilizerBatchViewSet,
     FertilizerTypeCatalogView,
+    IntegrityCheckView,
+    IntegrityScanView,
+    IntegrityTransferView,
     IssueViewSet,
     MeView,
     NotificationViewSet,
@@ -43,5 +46,8 @@ urlpatterns = [
     path("warehouse-catalog/", WarehouseCatalogView.as_view(), name="warehouse-catalog"),
     path("fertilizer-types/", FertilizerTypeCatalogView.as_view(), name="fertilizer-types"),
     path("reports/audit/", AuditReportView.as_view(), name="audit-report"),
+    path("integrity/", IntegrityCheckView.as_view(), name="integrity-check"),
+    path("integrity/scan/", IntegrityScanView.as_view(), name="integrity-scan"),
+    path("integrity/<int:transfer_id>/", IntegrityTransferView.as_view(), name="integrity-transfer"),
     path("me/", MeView.as_view(), name="me"),
 ]

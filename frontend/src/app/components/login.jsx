@@ -3,6 +3,7 @@ import { Lock, User } from 'lucide-react';
 import { useLanguage } from './language-context';
 import { Logo } from './logo';
 import { ImageWithFallback } from './figma/ImageWithFallback';
+import { getUserMessage } from '../utils/user-messages';
 
 export function Login({ onLogin }) {
   const { t, language } = useLanguage();
@@ -20,9 +21,12 @@ export function Login({ onLogin }) {
       await onLogin(credentials);
     } catch (err) {
       setError(
-        language === 'en'
-          ? err.message || 'Invalid username or password'
-          : err.message || 'Jina la mtumiaji au nywila si sahihi'
+        getUserMessage(
+          err,
+          language === 'en'
+            ? 'Incorrect username or password.'
+            : 'Jina la mtumiaji au nywila si sahihi.'
+        )
       );
     }
   };
@@ -116,12 +120,6 @@ export function Login({ onLogin }) {
               >
                 {language === 'en' ? 'Login to CoffeeChain' : 'Ingia CoffeeChain'}
               </button>
-
-              <p className="text-xs text-gray-500 text-center">
-                {language === 'en'
-                  ? 'Demo: cooperative1 / demo123 (also admin, supplier1, retailer1)'
-                  : 'Majaribio: cooperative1 / demo123'}
-              </p>
             </form>
           </div>
         </div>

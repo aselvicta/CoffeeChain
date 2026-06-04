@@ -1,4 +1,7 @@
 import { useMemo, useState } from 'react';
+import { HISTORY_PAGE_SIZE } from '../utils/list-limits';
+import { usePaginatedList } from '../hooks/use-paginated-list';
+import { PaginationBar } from './ui/pagination-bar';
 import {
   Users,
   Search,
@@ -13,6 +16,7 @@ import {
   X,
 } from 'lucide-react';
 import { lookupMinistryFarmer, registerFarmer } from '../api/client';
+import { getUserMessage } from '../utils/user-messages';
 import { PanelOutlineButton, PanelPrimaryButton } from './ui/dashboard-ui';
 
 const initialLookupState = {
@@ -47,6 +51,8 @@ export function FarmerRegistryPanel({ farmers, userProfile, onRegistered }) {
     });
   }, [search, farmers]);
 
+  const farmerPagination = usePaginatedList(filteredFarmers, HISTORY_PAGE_SIZE);
+
   const resetDialog = () => {
     setMinistryIdInput('');
     setLookupState(initialLookupState);
@@ -76,7 +82,7 @@ export function FarmerRegistryPanel({ farmers, userProfile, onRegistered }) {
       setLookupState({
         status: 'error',
         record: null,
-        error: error.message || 'Lookup failed',
+        error: 'Lookup failed. Check the Ministry ID and try again.',
       });
     }
   };
@@ -93,7 +99,7 @@ export function FarmerRegistryPanel({ farmers, userProfile, onRegistered }) {
       closeDialog();
       onRegistered?.();
     } catch (error) {
-      setRegistrationError(error.message || 'Registration failed');
+      setRegistrationError(getUserMessage(error, 'Registration failed. Please try again.'));
     } finally {
       setIsRegistering(false);
     }
@@ -181,7 +187,7 @@ export function FarmerRegistryPanel({ farmers, userProfile, onRegistered }) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200 bg-white">
-                {filteredFarmers.map((farmer) => (
+                {farmerPagination.pageItems.map((farmer) => (
                   <tr key={farmer.id} className="hover:bg-gray-50">
                     <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-gray-900">
                       {farmer.ministryId}
@@ -199,13 +205,20 @@ export function FarmerRegistryPanel({ farmers, userProfile, onRegistered }) {
                 ))}
               </tbody>
             </table>
+            <PaginationBar
+              page={farmerPagination.page}
+              totalPages={farmerPagination.totalPages}
+              total={farmerPagination.total}
+              rangeStart={farmerPagination.rangeStart}
+              rangeEnd={farmerPagination.rangeEnd}
+              onPrev={farmerPagination.goPrev}
+              onNext={farmerPagination.goNext}
+              canPrev={farmerPagination.canPrev}
+              canNext={farmerPagination.canNext}
+              className="px-4 pb-4"
+            />
           </div>
         )}
-
-        <p className="mt-3 text-xs text-gray-500">
-          {filteredFarmers.length} of {farmers.length} farmer
-          {farmers.length === 1 ? '' : 's'} shown
-        </p>
       </div>
 
       {isDialogOpen && (

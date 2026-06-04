@@ -6,6 +6,17 @@ function truncate(value, head = 10, tail = 6) {
   return `${value.slice(0, head)}…${value.slice(-tail)}`;
 }
 
+function resolveStorageHref(storageUrl, storageIsRemote) {
+  if (!storageUrl) return null;
+  if (storageIsRemote) return storageUrl;
+  if (storageUrl.startsWith('http://') || storageUrl.startsWith('https://')) {
+    return storageUrl;
+  }
+  const apiBase = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
+  const path = storageUrl.startsWith('/') ? storageUrl : `/${storageUrl}`;
+  return `${apiBase}${path}`;
+}
+
 export function VerificationTrustSeal({ verification, onDismiss }) {
   if (!verification) return null;
 
@@ -21,12 +32,11 @@ export function VerificationTrustSeal({ verification, onDismiss }) {
     blockchain_error: blockchainError,
   } = verification;
 
-  const storageLabel = storageIsRemote ? 'Storacha (IPFS)' : 'Local fallback';
-  const storageHref = storageIsRemote
-    ? storageUrl
-    : storageUrl?.startsWith('/')
-      ? `http://localhost:8000${storageUrl}`
-      : storageUrl;
+  const isLocalCid = Boolean(cid && String(cid).startsWith('local-'));
+  const isRemote = storageIsRemote && !isLocalCid;
+  const storageLabel = isRemote ? 'Storacha (IPFS)' : 'Local fallback';
+  const storageHref = resolveStorageHref(storageUrl, isRemote);
+  const receiptOk = isRemote ? Boolean(storachaOk) : Boolean(storageHref);
 
   return (
     <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-5 shadow-sm">
@@ -58,7 +68,7 @@ export function VerificationTrustSeal({ verification, onDismiss }) {
           <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
             <div
               className={`rounded-lg border p-3 ${
-                storachaOk
+                receiptOk
                   ? 'border-emerald-200 bg-white'
                   : 'border-amber-200 bg-amber-50'
               }`}
@@ -66,7 +76,7 @@ export function VerificationTrustSeal({ verification, onDismiss }) {
               <div className="flex items-center gap-2">
                 <FileText
                   className={`h-4 w-4 ${
-                    storachaOk ? 'text-emerald-600' : 'text-amber-600'
+                    receiptOk ? 'text-emerald-600' : 'text-amber-600'
                   }`}
                 />
                 <p className="text-xs font-semibold uppercase tracking-wider text-gray-600">
@@ -87,10 +97,15 @@ export function VerificationTrustSeal({ verification, onDismiss }) {
                   View receipt
                 </a>
               )}
-              {!storachaOk && storachaError && (
+              {!receiptOk && storachaError && (
                 <p className="mt-2 flex items-start gap-1 text-[10px] text-amber-700">
                   <AlertCircle className="mt-0.5 h-3 w-3 flex-shrink-0" />
                   Storacha unavailable; saved locally. {storachaError}
+                </p>
+              )}
+              {!isRemote && !storachaError && (
+                <p className="mt-2 text-[10px] text-amber-700">
+                  Receipt stored on this server. Polygon anchor still applies.
                 </p>
               )}
             </div>

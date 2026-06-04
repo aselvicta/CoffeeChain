@@ -7,6 +7,7 @@ export function NotificationBell({
   unreadCount = 0,
   onMarkRead,
   onMarkAllRead,
+  onDismiss,
   onNavigateTab,
   onOpenInventory,
   onOpenDispatch,
@@ -38,6 +39,7 @@ export function NotificationBell({
         unreadCount={unreadCount}
         onMarkRead={onMarkRead}
         onMarkAllRead={onMarkAllRead}
+        onDismiss={onDismiss}
         onNavigateTab={(tab, notification) => {
           onNavigateTab?.(tab, notification);
           setIsOpen(false);

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Package, X } from 'lucide-react';
 import { createBatch } from '../api/client';
 import { useFertilizerTypes } from '../hooks/use-fertilizer-types';
+import { getUserMessage } from '../utils/user-messages';
 
 function getTodayValue() {
   const d = new Date();
@@ -108,35 +109,36 @@ export function StockInModal({ isOpen, warehouse, supplierId, existingBatches = 
         supplier_id: supplierId,
         allow_capacity_override: formData.confirmOverCapacity,
       });
-      setSuccessMessage('Stock recorded successfully. Refreshing inventory…');
+      setSuccessMessage('Stock recorded successfully. Refreshing warehouse…');
       if (typeof onSuccess === 'function') await onSuccess();
       closeTimerRef.current = window.setTimeout(() => onClose(), 900);
     } catch (error) {
-      setErrorMessage(error.message || 'Failed to save stock receipt.');
+      setErrorMessage(getUserMessage(error, 'Could not save stock receipt. Please try again.'));
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const field = 'w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-amber-400 focus:bg-white';
+  const field =
+    'w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-transparent focus:ring-2 focus:ring-green-500';
   const lbl = 'flex flex-col gap-1';
-  const lblText = 'text-xs font-medium text-slate-600';
+  const lblText = 'text-xs font-medium text-gray-600';
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4 py-6">
       <div
-        className="flex w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+        className="flex w-full max-w-xl flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl"
         style={{ maxHeight: 'calc(100vh - 3rem)' }}
       >
-        {/* Header — never scrolls */}
-        <div className="shrink-0 flex items-center justify-between border-b border-slate-200 px-5 py-3">
+        <div className="shrink-0 flex items-center justify-between border-b border-gray-200 px-5 py-3">
           <div className="flex items-center gap-3">
-            <div className="rounded-xl bg-amber-100 p-2 text-amber-700">
+            <div className="rounded-lg bg-green-100 p-2 text-green-700">
               <Package className="h-4 w-4" />
             </div>
             <div>
-              <p className="text-xs font-semibold uppercase tracking-widest text-amber-600">Stock In</p>
-              <h3 className="text-sm font-semibold text-slate-900">{warehouse.name}</h3>
+              <p className="text-xs font-semibold uppercase tracking-wide text-green-700">Add Stock</p>
+              <h3 className="text-sm font-semibold text-gray-900">{warehouse.name}</h3>
+              <p className="text-xs text-gray-600">Section {warehouse.section || '—'}</p>
             </div>
           </div>
           <button
@@ -148,20 +150,22 @@ export function StockInModal({ isOpen, warehouse, supplierId, existingBatches = 
           </button>
         </div>
 
-        {/* Capacity bar — shrunk summary, always visible */}
-        <div className="shrink-0 border-b border-slate-100 bg-slate-50 px-5 py-2">
-          <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
+        <div className="shrink-0 border-b border-gray-100 bg-gray-50 px-5 py-2">
+          <div className="mb-1 flex items-center justify-between text-xs text-gray-600">
             <span>Warehouse capacity</span>
-            <span>{current} / {capacity} bags used · <span className="text-slate-700 font-medium">{remainingCapacity} free</span></span>
+            <span>
+              {current} / {capacity} bags used ·{' '}
+              <span className="font-medium text-gray-900">{remainingCapacity} free</span>
+            </span>
           </div>
-          <div className="h-1.5 overflow-hidden rounded-full bg-slate-200">
+          <div className="h-1.5 overflow-hidden rounded-full bg-gray-200">
             <div
               className={`h-full rounded-full transition-all ${
                 capacity > 0 && current / capacity >= 0.85
                   ? 'bg-rose-500'
                   : capacity > 0 && current / capacity >= 0.6
-                  ? 'bg-amber-400'
-                  : 'bg-emerald-500'
+                    ? 'bg-amber-400'
+                    : 'bg-emerald-500'
               }`}
               style={{ width: capacity > 0 ? `${Math.min((current / capacity) * 100, 100)}%` : '0%' }}
             />
@@ -324,21 +328,20 @@ export function StockInModal({ isOpen, warehouse, supplierId, existingBatches = 
             </div>
           </div>
 
-          {/* Footer — always visible */}
-          <div className="shrink-0 flex items-center justify-end gap-2 border-t border-slate-100 bg-white px-5 py-3">
+          <div className="shrink-0 flex items-center justify-end gap-2 border-t border-gray-100 bg-white px-5 py-3">
             <button
               type="button"
               onClick={onClose}
-              className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+              className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="rounded-xl bg-amber-600 px-5 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-lg bg-green-600 px-5 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {isSubmitting ? 'Saving…' : 'Record Stock Receipt'}
+              {isSubmitting ? 'Saving…' : 'Record Stock'}
             </button>
           </div>
         </form>

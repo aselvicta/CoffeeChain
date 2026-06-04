@@ -11,12 +11,15 @@ from __future__ import annotations
 import csv
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import TYPE_CHECKING, Iterable
 
 from django.conf import settings
 
+if TYPE_CHECKING:
+    from supply_chain.models import Farmer
 
 REQUIRED_FIELDS = {"ministry_id", "name", "phone_number"}
+_REGISTRY_CACHE: tuple[float, list["FarmerRecord"], dict[str, "FarmerRecord"]] | None = None
 
 
 @dataclass(frozen=True)
@@ -69,12 +72,10 @@ def _read_csv(path: Path) -> Iterable[FarmerRecord]:
             )
 
 
-def fetch_farmers() -> list[FarmerRecord]:
-    """Return the full farmer roster from the Ministry of Agriculture source.
+def _load_registry() -> tuple[list[FarmerRecord], dict[str, FarmerRecord]]:
+    """Load the ministry roster, re-reading the CSV when the file changes."""
 
-    Replace the body of this function with the production API client when ready.
-    The return contract is stable: a list of ``FarmerRecord`` instances.
-    """
+    global _REGISTRY_CACHE
 
     path = _csv_path()
     if not path.exists():
@@ -82,7 +83,26 @@ def fetch_farmers() -> list[FarmerRecord]:
             f"Farmer registry not found at {path}. "
             "Populate backend/data/farmers.csv or set FARMERS_CSV_PATH."
         )
-    return list(_read_csv(path))
+
+    mtime = path.stat().st_mtime
+    if _REGISTRY_CACHE and _REGISTRY_CACHE[0] == mtime:
+        return _REGISTRY_CACHE[1], _REGISTRY_CACHE[2]
+
+    records = list(_read_csv(path))
+    index = {record.ministry_id: record for record in records}
+    _REGISTRY_CACHE = (mtime, records, index)
+    return records, index
+
+
+def fetch_farmers() -> list[FarmerRecord]:
+    """Return the full farmer roster from the Ministry of Agriculture source.
+
+    Replace the body of this function with the production API client when ready.
+    The return contract is stable: a list of ``FarmerRecord`` instances.
+    """
+
+    records, _ = _load_registry()
+    return records
 
 
 def fetch_farmer(ministry_id: str) -> FarmerRecord | None:
@@ -91,7 +111,31 @@ def fetch_farmer(ministry_id: str) -> FarmerRecord | None:
     target = (ministry_id or "").strip()
     if not target:
         return None
-    for record in fetch_farmers():
-        if record.ministry_id == target:
-            return record
-    return None
+    _, index = _load_registry()
+    return index.get(target)
+
+
+def refresh_farmer_from_registry(farmer: Farmer) -> Farmer:
+    """Apply ministry registry fields to an existing local farmer row."""
+
+    ministry_id = (getattr(farmer, "ministry_id", None) or "").strip()
+    if not ministry_id or ministry_id.startswith("WALKIN-"):
+        return farmer
+
+    record = fetch_farmer(ministry_id)
+    if not record:
+        return farmer
+
+    updates = {}
+    for field in ("name", "phone_number", "district"):
+        new_value = getattr(record, field, "")
+        if getattr(farmer, field) != new_value:
+            updates[field] = new_value
+
+    if not updates:
+        return farmer
+
+    for field, value in updates.items():
+        setattr(farmer, field, value)
+    farmer.save(update_fields=list(updates.keys()))
+    return farmer

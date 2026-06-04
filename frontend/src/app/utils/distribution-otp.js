@@ -20,7 +20,7 @@ export async function requestDistributionOtp(transfer, sendOtpFn, options = {}) 
   }
 
   if (!transfer?.id || !sendOtpFn) {
-    throw new Error('Could not request OTP — missing transfer id.');
+    throw new Error('Could not request verification code.');
   }
 
   const payload = { resend };
@@ -47,22 +47,22 @@ export function farmerHasValidPhone(farmer) {
 
 const METHOD_LABELS = {
   en: {
-    sms: 'Sending OTP via Briq SMS…',
-    call: 'Requesting Briq voice call…',
-    whatsapp: 'Sending OTP via Briq WhatsApp…',
-    default: 'Contacting Briq to send OTP…',
-    create: 'Saving distribution…',
-    api: 'Calling backend send_otp…',
-    done: 'Briq accepted the request',
+    sms: 'Sending verification code by SMS…',
+    call: 'Calling the farmer\'s phone…',
+    whatsapp: 'Sending verification code on WhatsApp…',
+    default: 'Sending verification code…',
+    create: 'Recording distribution…',
+    api: 'Sending verification code…',
+    done: 'Code sent — check the farmer\'s phone',
   },
   sw: {
-    sms: 'Inatumia Briq kutuma SMS…',
-    call: 'Inapiga simu kupitia Briq…',
-    whatsapp: 'Inatumia Briq WhatsApp…',
-    default: 'Inawasiliana na Briq…',
+    sms: 'Inatumia SMS kutuma nambari…',
+    call: 'Inapiga simu ya mkulima…',
+    whatsapp: 'Inatumia WhatsApp kutuma nambari…',
+    default: 'Inatuma nambari ya uthibitisho…',
     create: 'Inahifadhi usambazaji…',
-    api: 'Inaita backend send_otp…',
-    done: 'Briq imekubali ombi',
+    api: 'Inatuma nambari ya uthibitisho…',
+    done: 'Nambari imetumwa — angalia simu ya mkulima',
   },
 };
 
@@ -74,13 +74,7 @@ export function otpLoadingLabel(phase, language = 'en', deliveryMethod) {
   return labels[deliveryMethod] || labels.default;
 }
 
-export function formatOtpDeliveryStatus(sms, language = 'en') {
-  if (!sms?.backend_reached) return '';
-  const method = (sms.delivery_method || 'sms').toUpperCase();
-  const ms = sms.briq_duration_ms != null ? `${sms.briq_duration_ms}ms` : '';
-  const transfer = sms.transfer_id ? `#${sms.transfer_id}` : '';
-  if (language === 'sw') {
-    return `Backend + Briq: ${method}${ms ? ` • ${ms}` : ''}${transfer ? ` • ${transfer}` : ''}`;
-  }
-  return `Backend reached Briq (${method}${ms ? `, ${ms}` : ''}${transfer ? `, transfer ${transfer}` : ''})`;
+/** @deprecated Delivery status is shown via sms.message in the OTP modal. */
+export function formatOtpDeliveryStatus() {
+  return '';
 }

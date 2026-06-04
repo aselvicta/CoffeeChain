@@ -7,6 +7,9 @@ import {
   Search,
   Calendar,
 } from 'lucide-react';
+import { usePaginatedList } from '../hooks/use-paginated-list';
+import { HISTORY_PAGE_SIZE } from '../utils/list-limits';
+import { PaginationBar } from './ui/pagination-bar';
 
 const FILTERS = [
   { id: 'all', label: 'All' },
@@ -56,6 +59,8 @@ export function CooperativeHistoryPanel({ receivedBatches, distributions }) {
     return items.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   }, [receivedBatches, distributions, filter, search]);
 
+  const pagination = usePaginatedList(timeline, HISTORY_PAGE_SIZE);
+
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
       <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -104,44 +109,58 @@ export function CooperativeHistoryPanel({ receivedBatches, distributions }) {
           </p>
         </div>
       ) : (
-        <ol className="space-y-3">
-          {timeline.map((item) => (
-            <li
-              key={item.key}
-              className="flex items-start gap-4 rounded-lg border border-gray-200 p-4 transition-colors hover:bg-gray-50"
-            >
-              <div
-                className={`rounded-lg p-2.5 ${
-                  item.kind === 'receipt'
-                    ? 'bg-blue-100 text-blue-700'
-                    : 'bg-green-100 text-green-700'
-                }`}
+        <>
+          <ol className="space-y-3">
+            {pagination.pageItems.map((item) => (
+              <li
+                key={item.key}
+                className="flex items-start gap-4 rounded-lg border border-gray-200 p-4 transition-colors hover:bg-gray-50"
               >
-                {item.kind === 'receipt' ? (
-                  <ArrowDownLeft className="h-4 w-4" />
-                ) : (
-                  <ArrowUpRight className="h-4 w-4" />
-                )}
-              </div>
-              <div className="flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="font-semibold text-gray-900">{item.title}</p>
-                  {item.status === 'VERIFIED' && (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
-                      <ShieldCheck className="h-3 w-3" />
-                      Verified
-                    </span>
+                <div
+                  className={`rounded-lg p-2.5 ${
+                    item.kind === 'receipt'
+                      ? 'bg-blue-100 text-blue-700'
+                      : 'bg-green-100 text-green-700'
+                  }`}
+                >
+                  {item.kind === 'receipt' ? (
+                    <ArrowDownLeft className="h-4 w-4" />
+                  ) : (
+                    <ArrowUpRight className="h-4 w-4" />
                   )}
                 </div>
-                <p className="text-sm text-gray-600">{item.subtitle}</p>
-              </div>
-              <div className="flex items-center gap-1 text-xs text-gray-500">
-                <Calendar className="h-3 w-3" />
-                {item.date || '—'}
-              </div>
-            </li>
-          ))}
-        </ol>
+                <div className="flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-semibold text-gray-900">{item.title}</p>
+                    {item.status === 'VERIFIED' && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                        <ShieldCheck className="h-3 w-3" />
+                        Verified
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-gray-600">{item.subtitle}</p>
+                </div>
+                <div className="flex items-center gap-1 text-xs text-gray-500">
+                  <Calendar className="h-3 w-3" />
+                  {item.date || '—'}
+                </div>
+              </li>
+            ))}
+          </ol>
+          <PaginationBar
+            page={pagination.page}
+            totalPages={pagination.totalPages}
+            total={pagination.total}
+            rangeStart={pagination.rangeStart}
+            rangeEnd={pagination.rangeEnd}
+            onPrev={pagination.goPrev}
+            onNext={pagination.goNext}
+            canPrev={pagination.canPrev}
+            canNext={pagination.canNext}
+            className="mt-4"
+          />
+        </>
       )}
     </div>
   );

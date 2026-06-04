@@ -7,11 +7,11 @@ import {
   Loader2,
   AlertCircle,
   CheckCircle2,
-  Percent,
   UserX,
 } from 'lucide-react';
 import { lookupMinistryFarmer, resolveRetailerBuyer } from '../api/client';
 import { PanelOutlineButton, PanelPrimaryButton, QuickActionCard } from './ui/dashboard-ui';
+import { getUserMessage } from '../utils/user-messages';
 
 const emptyBuyer = {
   farmerId: null,
@@ -25,6 +25,113 @@ const emptyBuyer = {
   message: '',
 };
 
+function VerifiedCustomerCard({
+  title,
+  subtitle,
+  name,
+  ministryId,
+  phone,
+  cooperativeName,
+  discountPercent,
+  discountEligible = true,
+  primaryLabel,
+  onPrimary,
+  onDismiss,
+  primaryLoading = false,
+  dismissLabel = 'Search again',
+  hidePrimary = false,
+  discountEditable = false,
+  onDiscountChange,
+}) {
+  const detailItems = [
+    { label: 'Name', value: name },
+    ministryId ? { label: 'Ministry ID', value: ministryId } : null,
+    phone ? { label: 'Phone', value: phone } : null,
+    cooperativeName ? { label: 'AMCOS', value: cooperativeName } : null,
+  ].filter(Boolean);
+
+  return (
+    <div className="w-full overflow-hidden rounded-xl border border-green-200 bg-green-50/40">
+      <div className="flex flex-col gap-4 p-4 xl:flex-row xl:items-center">
+        <div className="flex shrink-0 items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-100 ring-1 ring-green-200">
+            <CheckCircle2 className="h-5 w-5 text-green-700" />
+          </div>
+          <div>
+            <h4 className="font-semibold text-gray-900">{title}</h4>
+            {subtitle && <p className="text-xs text-gray-500">{subtitle}</p>}
+          </div>
+        </div>
+
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-5 gap-y-2 border-y border-green-100 py-3 xl:border-y-0 xl:border-x xl:px-5 xl:py-0">
+          {detailItems.map((item) => (
+            <div key={item.label} className="min-w-[7rem]">
+              <p className="text-[11px] uppercase tracking-wide text-gray-500">{item.label}</p>
+              <p className="truncate text-sm font-medium text-gray-900">{item.value}</p>
+            </div>
+          ))}
+          {discountEligible && (
+            discountEditable ? (
+              <div className="flex items-center gap-2">
+                <label className="text-[11px] uppercase tracking-wide text-gray-500">
+                  Discount
+                </label>
+                <div className="flex items-center rounded-lg border border-emerald-200 bg-white">
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={discountPercent ?? 0}
+                    onChange={(e) =>
+                      onDiscountChange?.(
+                        Math.min(100, Math.max(0, Number(e.target.value) || 0))
+                      )
+                    }
+                    className="w-14 rounded-lg border-0 bg-transparent px-2 py-1 text-sm font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-green-500"
+                  />
+                  <span className="pr-2 text-sm font-medium text-emerald-800">% off</span>
+                </div>
+              </div>
+            ) : (
+              <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800">
+                {discountPercent ?? 10}% off
+              </span>
+            )
+          )}
+        </div>
+
+        <div className="flex shrink-0 flex-wrap gap-2 xl:justify-end">
+          <button
+            type="button"
+            onClick={onDismiss}
+            disabled={primaryLoading}
+            className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-900 transition-colors hover:bg-gray-50 disabled:opacity-50"
+          >
+            {dismissLabel}
+          </button>
+          {!hidePrimary && (
+            <button
+              type="button"
+              onClick={onPrimary}
+              disabled={primaryLoading}
+              className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500"
+            >
+              {primaryLoading ? (
+                <span className="inline-flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Confirming…
+                </span>
+              ) : (
+                primaryLabel
+              )}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function RetailerSalePanel({ onBuyerResolved, onClear }) {
   const [mode, setMode] = useState('ministry');
   const [ministryIdInput, setMinistryIdInput] = useState('');
@@ -34,6 +141,7 @@ export function RetailerSalePanel({ onBuyerResolved, onClear }) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [preview, setPreview] = useState(null);
+  const [previewDiscount, setPreviewDiscount] = useState(10);
 
   const reset = () => {
     setBuyer(emptyBuyer);
@@ -77,8 +185,9 @@ export function RetailerSalePanel({ onBuyerResolved, onClear }) {
         discount_eligible: true,
         discount_percent: record.discount_percent ?? 10,
       });
+      setPreviewDiscount(record.discount_percent ?? 10);
     } catch (err) {
-      setError(err.message || 'Ministry lookup failed');
+      setError(getUserMessage(err, 'Could not verify Ministry ID. Please try again.'));
     } finally {
       setIsLoading(false);
     }
@@ -90,10 +199,14 @@ export function RetailerSalePanel({ onBuyerResolved, onClear }) {
     setError('');
     try {
       const data = await resolveRetailerBuyer({ ministry_id: preview.ministry_id });
-      applyResolved(data);
+      applyResolved({
+        ...data,
+        discount_percent: previewDiscount,
+        discount_eligible: true,
+      });
       setPreview(null);
     } catch (err) {
-      setError(err.message || 'Could not confirm buyer');
+      setError(getUserMessage(err, 'Could not confirm buyer. Please try again.'));
     } finally {
       setIsLoading(false);
     }
@@ -114,7 +227,7 @@ export function RetailerSalePanel({ onBuyerResolved, onClear }) {
       });
       applyResolved(data);
     } catch (err) {
-      setError(err.message || 'Walk-in buyer could not be recorded');
+      setError(getUserMessage(err, 'Could not record walk-in buyer. Please try again.'));
     } finally {
       setIsLoading(false);
     }
@@ -157,55 +270,43 @@ export function RetailerSalePanel({ onBuyerResolved, onClear }) {
       </div>
 
       {mode === 'ministry' && (
-        <form onSubmit={handleMinistryLookup} className="space-y-3">
+        <form onSubmit={handleMinistryLookup} className="w-full space-y-3">
           <label className="block text-sm font-medium text-gray-700">
             Ministry farmer ID
           </label>
-          <div className="flex gap-2">
+          <div className="flex w-full gap-2">
             <input
               type="text"
               value={ministryIdInput}
               onChange={(e) => setMinistryIdInput(e.target.value)}
               placeholder="e.g. MOA-KAG-031"
-              className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
+              className="min-w-0 flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
             />
-            <PanelOutlineButton
+            <PanelPrimaryButton
               type="submit"
               icon={isLoading ? Loader2 : Search}
               disabled={isLoading || !ministryIdInput.trim()}
-              className={isLoading ? '[&_svg]:animate-spin' : ''}
+              className={`shrink-0 px-6 ${isLoading ? '[&_svg]:animate-spin' : ''}`}
             >
               Look up
-            </PanelOutlineButton>
+            </PanelPrimaryButton>
           </div>
           {preview && (
-            <div className="rounded-lg border border-green-200 bg-green-50 p-4 space-y-3">
-              <div className="flex items-start gap-2">
-                <CheckCircle2 className="h-5 w-5 text-green-600 mt-0.5" />
-                <div>
-                  <p className="font-semibold text-green-900">{preview.name}</p>
-                  <p className="text-sm text-green-800">{preview.ministry_id}</p>
-                  <p className="text-sm text-green-700">{preview.phone_number}</p>
-                  {preview.cooperative_name && (
-                    <p className="text-xs text-green-700 mt-1">
-                      AMCOS on record: {preview.cooperative_name}
-                    </p>
-                  )}
-                </div>
-              </div>
-              <div className="inline-flex items-center gap-2 rounded-full bg-emerald-100 px-3 py-1 text-sm font-medium text-emerald-800">
-                <Percent className="h-4 w-4" />
-                {preview.discount_percent ?? 10}% subsidy discount eligible
-              </div>
-              <PanelPrimaryButton
-                icon={User}
-                onClick={handleConfirmMinistryBuyer}
-                disabled={isLoading}
-                className="w-full justify-center"
-              >
-                Use this customer for sale
-              </PanelPrimaryButton>
-            </div>
+            <VerifiedCustomerCard
+              title="Farmer verified"
+              subtitle="Match found in Ministry registry"
+              name={preview.name}
+              ministryId={preview.ministry_id}
+              phone={preview.phone_number}
+              cooperativeName={preview.cooperative_name}
+              discountPercent={previewDiscount}
+              discountEditable
+              onDiscountChange={setPreviewDiscount}
+              primaryLabel="Use for sale"
+              onPrimary={handleConfirmMinistryBuyer}
+              onDismiss={() => setPreview(null)}
+              primaryLoading={isLoading}
+            />
           )}
         </form>
       )}
@@ -256,34 +357,28 @@ export function RetailerSalePanel({ onBuyerResolved, onClear }) {
       )}
 
       {buyer.farmerId && (
-        <div
-          className={`rounded-lg border p-4 ${
+        <VerifiedCustomerCard
+          title="Customer selected"
+          subtitle={
             buyer.discountEligible
-              ? 'border-emerald-200 bg-emerald-50'
-              : 'border-gray-200 bg-gray-50'
-          }`}
-        >
-          <p className="text-sm font-semibold text-gray-900">Selected for this sale</p>
-          <p className="text-gray-800">{buyer.name}</p>
-          <p className="text-sm text-gray-600">
-            {buyer.ministryId.startsWith('WALKIN-') ? 'Walk-in' : buyer.ministryId} •{' '}
-            {buyer.phone}
-          </p>
-          {buyer.discountEligible ? (
-            <p className="text-sm text-emerald-700 mt-2 font-medium">
-              {buyer.discountPercent}% discount will apply
-            </p>
-          ) : (
-            <p className="text-sm text-gray-600 mt-2">No subsidy discount (walk-in)</p>
-          )}
-          <button
-            type="button"
-            onClick={reset}
-            className="mt-3 text-sm text-red-600 hover:text-red-800"
-          >
-            Clear customer
-          </button>
-        </div>
+              ? 'Adjust discount below, then choose a batch'
+              : 'Walk-in — standard price applies'
+          }
+          name={buyer.name}
+          ministryId={buyer.ministryId.startsWith('WALKIN-') ? 'Walk-in customer' : buyer.ministryId}
+          phone={buyer.phone}
+          discountPercent={buyer.discountPercent}
+          discountEligible={buyer.discountEligible}
+          discountEditable={buyer.discountEligible}
+          onDiscountChange={(value) => {
+            const next = { ...buyer, discountPercent: value };
+            setBuyer(next);
+            onBuyerResolved?.(next);
+          }}
+          hidePrimary
+          onDismiss={reset}
+          dismissLabel="Clear customer"
+        />
       )}
 
       {error && (

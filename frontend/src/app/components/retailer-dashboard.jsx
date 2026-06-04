@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { Package, Users, Send, History, LogOut, TrendingUp, ShieldCheck } from 'lucide-react';
+import { Package, Users, Send, History, LogOut, TrendingUp, ShieldCheck, Search } from 'lucide-react';
 import { NotificationBell } from './notification-bell';
 import { useNotifications } from '../hooks/use-notifications';
 import { LineChart, Line, PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
@@ -8,6 +8,7 @@ import { Logo } from './logo';
 import { FarmerOTPModal } from './farmer-otp-modal';
 import { ReceiveFertilizerPanel } from './receive-fertilizer-panel';
 import { RetailerSalePanel } from './retailer-sale-panel';
+import { StockBatchPicker } from './stock-batch-picker';
 import { CooperativeHistoryPanel } from './cooperative-history-panel';
 import { VerificationTrustSeal } from './verification-trust-seal';
 import {
@@ -30,6 +31,11 @@ import {
   PanelOutlineButton,
 } from './ui/dashboard-ui';
 import { buildDashboardPath, resolveDashboardTab } from '../utils/dashboard-routing';
+import { buildWeeklyTrend } from '../utils/chart-trends';
+import { getUserMessage } from '../utils/user-messages';
+import { takeRecent, sortByDateDesc, RECENT_LIST_LIMIT, HISTORY_PAGE_SIZE } from '../utils/list-limits';
+import { usePaginatedList } from '../hooks/use-paginated-list';
+import { PaginationBar, RecentListNote } from './ui/pagination-bar';
 
 export function RetailerDashboard({ userProfile, onLogout }) {
   const dashboardRole = 'retailer';
@@ -44,7 +50,6 @@ export function RetailerDashboard({ userProfile, onLogout }) {
   const [pendingTransfer, setPendingTransfer] = useState(null);
   const [pendingFarmer, setPendingFarmer] = useState(null);
   const [isOtpOpen, setIsOtpOpen] = useState(false);
-  const [otpMessage, setOtpMessage] = useState('');
   const [smsInfo, setSmsInfo] = useState(null);
   const [otpCodeLength, setOtpCodeLength] = useState(6);
   const [latestVerification, setLatestVerification] = useState(null);
@@ -52,12 +57,16 @@ export function RetailerDashboard({ userProfile, onLogout }) {
   const [isSaving, setIsSaving] = useState(false);
   const [savePhase, setSavePhase] = useState('');
   const [otpSendingTransferId, setOtpSendingTransferId] = useState(null);
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [customerFilter, setCustomerFilter] = useState('all');
+  const [customerSort, setCustomerSort] = useState('date');
   const {
     notifications,
     unreadCount,
     refresh: refreshNotifications,
     markRead,
     markAllRead,
+    dismiss,
   } = useNotifications();
   const location = useLocation();
   const navigate = useNavigate();
@@ -76,12 +85,6 @@ export function RetailerDashboard({ userProfile, onLogout }) {
     setActiveTab(nextTab);
     navigate(buildDashboardPath(dashboardRole, nextTab));
   };
-
-  const distributionTrends = [
-    { week: 'W1', bags: 18, verified: 12 },
-    { week: 'W2', bags: 24, verified: 19 },
-    { week: 'W3', bags: 30, verified: 25 },
-  ];
 
   const receivedBatches = useMemo(
     () =>
@@ -127,20 +130,58 @@ export function RetailerDashboard({ userProfile, onLogout }) {
     ];
   }, [distributions]);
 
-  const recentCustomers = useMemo(() => {
+  const allCustomers = useMemo(() => {
     const seen = new Map();
-    distributions.forEach((dist) => {
-      const key = dist.farmerMinistryId || dist.farmer;
+    sortByDateDesc(distributions).forEach((dist) => {
+      const key =
+        dist.farmerMinistryId ||
+        (dist.farmerPhone ? `phone:${dist.farmerPhone}` : null) ||
+        dist.farmer;
       if (!key || seen.has(key)) return;
       seen.set(key, {
+        id: key,
         name: dist.farmer,
-        ministryId: dist.farmerMinistryId,
-        phone: dist.farmerPhone,
+        ministryId: dist.farmerMinistryId || '—',
+        phone: dist.farmerPhone || '—',
         lastDiscount: dist.discountPercent,
+        lastDate: dist.date,
+        hasMinistryId: Boolean(dist.farmerMinistryId),
+        isSubsidized: Number(dist.discountPercent) > 0,
       });
     });
-    return Array.from(seen.values());
+    return sortByDateDesc(Array.from(seen.values()), 'lastDate');
   }, [distributions]);
+
+  const filteredCustomers = useMemo(() => {
+    const needle = customerSearch.trim().toLowerCase();
+    let items = allCustomers.filter((customer) => {
+      if (customerFilter === 'subsidy' && !customer.isSubsidized) return false;
+      if (customerFilter === 'walkin' && customer.isSubsidized) return false;
+      if (!needle) return true;
+      return [customer.name, customer.ministryId, customer.phone, customer.lastDate]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+        .includes(needle);
+    });
+
+    if (customerSort === 'name') {
+      items = [...items].sort((a, b) => a.name.localeCompare(b.name));
+    } else {
+      items = sortByDateDesc(items, 'lastDate');
+    }
+
+    return items;
+  }, [allCustomers, customerSearch, customerFilter, customerSort]);
+
+  const customerPagination = usePaginatedList(filteredCustomers, HISTORY_PAGE_SIZE);
+
+  const recentDistributions = useMemo(
+    () => takeRecent(distributions, RECENT_LIST_LIMIT),
+    [distributions]
+  );
+
+  const verificationPagination = usePaginatedList(verificationList, HISTORY_PAGE_SIZE);
 
   const refreshData = async () => {
     try {
@@ -201,9 +242,21 @@ export function RetailerDashboard({ userProfile, onLogout }) {
       );
       await refreshNotifications();
     } catch (error) {
-      setStatusMessage(error.message);
+      setStatusMessage(getUserMessage(error));
     }
   };
+
+  const distributionTrends = useMemo(
+    () =>
+      buildWeeklyTrend(distributions, {
+        dateKey: 'date',
+        countKeys: {
+          bags: 'bags',
+          verified: (item) => (item.otp?.toLowerCase() === 'verified' ? Number(item.bags) || 0 : 0),
+        },
+      }),
+    [distributions]
+  );
 
   useEffect(() => {
     refreshData();
@@ -225,7 +278,7 @@ export function RetailerDashboard({ userProfile, onLogout }) {
             { id: 'overview', label: 'Overview', icon: TrendingUp },
             { id: 'receive', label: 'Receive Batches', icon: Package },
             { id: 'distribute', label: 'Point of Sale', icon: Send },
-            { id: 'customers', label: 'Recent Customers', icon: Users },
+            { id: 'customers', label: 'Customers', icon: Users },
             { id: 'verification', label: 'Verify Distribution', icon: ShieldCheck },
             { id: 'history', label: 'History', icon: History },
             { id: 'analytics', label: 'Analytics', icon: TrendingUp },
@@ -261,6 +314,7 @@ export function RetailerDashboard({ userProfile, onLogout }) {
                 unreadCount={unreadCount}
                 onMarkRead={markRead}
                 onMarkAllRead={markAllRead}
+                onDismiss={dismiss}
                 onNavigateTab={(tab) => {
                   const tabMap = {
                     receive: 'receive',
@@ -298,9 +352,9 @@ export function RetailerDashboard({ userProfile, onLogout }) {
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 {[
                   {
-                    label: 'Recent Customers',
-                    value: `${recentCustomers.length}`,
-                    change: 'Buyers at this shop',
+                    label: 'Customers',
+                    value: `${allCustomers.length}`,
+                    change: 'Unique buyers at this shop',
                     icon: Users,
                   },
                   {
@@ -363,30 +417,124 @@ export function RetailerDashboard({ userProfile, onLogout }) {
 
           {activeTab === 'customers' && (
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <h2 className="text-xl font-bold text-gray-900 mb-1">Recent Customers</h2>
-              <p className="text-sm text-gray-600 mb-4">
-                Customers appear here after a sale. Retailers do not register farmers — use
-                Ministry ID or walk-in at point of sale.
-              </p>
-              {recentCustomers.length === 0 ? (
-                <p className="text-sm text-gray-500">No sales recorded yet.</p>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {recentCustomers.map((customer) => (
-                    <div key={customer.ministryId} className="border border-gray-200 rounded-lg p-4">
-                      <p className="font-semibold text-gray-900">{customer.name}</p>
-                      <p className="text-sm text-gray-600">{customer.ministryId}</p>
-                      <p className="text-sm text-gray-500">{customer.phone}</p>
-                      {customer.lastDiscount > 0 ? (
-                        <p className="text-xs text-emerald-700 mt-2 font-medium">
-                          Last sale: {customer.lastDiscount}% discount applied
-                        </p>
-                      ) : (
-                        <p className="text-xs text-gray-500 mt-2">Walk-in / no subsidy</p>
-                      )}
-                    </div>
+              <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <h2 className="text-xl font-bold text-gray-900">Customers</h2>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { id: 'all', label: 'All' },
+                    { id: 'subsidy', label: 'Subsidy' },
+                    { id: 'walkin', label: 'Walk-in' },
+                  ].map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => setCustomerFilter(option.id)}
+                      className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                        customerFilter === option.id
+                          ? 'border-green-600 bg-green-50 text-green-800'
+                          : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
                   ))}
                 </div>
+              </div>
+
+              {allCustomers.length === 0 ? (
+                <p className="text-sm text-gray-500">No sales recorded yet.</p>
+              ) : (
+                <>
+                  <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                      <input
+                        type="search"
+                        value={customerSearch}
+                        onChange={(event) => setCustomerSearch(event.target.value)}
+                        placeholder="Search by name, Ministry ID, or phone"
+                        className="w-full rounded-lg border border-gray-300 py-2.5 pl-10 pr-4 text-sm focus:border-transparent focus:ring-2 focus:ring-green-500"
+                      />
+                    </div>
+                    <select
+                      value={customerSort}
+                      onChange={(event) => setCustomerSort(event.target.value)}
+                      className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-transparent focus:ring-2 focus:ring-green-500 sm:w-44"
+                    >
+                      <option value="date">Sort by date</option>
+                      <option value="name">Sort by name</option>
+                    </select>
+                  </div>
+
+                  {filteredCustomers.length === 0 ? (
+                    <p className="text-sm text-gray-500">No customers match your search or filters.</p>
+                  ) : (
+                    <>
+                      <div className="overflow-hidden rounded-lg border border-gray-200">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">
+                            Name
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">
+                            Ministry ID
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">
+                            Phone
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">
+                            Last sale
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">
+                            Date
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200 bg-white">
+                        {customerPagination.pageItems.map((customer) => (
+                          <tr key={customer.id} className="hover:bg-gray-50">
+                            <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-gray-900">
+                              {customer.name}
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-700">
+                              {customer.ministryId}
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-700">
+                              {customer.phone}
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 text-sm">
+                              {customer.lastDiscount > 0 ? (
+                                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                                  {customer.lastDiscount}% discount
+                                </span>
+                              ) : (
+                                <span className="text-gray-500">Walk-in / full price</span>
+                              )}
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-500">
+                              {customer.lastDate || '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                      </div>
+                      <PaginationBar
+                        page={customerPagination.page}
+                        totalPages={customerPagination.totalPages}
+                        total={customerPagination.total}
+                        rangeStart={customerPagination.rangeStart}
+                        rangeEnd={customerPagination.rangeEnd}
+                        onPrev={customerPagination.goPrev}
+                        onNext={customerPagination.goNext}
+                        canPrev={customerPagination.canPrev}
+                        canNext={customerPagination.canNext}
+                        className="mt-4"
+                      />
+                    </>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -409,36 +557,68 @@ export function RetailerDashboard({ userProfile, onLogout }) {
                 onBuyerResolved={(buyer) => setSaleBuyer(buyer)}
                 onClear={() => setSaleBuyer(null)}
               />
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                <h2 className="text-xl font-bold text-gray-900 mb-1">Complete sale</h2>
-                <p className="text-sm text-gray-600 mb-4">
-                  Select stock and bag count, then send OTP to the customer&apos;s phone.
-                </p>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <select
-                    value={distributionForm.batchId}
-                    onChange={(e) =>
-                      setDistributionForm({ ...distributionForm, batchId: e.target.value })
-                    }
-                    disabled={distributableStock.length === 0}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 disabled:bg-gray-100"
-                  >
-                    <option value="">Select Batch</option>
-                    {distributableStock.map((batch) => (
-                      <option key={batch.batchId} value={batch.batchId}>
-                        {batch.batchCode || `Batch ${batch.batchId}`} ({batch.bagsAvailable} bags
-                        {batch.fertilizerType ? ` • ${batch.fertilizerType}` : ''})
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="number"
-                    min="1"
-                    placeholder="Bags"
-                    value={distributionForm.bags}
-                    onChange={(e) => setDistributionForm({ ...distributionForm, bags: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
-                  />
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-5">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900 mb-1">Complete sale</h2>
+                  <p className="text-sm text-gray-600">
+                    Choose a batch, set bags and discount, then send OTP to the customer&apos;s phone.
+                  </p>
+                </div>
+
+                <StockBatchPicker
+                  batches={distributableStock}
+                  selectedBatchId={distributionForm.batchId}
+                  onSelect={(batchId) =>
+                    setDistributionForm({ ...distributionForm, batchId: String(batchId) })
+                  }
+                  disabled={distributableStock.length === 0}
+                  emptyMessage="Receive fertilizer first — no batches in stock."
+                />
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">
+                      Bags to sell
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="Bags"
+                      value={distributionForm.bags}
+                      onChange={(e) =>
+                        setDistributionForm({ ...distributionForm, bags: e.target.value })
+                      }
+                      disabled={!distributionForm.batchId}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 disabled:bg-gray-100"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">
+                      Subsidy discount
+                    </label>
+                    <div className="flex items-center rounded-lg border border-gray-300 bg-white focus-within:ring-2 focus-within:ring-green-500">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={saleBuyer?.discountEligible ? saleBuyer.discountPercent : 0}
+                        onChange={(e) => {
+                          if (!saleBuyer?.discountEligible) return;
+                          const value = Math.min(
+                            100,
+                            Math.max(0, Number(e.target.value) || 0)
+                          );
+                          setSaleBuyer({ ...saleBuyer, discountPercent: value });
+                        }}
+                        disabled={!saleBuyer?.discountEligible}
+                        className="min-w-0 flex-1 rounded-lg border-0 bg-transparent px-4 py-3 text-gray-900 disabled:bg-gray-100 disabled:text-gray-400"
+                      />
+                      <span className="pr-4 text-sm font-medium text-gray-600">% off</span>
+                    </div>
+                    {!saleBuyer?.discountEligible && (
+                      <p className="mt-1 text-xs text-gray-500">Walk-in customers — no discount</p>
+                    )}
+                  </div>
                 </div>
                 <div className="mt-4">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -496,7 +676,6 @@ export function RetailerDashboard({ userProfile, onLogout }) {
                             name: saleBuyer.name,
                             ministryId: saleBuyer.ministryId,
                           });
-                          setOtpMessage(sms.message || '');
                           setSmsInfo(sms);
                           setIsOtpOpen(true);
                           setDistributionForm({ batchId: '', bags: '' });
@@ -508,12 +687,12 @@ export function RetailerDashboard({ userProfile, onLogout }) {
                         setStatusMessage(
                           (current) =>
                             current ||
-                            'Sale was saved but Briq OTP failed. Open Verify Distribution to resend.'
+                            'Sale was saved but the verification code could not be sent. Open Verify Distribution to resend.'
                         );
                       }
                       await refreshData();
                     } catch (error) {
-                      setStatusMessage(error.message);
+                      setStatusMessage(getUserMessage(error));
                     } finally {
                       setIsSaving(false);
                       setSavePhase('');
@@ -538,12 +717,19 @@ export function RetailerDashboard({ userProfile, onLogout }) {
               </div>
 
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-4">Recent Distributions</h3>
+                <div className="mb-4 flex items-center justify-between gap-2">
+                  <h3 className="text-lg font-bold text-gray-900">Recent Distributions</h3>
+                  <RecentListNote
+                    shown={recentDistributions.length}
+                    total={distributions.length}
+                    label="distributions"
+                  />
+                </div>
                 <div className="space-y-3">
                   {distributions.length === 0 ? (
                     <p className="text-sm text-gray-500">No distributions yet.</p>
                   ) : (
-                    distributions.map((dist) => (
+                    recentDistributions.map((dist) => (
                       <div
                         key={dist.id}
                         className="flex items-center justify-between border border-gray-100 rounded-lg p-4"
@@ -593,8 +779,9 @@ export function RetailerDashboard({ userProfile, onLogout }) {
                 {verificationList.length === 0 ? (
                   <p className="text-sm text-gray-500">No distributions to verify yet.</p>
                 ) : (
-                  <div className="space-y-3">
-                    {verificationList.map((record) => {
+                  <>
+                    <div className="space-y-3">
+                      {verificationPagination.pageItems.map((record) => {
                       const isVerified = record.status === 'verified';
                       return (
                         <ContentListRow
@@ -618,14 +805,13 @@ export function RetailerDashboard({ userProfile, onLogout }) {
                                           name: record.farmer,
                                           ministryId: record.farmerMinistryId,
                                         });
-                                        setOtpMessage(sms.message || '');
                                         setSmsInfo(sms);
                                         setIsOtpOpen(true);
                                       },
                                       onFailed: (message) => setStatusMessage(message),
                                     });
                                   } catch (error) {
-                                    setStatusMessage(error.message);
+                                    setStatusMessage(getUserMessage(error));
                                   } finally {
                                     setOtpSendingTransferId(null);
                                   }
@@ -663,7 +849,20 @@ export function RetailerDashboard({ userProfile, onLogout }) {
                         </ContentListRow>
                       );
                     })}
-                  </div>
+                    </div>
+                    <PaginationBar
+                      page={verificationPagination.page}
+                      totalPages={verificationPagination.totalPages}
+                      total={verificationPagination.total}
+                      rangeStart={verificationPagination.rangeStart}
+                      rangeEnd={verificationPagination.rangeEnd}
+                      onPrev={verificationPagination.goPrev}
+                      onNext={verificationPagination.goNext}
+                      canPrev={verificationPagination.canPrev}
+                      canNext={verificationPagination.canNext}
+                      className="mt-4"
+                    />
+                  </>
                 )}
                 {statusMessage && <p className="mt-3 text-sm text-red-600">{statusMessage}</p>}
               </div>

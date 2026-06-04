@@ -1,3 +1,5 @@
+import { getUserMessage } from '../utils/user-messages';
+
 const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
 export const DEFAULT_FERTILIZER_TYPES = [
@@ -122,18 +124,15 @@ async function apiFetch(path, options = {}, retryOnUnauthorized = true) {
   }
 
   if (!response.ok) {
-    let message = 'Request failed';
+    let errorData = null;
     try {
-      const errorData = await response.json();
-      message = errorData.detail || JSON.stringify(errorData);
+      errorData = await response.json();
     } catch {
       // ignore
     }
+    const message = getUserMessage(errorData, 'Something went wrong. Please try again.');
     if (response.status === 401) {
-      throw new AuthError(
-        typeof message === 'string' ? message : 'Authentication failed.',
-        401
-      );
+      throw new AuthError(message, 401);
     }
     throw new Error(message);
   }
@@ -148,14 +147,16 @@ export async function login(username, password) {
     body: JSON.stringify({ username, password }),
   });
   if (!response.ok) {
-    let message = 'Invalid username or password';
+    let errorData = null;
     try {
-      const errorData = await response.json();
-      message = errorData.detail || message;
+      errorData = await response.json();
     } catch {
       // ignore
     }
-    throw new AuthError(message, response.status);
+    throw new AuthError(
+      getUserMessage(errorData, 'Incorrect username or password.'),
+      response.status
+    );
   }
   const result = await response.json();
   setAccessToken(result.access);
@@ -179,9 +180,20 @@ export function fetchUsers() {
   return apiFetch('/api/users/');
 }
 
+export function fetchUser(userId) {
+  return apiFetch(`/api/users/${userId}/`);
+}
+
 export function createUser(payload) {
   return apiFetch('/api/users/', {
     method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateUser(userId, payload) {
+  return apiFetch(`/api/users/${userId}/`, {
+    method: 'PATCH',
     body: JSON.stringify(payload),
   });
 }
@@ -393,10 +405,59 @@ export function fetchAuditReport() {
   return apiFetch('/api/reports/audit/');
 }
 
+export function fetchIntegrityTransfers({
+  branchId = '',
+  branchType = '',
+  search = '',
+  transferId = '',
+} = {}) {
+  const params = new URLSearchParams();
+  if (branchId) params.set('branch_id', String(branchId));
+  if (branchType) params.set('branch_type', branchType);
+  if (search) params.set('search', search);
+  if (transferId) params.set('transfer_id', String(transferId));
+  const query = params.toString();
+  return apiFetch(`/api/integrity/${query ? `?${query}` : ''}`);
+}
+
+export function compareIntegrityTransfer(transferId, { notify = true } = {}) {
+  return apiFetch(`/api/integrity/${transferId}/`, {
+    method: 'POST',
+    body: JSON.stringify({ notify }),
+  });
+}
+
+export function fetchIntegrityTransferDetail(transferId) {
+  return apiFetch(`/api/integrity/${transferId}/`);
+}
+
+export function scanIntegrityFiltered({
+  branchId = '',
+  branchType = '',
+  search = '',
+  transferIds = [],
+  notify = true,
+} = {}) {
+  return apiFetch('/api/integrity/scan/', {
+    method: 'POST',
+    body: JSON.stringify({
+      branch_id: branchId || undefined,
+      branch_type: branchType || undefined,
+      search: search || undefined,
+      transfer_ids: transferIds.length ? transferIds : undefined,
+      notify,
+    }),
+  });
+}
+
 export function markNotificationRead(id) {
   return apiFetch(`/api/notifications/${id}/read/`, { method: 'POST' });
 }
 
 export function markAllNotificationsRead() {
   return apiFetch('/api/notifications/read_all/', { method: 'POST' });
+}
+
+export function deleteNotification(id) {
+  return apiFetch(`/api/notifications/${id}/`, { method: 'DELETE' });
 }

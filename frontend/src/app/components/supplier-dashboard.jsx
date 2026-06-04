@@ -1,18 +1,24 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { Package, Send, History, BarChart3, LogOut, TrendingUp, ChevronLeft, ChevronRight, Search, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Package, Send, History, BarChart3, LogOut, TrendingUp, Search, AlertCircle, CheckCircle2, Plus, Eye, Trash2 } from 'lucide-react';
 import { LineChart, Line, PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import { Logo } from './logo';
 import { NotificationBell } from './notification-bell';
 import { useNotifications } from '../hooks/use-notifications';
 import { WarehouseModal } from './warehouse-modal';
+import { StockInModal } from './stock-in-modal';
 import { createTransfer, createWarehouse, deleteWarehouse, fetchBatches, fetchBranches, fetchIssues, fetchTransfers, fetchWarehouseCatalog, fetchWarehouses, resolveIssue } from '../api/client';
-import { QuickActionCard, PanelPrimaryButton } from './ui/dashboard-ui';
+import { QuickActionCard, PanelPrimaryButton, PanelOutlineButton } from './ui/dashboard-ui';
 import { buildDashboardPath, resolveDashboardTab } from '../utils/dashboard-routing';
+import { buildMonthlyTrend } from '../utils/chart-trends';
+import { getUserMessage } from '../utils/user-messages';
+import { sortByDateDesc, HISTORY_PAGE_SIZE } from '../utils/list-limits';
+import { usePaginatedList } from '../hooks/use-paginated-list';
+import { PaginationBar } from './ui/pagination-bar';
 
 export function SupplierDashboard({ userProfile, onLogout }) {
   const dashboardRole = 'supplier';
-  const dashboardTabs = ['overview', 'dispatch', 'dispatched', 'warehouse', 'inventory', 'issues', 'analytics', 'history'];
+  const dashboardTabs = ['overview', 'dispatch', 'dispatched', 'warehouse', 'issues', 'analytics', 'history'];
   function createDispatchLineItem() {
     return {
       id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -27,11 +33,9 @@ export function SupplierDashboard({ userProfile, onLogout }) {
     warehouseId: '',
   });
   const [dispatches, setDispatches] = useState([]);
-  const [dispatchedIndex, setDispatchedIndex] = useState(0);
-  const [dispatchedQuery, setDispatchedQuery] = useState('');
-  const [dispatchedSearchDraft, setDispatchedSearchDraft] = useState('');
+  const [dispatchedSearch, setDispatchedSearch] = useState('');
   const [dispatchedStatusFilter, setDispatchedStatusFilter] = useState('all');
-  const [dispatchedStatusDraft, setDispatchedStatusDraft] = useState('all');
+  const [dispatchedSort, setDispatchedSort] = useState('date');
   const [dispatchedTransfers, setDispatchedTransfers] = useState([]);
   const [batches, setBatches] = useState([]);
   const [branches, setBranches] = useState([]);
@@ -41,11 +45,14 @@ export function SupplierDashboard({ userProfile, onLogout }) {
   const [issues, setIssues] = useState([]);
   const [resolutionByIssueId, setResolutionByIssueId] = useState({});
   const [isWarehouseModalOpen, setIsWarehouseModalOpen] = useState(false);
+  const [showWarehouseForm, setShowWarehouseForm] = useState(false);
+  const [warehouseFormError, setWarehouseFormError] = useState('');
   const [selectedWarehouse, setSelectedWarehouse] = useState(null);
   const [newWarehouse, setNewWarehouse] = useState({ name: '', section: '', capacity: '' });
   const [statusMessage, setStatusMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [readNotificationIds, setReadNotificationIds] = useState([]);
+  const [dismissedNotificationIds, setDismissedNotificationIds] = useState([]);
   const [dispatchItems, setDispatchItems] = useState([createDispatchLineItem()]);
   const location = useLocation();
   const navigate = useNavigate();
@@ -54,6 +61,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
     refresh: refreshNotifications,
     markRead: markApiRead,
     markAllRead: markAllApiRead,
+    dismiss: dismissApi,
   } = useNotifications();
 
   useEffect(() => {
@@ -128,6 +136,11 @@ export function SupplierDashboard({ userProfile, onLogout }) {
           section: warehouse.section,
           capacity: warehouse.capacity_bags,
           current: warehouse.current_bags,
+          address: warehouse.address || '',
+          region: warehouse.region || '',
+          contact_name: warehouse.contact_name || '',
+          contact_phone: warehouse.contact_phone || '',
+          notes: warehouse.notes || '',
         }))
       );
 
@@ -155,6 +168,30 @@ export function SupplierDashboard({ userProfile, onLogout }) {
           confirmedAt: transfer.confirmed_at || '',
         }))
       );
+      setDispatchedTransfers(
+        [...supplierTransfers]
+          .map((transfer) => ({
+            id: transfer.id,
+            batchCode: transfer.batch?.batch_code || '—',
+            product: transfer.batch?.fertilizer_type || '—',
+            bags: transfer.quantity_bags,
+            destination: transfer.to_branch?.name || 'Unknown',
+            recipient: transfer.to_branch?.name || transfer.receiver_name || 'Unknown',
+            rawStatus: transfer.status,
+            status: getDispatchStatusMeta(transfer.status).label,
+            statusTone: getDispatchStatusMeta(transfer.status).tone,
+            statusDescription: getDispatchStatusMeta(transfer.status).description,
+            warehouse: transfer.warehouse?.name || transfer.batch?.storage_location?.name || '—',
+            supplier: transfer.from_supplier?.name || '—',
+            date: transfer.created_at?.slice(0, 10),
+            createdAt: transfer.created_at || '',
+            confirmedAt: transfer.confirmed_at || '',
+          }))
+          .sort(
+            (left, right) =>
+              new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime()
+          )
+      );
 
       const batchInventory = batchData.map((batch) => {
         const storageLocation = batch.storage_location || null;
@@ -173,14 +210,18 @@ export function SupplierDashboard({ userProfile, onLogout }) {
         const expiryRisk = daysToExpiry !== null && daysToExpiry <= 30 && daysToExpiry >= 0;
         return {
           id: batch.id,
+          batchCode: batch.batch_code || `Batch ${batch.id}`,
           name: batch.fertilizer_type,
+          fertilizerType: batch.fertilizer_type,
           available,
+          availableBags: available,
           unit: 'bags',
           threshold: storageCapacity ? Math.max(1, Math.round(storageCapacity * 0.2)) : 200,
           manufacturer: batch.manufacturer || '—',
           unitWeightKg: batch.unit_weight_kg || '',
           productionDate: batch.production_date || '',
           expiryDate: batch.expiry_date || '',
+          dateReceived: batch.date_received?.slice(0, 10) || batch.created_at?.slice(0, 10) || '',
           certificationStatus: batch.certification_status || 'Pending',
           storageLocation: batch.storage_location?.name || '',
           storageLocationId: batch.storage_location?.id || null,
@@ -192,13 +233,19 @@ export function SupplierDashboard({ userProfile, onLogout }) {
       setIssues(issueData);
       await refreshNotifications();
     } catch (error) {
-      setStatusMessage(error.message);
+      setStatusMessage(getUserMessage(error));
     }
   };
 
   useEffect(() => {
     refreshData();
   }, []);
+
+  useEffect(() => {
+    if (!selectedWarehouse) return;
+    const updated = warehouses.find((w) => w.id === selectedWarehouse.id);
+    if (updated) setSelectedWarehouse(updated);
+  }, [warehouses, selectedWarehouse?.id]);
 
   const productMix = useMemo(() => {
     const totals = inventory.reduce((acc, item) => {
@@ -213,13 +260,45 @@ export function SupplierDashboard({ userProfile, onLogout }) {
     }));
   }, [inventory]);
 
-  const dispatchTrends = useMemo(() => {
-    return [
-      { month: 'Jan', bags: dispatches.length * 20, deliveries: dispatches.length },
-      { month: 'Feb', bags: dispatches.length * 24, deliveries: dispatches.length + 2 },
-      { month: 'Mar', bags: dispatches.length * 26, deliveries: dispatches.length + 3 },
-    ];
-  }, [dispatches.length]);
+  const dispatchTrends = useMemo(
+    () =>
+      buildMonthlyTrend(dispatches, {
+        dateKey: 'date',
+        countKeys: {
+          bags: 'bags',
+          deliveries: () => 1,
+        },
+      }),
+    [dispatches]
+  );
+
+  const deliveredRate = useMemo(() => {
+    if (!dispatches.length) return 0;
+    const confirmed = dispatches.filter(
+      (dispatch) => dispatch.rawStatus === 'RECEIVED' || dispatch.rawStatus === 'VERIFIED'
+    ).length;
+    return Math.round((confirmed / dispatches.length) * 100);
+  }, [dispatches]);
+
+  const warehouseSummaries = useMemo(() => {
+    const summaries = new Map();
+    warehouses.forEach((warehouse) => {
+      summaries.set(warehouse.id, { batchCount: 0, lowStock: 0, expiryRisk: 0 });
+    });
+    inventory.forEach((item) => {
+      if (!item.storageLocationId) return;
+      const summary = summaries.get(item.storageLocationId) || {
+        batchCount: 0,
+        lowStock: 0,
+        expiryRisk: 0,
+      };
+      summary.batchCount += 1;
+      if (item.available <= item.threshold) summary.lowStock += 1;
+      if (item.expiryRisk) summary.expiryRisk += 1;
+      summaries.set(item.storageLocationId, summary);
+    });
+    return summaries;
+  }, [warehouses, inventory]);
 
   const selectedWarehouseCatalog = useMemo(
     () =>
@@ -250,137 +329,97 @@ export function SupplierDashboard({ userProfile, onLogout }) {
     [branches]
   );
 
-  const recentDispatches = useMemo(() => dispatches.slice(0, 8), [dispatches]);
-
-  const visibleDispatchedTransfers = useMemo(() => {
-    const query = dispatchedQuery.trim().toLowerCase();
-    return dispatchedTransfers.filter((dispatch) => {
-      const matchesQuery =
-        !query ||
-        dispatch.batchCode.toLowerCase().includes(query) ||
-        dispatch.product.toLowerCase().includes(query) ||
-        dispatch.recipient.toLowerCase().includes(query) ||
-        dispatch.warehouse.toLowerCase().includes(query);
-      const matchesStatus =
-        dispatchedStatusFilter === 'all' || dispatch.rawStatus === dispatchedStatusFilter;
-      return matchesQuery && matchesStatus;
-    });
-  }, [dispatchedTransfers, dispatchedQuery, dispatchedStatusFilter]);
-
-  const dispatchedStatusOptions = useMemo(() => {
-    const counts = visibleDispatchedTransfers.reduce((acc, dispatch) => {
-      acc[dispatch.rawStatus] = (acc[dispatch.rawStatus] || 0) + 1;
-      return acc;
-    }, {});
-
-    return [
-      { value: 'all', label: 'All statuses', count: visibleDispatchedTransfers.length },
-      { value: 'DISPATCHED', label: 'Dispatched', count: counts.DISPATCHED || 0 },
-      { value: 'RECEIVED', label: 'Received', count: counts.RECEIVED || 0 },
-      { value: 'VERIFIED', label: 'Verified', count: counts.VERIFIED || 0 },
-    ];
-  }, [visibleDispatchedTransfers]);
-
-  useEffect(() => {
-    const debounceId = setTimeout(() => {
-      const normalizedQuery = dispatchedSearchDraft.trim();
-      if (normalizedQuery !== dispatchedQuery) {
-        setDispatchedQuery(normalizedQuery);
-      }
-    }, 350);
-
-    return () => clearTimeout(debounceId);
-  }, [dispatchedSearchDraft, dispatchedQuery]);
-
-  useEffect(() => {
-    const loadDispatchedTransfers = async () => {
-      if (!userProfile?.supplierRecordId) return;
-      try {
-        setDispatchedTransfers([]);
-        const params = {
-          supplier_id: userProfile.supplierRecordId,
-          transfer_type: 'SUPPLIER_TO_BRANCH',
-        };
-        if (dispatchedQuery.trim()) {
-          params.search = dispatchedQuery.trim();
-        }
-        if (dispatchedStatusFilter !== 'all') {
-          params.status = dispatchedStatusFilter;
-        }
-        const transferData = await fetchTransfers(params);
-        setDispatchedTransfers(
-          [...transferData]
-            .map((transfer) => ({
-              id: transfer.id,
-              batchCode: transfer.batch?.batch_code || '—',
-              product: transfer.batch?.fertilizer_type || '—',
-              bags: transfer.quantity_bags,
-              destination: transfer.to_branch?.name || 'Unknown',
-              recipient: transfer.to_branch?.name || transfer.receiver_name || 'Unknown',
-              rawStatus: transfer.status,
-              status: getDispatchStatusMeta(transfer.status).label,
-              statusTone: getDispatchStatusMeta(transfer.status).tone,
-              statusDescription: getDispatchStatusMeta(transfer.status).description,
-              warehouse: transfer.warehouse?.name || transfer.batch?.storage_location?.name || '—',
-              supplier: transfer.from_supplier?.name || '—',
-              date: transfer.created_at?.slice(0, 10),
-              createdAt: transfer.created_at || '',
-              confirmedAt: transfer.confirmed_at || '',
-            }))
-            .sort(
-              (left, right) =>
-                new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime()
-            )
-        );
-      } catch (error) {
-        setStatusMessage(error.message);
-      }
-    };
-
-    loadDispatchedTransfers();
-  }, [dispatchedQuery, dispatchedStatusFilter, userProfile?.supplierRecordId]);
-
-  const applyDispatchedFilters = () => {
-    setDispatchedQuery(dispatchedSearchDraft.trim());
-    setDispatchedStatusFilter(dispatchedStatusDraft);
-    setDispatchedIndex(0);
-  };
-
-  const resetDispatchedFilters = () => {
-    setDispatchedSearchDraft('');
-    setDispatchedQuery('');
-    setDispatchedStatusDraft('all');
-    setDispatchedStatusFilter('all');
-    setDispatchedIndex(0);
-  };
-
-  const handleDispatchedSearchKeyDown = (event) => {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      applyDispatchedFilters();
-    }
-  };
-
-  const pageSize = 6;
-  const dispatchedPageStart = dispatchedIndex;
-  const currentDispatchedTransfers = visibleDispatchedTransfers.slice(
-    dispatchedPageStart,
-    dispatchedPageStart + pageSize
+  const sortedDispatches = useMemo(
+    () => sortByDateDesc(dispatches, 'date'),
+    [dispatches]
   );
-  const dispatchedPageEnd = Math.min(dispatchedPageStart + pageSize, visibleDispatchedTransfers.length);
 
-  useEffect(() => {
-    if (dispatchedIndex >= visibleDispatchedTransfers.length && visibleDispatchedTransfers.length > 0) {
-      setDispatchedIndex(Math.max(visibleDispatchedTransfers.length - pageSize, 0));
+  const recentDispatches = useMemo(() => sortedDispatches.slice(0, 8), [sortedDispatches]);
+
+  const dispatchHistoryPagination = usePaginatedList(sortedDispatches, HISTORY_PAGE_SIZE);
+
+  const issuesPagination = usePaginatedList(issues, HISTORY_PAGE_SIZE);
+
+  const filteredDispatchedTransfers = useMemo(() => {
+    const needle = dispatchedSearch.trim().toLowerCase();
+    let items = dispatchedTransfers.filter((dispatch) => {
+      if (dispatchedStatusFilter !== 'all' && dispatch.rawStatus !== dispatchedStatusFilter) {
+        return false;
+      }
+      if (!needle) return true;
+      return [
+        dispatch.batchCode,
+        dispatch.product,
+        dispatch.recipient,
+        dispatch.warehouse,
+        dispatch.date,
+        dispatch.status,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+        .includes(needle);
+    });
+
+    if (dispatchedSort === 'batch') {
+      items = [...items].sort((a, b) => a.batchCode.localeCompare(b.batchCode));
+    } else if (dispatchedSort === 'receiver') {
+      items = [...items].sort((a, b) => a.recipient.localeCompare(b.recipient));
+    } else {
+      items = sortByDateDesc(items, 'date');
     }
-  }, [dispatchedIndex, visibleDispatchedTransfers.length]);
 
-  const formatDateTime = (value) => {
+    return items;
+  }, [dispatchedTransfers, dispatchedSearch, dispatchedStatusFilter, dispatchedSort]);
+
+  const dispatchedPagination = usePaginatedList(filteredDispatchedTransfers, HISTORY_PAGE_SIZE);
+
+  const openWarehouseForm = () => {
+    setNewWarehouse({ name: '', section: '', capacity: '' });
+    setWarehouseFormError('');
+    setShowWarehouseForm(true);
+  };
+
+  const closeWarehouseForm = () => {
+    setShowWarehouseForm(false);
+    setWarehouseFormError('');
+    setNewWarehouse({ name: '', section: '', capacity: '' });
+  };
+
+  const handleRegisterWarehouse = async (event) => {
+    event?.preventDefault?.();
+    if (!newWarehouse.name.trim() || !newWarehouse.section.trim() || !newWarehouse.capacity) {
+      setWarehouseFormError('Name, section, and capacity are required.');
+      return;
+    }
+    setIsSaving(true);
+    setWarehouseFormError('');
+    try {
+      await createWarehouse({
+        name: newWarehouse.name.trim(),
+        section: newWarehouse.section.trim(),
+        capacity_bags: Number(newWarehouse.capacity),
+        current_bags: 0,
+      });
+      closeWarehouseForm();
+      await refreshData();
+    } catch (error) {
+      setWarehouseFormError(getUserMessage(error, 'Could not register warehouse. Please try again.'));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const formatShortDate = (value) => {
     if (!value) return '—';
     const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return '—';
-    return parsed.toLocaleString();
+    if (Number.isNaN(parsed.getTime())) return String(value).slice(0, 10) || '—';
+    return parsed.toLocaleDateString();
   };
+
+  const tableHeadCell =
+    'px-2 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-600 sm:px-3';
+  const tableBodyCell = 'px-2 py-2 text-xs text-gray-700 sm:px-3 sm:text-sm';
 
   const localNotifications = useMemo(() => {
     const inventoryNotifications = inventory
@@ -401,7 +440,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
           priority: isExpiryRisk ? 'high' : 'medium',
           badgeTone: isExpiryRisk ? 'bg-amber-500' : 'bg-sky-600',
           unread: !readNotificationIds.includes(notificationId),
-          actionLabel: 'Open inventory',
+          actionLabel: 'Open warehouse',
         };
       });
 
@@ -429,14 +468,16 @@ export function SupplierDashboard({ userProfile, onLogout }) {
   }, [dispatches, inventory, readNotificationIds]);
 
   const notifications = useMemo(() => {
-    const merged = [...apiNotifications, ...localNotifications];
+    const merged = [...apiNotifications, ...localNotifications].filter(
+      (notification) => !dismissedNotificationIds.includes(notification.id)
+    );
     return merged.sort((left, right) => {
       const leftScore = left.priority === 'high' ? 2 : left.priority === 'medium' ? 1 : 0;
       const rightScore = right.priority === 'high' ? 2 : right.priority === 'medium' ? 1 : 0;
       if (rightScore !== leftScore) return rightScore - leftScore;
       return String(right.timeLabel || '').localeCompare(String(left.timeLabel || ''));
     });
-  }, [apiNotifications, localNotifications]);
+  }, [apiNotifications, localNotifications, dismissedNotificationIds]);
 
   const unreadNotificationCount = notifications.filter((notification) => notification.unread).length;
 
@@ -455,6 +496,16 @@ export function SupplierDashboard({ userProfile, onLogout }) {
     await markAllApiRead();
   };
 
+  const handleDismiss = (notificationId) => {
+    if (typeof notificationId === 'string' && notificationId.includes('-')) {
+      setDismissedNotificationIds((current) =>
+        current.includes(notificationId) ? current : [...current, notificationId]
+      );
+      return;
+    }
+    dismissApi(notificationId);
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 flex">
       {/* Sidebar */}
@@ -471,7 +522,6 @@ export function SupplierDashboard({ userProfile, onLogout }) {
             { id: 'dispatch', label: 'Dispatch Batches', icon: Send },
             { id: 'dispatched', label: 'Dispatched', icon: History },
             { id: 'warehouse', label: 'Warehouse', icon: Package },
-            { id: 'inventory', label: 'Inventory', icon: Package },
             { id: 'issues', label: 'Issues', icon: AlertCircle },
             { id: 'analytics', label: 'Analytics', icon: TrendingUp },
             { id: 'history', label: 'History', icon: History },
@@ -493,7 +543,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 min-w-0 flex flex-col">
         {/* Header */}
         <header className="bg-white border-b border-gray-200 px-8 py-4">
           <div className="flex items-center justify-between">
@@ -507,8 +557,9 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                 unreadCount={unreadNotificationCount}
                 onMarkRead={handleMarkRead}
                 onMarkAllRead={handleMarkAllRead}
+                onDismiss={handleDismiss}
                 onNavigateTab={(tab) => goToTab(tab === 'dispatch' ? 'dispatch' : tab)}
-                onOpenInventory={() => goToTab('inventory')}
+                onOpenInventory={() => goToTab('warehouse')}
                 onOpenDispatch={() => goToTab('dispatch')}
               />
               <div className="text-right">
@@ -527,7 +578,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
         </header>
 
         {/* CONTENTS */}
-        <main className="flex-1 overflow-y-auto p-8">
+        <main className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-4 md:p-6 lg:p-8">
           {activeTab === 'overview' && (
            // Quick actions sections
             <div className="space-y-6">
@@ -562,10 +613,10 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                   />
                   <QuickActionCard
                     icon={Package}
-                    tone="blue"
-                    title="Check Inventory"
-                    description="View current stock levels"
-                    onClick={() => goToTab('inventory')}
+                    tone="green"
+                    title="Manage Warehouses"
+                    description="View stock, add batches, and locations"
+                    onClick={() => goToTab('warehouse')}
                   />
                 </div>
               </div>
@@ -756,7 +807,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                         );
                         await refreshData();
                       } catch (error) {
-                        setStatusMessage(error.message);
+                        setStatusMessage(getUserMessage(error));
                       } finally {
                         setIsSaving(false);
                       }
@@ -809,298 +860,307 @@ export function SupplierDashboard({ userProfile, onLogout }) {
           )}
 
           {activeTab === 'dispatched' && (
-            <div className="space-y-6">
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                <div className="flex items-start justify-between gap-4 mb-5">
-                  <div>
-                    <h2 className="text-xl font-bold text-gray-900">Dispatched</h2>
-                    <p className="text-sm text-gray-600">Browse dispatched batches and track receiver confirmation.</p>
-                  </div>
-                  <div className="text-right text-sm text-gray-500">
-                    <p>
-                      {dispatchedTransfers.length === 0
-                        ? 'No dispatched batches'
-                        : `${dispatchedPageStart + 1}-${dispatchedPageEnd} of ${dispatchedTransfers.length}`}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 mb-5">
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-gray-700">Search</label>
-                    <div className="flex items-stretch gap-2">
-                      <input
-                        type="text"
-                        value={dispatchedSearchDraft}
-                        onChange={(e) => setDispatchedSearchDraft(e.target.value)}
-                        onKeyDown={handleDispatchedSearchKeyDown}
-                        placeholder="Search batch, receiver, warehouse..."
-                        className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:border-transparent focus:ring-2 focus:ring-green-500"
-                      />
-                      <button
-                        type="button"
-                        onClick={applyDispatchedFilters}
-                        className="inline-flex items-center justify-center rounded-lg bg-green-700 px-4 py-3 text-white shadow-sm hover:bg-green-800"
-                        aria-label="Apply dispatched search and filter"
-                      >
-                        <Search className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={resetDispatchedFilters}
-                        className="rounded-lg border border-gray-300 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
-                      >
-                        Reset
-                      </button>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-gray-700">Filter</label>
-                    <select
-                      value={dispatchedStatusDraft}
-                      onChange={(e) => {
-                        const nextStatus = e.target.value;
-                        setDispatchedStatusDraft(nextStatus);
-                        setDispatchedStatusFilter(nextStatus);
-                        setDispatchedIndex(0);
-                      }}
-                      className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:border-transparent focus:ring-2 focus:ring-green-500"
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 md:p-5">
+              <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <h2 className="text-lg font-bold text-gray-900 sm:text-xl">Dispatched</h2>
+                <div className="flex flex-wrap gap-1.5 sm:gap-2">
+                  {[
+                    { id: 'all', label: 'All' },
+                    { id: 'DISPATCHED', label: 'In transit' },
+                    { id: 'RECEIVED', label: 'Received' },
+                    { id: 'VERIFIED', label: 'Verified' },
+                  ].map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => setDispatchedStatusFilter(option.id)}
+                      className={`rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors sm:px-3 sm:py-2 sm:text-sm ${
+                        dispatchedStatusFilter === option.id
+                          ? 'border-green-600 bg-green-50 text-green-800'
+                          : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                      }`}
                     >
-                        {dispatchedStatusOptions.map((option) => (
-                          <option key={option.value} value={option.value} disabled={option.value !== 'all' && option.count === 0}>
-                            {option.label} ({option.count})
-                          </option>
-                        ))}
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {dispatchedTransfers.length === 0 ? (
+                <p className="text-sm text-gray-500">No dispatched batches yet.</p>
+              ) : (
+                <>
+                  <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <div className="relative min-w-0 flex-1">
+                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                      <input
+                        type="search"
+                        value={dispatchedSearch}
+                        onChange={(event) => setDispatchedSearch(event.target.value)}
+                        placeholder="Search batch, receiver, warehouse…"
+                        className="w-full rounded-lg border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-transparent focus:ring-2 focus:ring-green-500"
+                      />
+                    </div>
+                    <select
+                      value={dispatchedSort}
+                      onChange={(event) => setDispatchedSort(event.target.value)}
+                      className="w-full shrink-0 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-transparent focus:ring-2 focus:ring-green-500 sm:w-40"
+                    >
+                      <option value="date">Sort by date</option>
+                      <option value="batch">Sort by batch</option>
+                      <option value="receiver">Sort by receiver</option>
                     </select>
                   </div>
-                  <div className="rounded-lg border border-gray-200 p-4 flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Results</p>
-                      <p className="text-sm text-gray-600">Showing up to 6 dispatches at a time</p>
-                    </div>
-                    <p className="text-lg font-bold text-gray-900">{dispatchedTransfers.length}</p>
-                  </div>
-                </div>
 
-                {currentDispatchedTransfers.length > 0 ? (
-                  <div className="space-y-5">
-                    <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-                      {currentDispatchedTransfers.map((dispatch) => (
-                        <div key={dispatch.id} className="rounded-xl border border-gray-200 p-4 shadow-sm">
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Batch</p>
-                              <p className="mt-1 text-lg font-bold text-gray-900">{dispatch.batchCode}</p>
-                            </div>
-                            <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-medium ${dispatch.statusTone}`}>
-                              {dispatch.status}
-                            </span>
-                          </div>
-                          <p className="mt-2 text-sm text-gray-600">{dispatch.product} · {dispatch.bags} bags</p>
-                          <div className="mt-4 space-y-3 text-sm">
-                            <div>
-                              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">To</p>
-                              <p className="font-medium text-gray-900">{dispatch.recipient}</p>
-                              <p className="text-gray-600">Warehouse: {dispatch.warehouse}</p>
-                            </div>
-                            <div>
-                              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Confirmation</p>
-                              <p className="font-medium text-gray-900">
-                                {dispatch.confirmedAt ? 'Confirmed' : 'Awaiting confirmation'}
-                              </p>
-                              <p className="text-gray-600">{formatDateTime(dispatch.confirmedAt)}</p>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="flex items-center justify-between gap-3">
-                      <button
-                        type="button"
-                        onClick={() => setDispatchedIndex((current) => Math.max(current - pageSize, 0))}
-                        disabled={dispatchedIndex === 0}
-                        className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <ChevronLeft className="h-4 w-4" />
-                        Back
-                      </button>
-                      <div className="text-sm text-gray-500">
-                        {currentDispatchedTransfers.length} shown
+                  {filteredDispatchedTransfers.length === 0 ? (
+                    <p className="text-sm text-gray-500">No dispatches match your search or filters.</p>
+                  ) : (
+                    <>
+                      <div className="overflow-x-auto rounded-lg border border-gray-200">
+                        <table className="w-full min-w-[640px] table-fixed divide-y divide-gray-200">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className={`${tableHeadCell} w-[22%]`}>Batch</th>
+                              <th className={`${tableHeadCell} w-[14%]`}>Shipment</th>
+                              <th className={`${tableHeadCell} w-[20%]`}>Receiver</th>
+                              <th className={`${tableHeadCell} hidden w-[16%] xl:table-cell`}>Warehouse</th>
+                              <th className={`${tableHeadCell} w-[18%]`}>Status</th>
+                              <th className={`${tableHeadCell} w-[10%]`}>Date</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-200 bg-white">
+                            {dispatchedPagination.pageItems.map((dispatch) => (
+                              <tr key={dispatch.id} className="hover:bg-gray-50">
+                                <td
+                                  className={`${tableBodyCell} truncate font-medium text-gray-900`}
+                                  title={dispatch.batchCode}
+                                >
+                                  {dispatch.batchCode}
+                                </td>
+                                <td className={tableBodyCell}>
+                                  <span className="block truncate" title={dispatch.product}>
+                                    {dispatch.product}
+                                  </span>
+                                  <span className="text-[11px] text-gray-500 sm:text-xs">
+                                    {dispatch.bags} bags
+                                  </span>
+                                </td>
+                                <td
+                                  className={`${tableBodyCell} truncate`}
+                                  title={dispatch.recipient}
+                                >
+                                  {dispatch.recipient}
+                                </td>
+                                <td
+                                  className={`${tableBodyCell} hidden truncate xl:table-cell`}
+                                  title={dispatch.warehouse}
+                                >
+                                  {dispatch.warehouse}
+                                </td>
+                                <td className={tableBodyCell}>
+                                  <div className="inline-flex flex-col items-start">
+                                    <span
+                                      className={`inline-block max-w-full truncate rounded-full px-2 py-0.5 text-[11px] font-medium sm:text-xs ${dispatch.statusTone}`}
+                                    >
+                                      {dispatch.status}
+                                    </span>
+                                    <span className="mt-0.5 truncate text-[11px] text-gray-500">
+                                      {dispatch.confirmedAt
+                                        ? formatShortDate(dispatch.confirmedAt)
+                                        : 'Awaiting'}
+                                    </span>
+                                  </div>
+                                </td>
+                                <td className={`${tableBodyCell} text-gray-500`}>
+                                  {dispatch.date || '—'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setDispatchedIndex((current) =>
-                            Math.min(current + pageSize, Math.max(dispatchedTransfers.length - pageSize, 0))
-                          )
-                        }
-                        disabled={dispatchedIndex >= Math.max(dispatchedTransfers.length - pageSize, 0)}
-                        className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        Next
-                        <ChevronRight className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center">
-                    <p className="text-lg font-semibold text-gray-900">No dispatched batches found</p>
-                    <p className="mt-2 text-sm text-gray-600">
-                      Try a different search term or status, then apply again with the search icon.
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'inventory' && (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <h2 className="text-xl font-bold text-gray-900 mb-4">Inventory</h2>
-              <div className="space-y-4">
-                {inventory.map((item) => (
-                  <div key={item.id} className="flex flex-col border border-gray-200 rounded-lg p-4">
-                    <div className="flex items-start justify-between mb-2">
-                      <div>
-                        <p className="font-semibold text-gray-900">{item.name} <span className="text-sm text-gray-500">(Batch {item.id})</span></p>
-                        <p className="text-sm text-gray-600">{item.available} {item.unit} available • {item.manufacturer}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm font-medium">{item.lifecycle}</p>
-                        {item.expiryRisk && <p className="text-xs text-red-600">Expiry risk ({item.expiryDate})</p>}
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
-                      <div className="text-sm text-gray-600">
-                        <div>Production: {item.productionDate || '—'}</div>
-                        <div>Expiry: {item.expiryDate || '—'}</div>
-                        <div>Location: {formatWarehouseLocation(item.storageLocation)}</div>
-                      </div>
-                      <div className="text-sm text-gray-600">
-                        <div>Certification: {item.certificationStatus}</div>
-                        <div>Threshold: {item.threshold} bags</div>
-                      </div>
-                      <div className="flex items-center gap-3 justify-end">
-                        {item.available <= item.threshold && (
-                          <span className="text-xs font-medium text-red-600">Low stock</span>
-                        )}
-                        <button
-                          onClick={() =>
-                            setInventory((prev) =>
-                              prev.map((stock) =>
-                                stock.id === item.id ? { ...stock, available: stock.available + 20 } : stock
-                              )
-                            )
-                          }
-                          className="text-green-700 text-sm font-medium"
-                        >
-                          + Restock
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                      <PaginationBar
+                        page={dispatchedPagination.page}
+                        totalPages={dispatchedPagination.totalPages}
+                        total={dispatchedPagination.total}
+                        rangeStart={dispatchedPagination.rangeStart}
+                        rangeEnd={dispatchedPagination.rangeEnd}
+                        onPrev={dispatchedPagination.goPrev}
+                        onNext={dispatchedPagination.goNext}
+                        canPrev={dispatchedPagination.canPrev}
+                        canNext={dispatchedPagination.canNext}
+                        className="mt-3"
+                      />
+                    </>
+                  )}
+                </>
+              )}
             </div>
           )}
 
           {activeTab === 'warehouse' && (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold text-gray-900">Warehouse Locations</h2>
-                <div className="flex items-center gap-3">
-                  <input
-                    type="text"
-                    placeholder="Name"
-                    value={newWarehouse.name}
-                    onChange={(e) => setNewWarehouse({ ...newWarehouse, name: e.target.value })}
-                    className="px-3 py-2 border rounded"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Section"
-                    value={newWarehouse.section}
-                    onChange={(e) => setNewWarehouse({ ...newWarehouse, section: e.target.value })}
-                    className="px-3 py-2 border rounded"
-                  />
-                  <input
-                    type="number"
-                    placeholder="Capacity"
-                    value={newWarehouse.capacity}
-                    onChange={(e) => setNewWarehouse({ ...newWarehouse, capacity: e.target.value })}
-                    className="px-3 py-2 border rounded w-28"
-                  />
-                  <button
-                    onClick={async () => {
-                      if (!newWarehouse.name || !newWarehouse.section || !newWarehouse.capacity) return;
-                      setIsSaving(true);
-                      setStatusMessage('');
-                      try {
-                        await createWarehouse({
-                          name: newWarehouse.name,
-                          section: newWarehouse.section,
-                          capacity_bags: Number(newWarehouse.capacity),
-                          current_bags: 0,
-                        });
-                        setNewWarehouse({ name: '', section: '', capacity: '' });
-                        await refreshData();
-                      } catch (error) {
-                        setStatusMessage(error.message);
-                      } finally {
-                        setIsSaving(false);
-                      }
-                    }}
-                    className="bg-green-600 text-white px-4 py-2 rounded"
-                  >{isSaving ? 'Saving...' : 'Add Warehouse'}</button>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 md:p-5">
+              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <h2 className="text-lg font-bold text-gray-900 sm:text-xl">Warehouse Locations</h2>
+                <PanelPrimaryButton icon={Plus} onClick={openWarehouseForm}>
+                  Add Warehouse
+                </PanelPrimaryButton>
+              </div>
+
+              {warehouses.length === 0 ? (
+                <p className="text-sm text-gray-500">No warehouses registered yet.</p>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-gray-200">
+                  <table className="w-full min-w-[680px] divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className={tableHeadCell}>Name</th>
+                        <th className={tableHeadCell}>Section</th>
+                        <th className={tableHeadCell}>Capacity</th>
+                        <th className={tableHeadCell}>Current</th>
+                        <th className={tableHeadCell}>Batches</th>
+                        <th className={tableHeadCell}>Alerts</th>
+                        <th className={`${tableHeadCell} text-right`}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200 bg-white">
+                      {warehouses.map((w) => {
+                        const summary = warehouseSummaries.get(w.id) || {
+                          batchCount: 0,
+                          lowStock: 0,
+                          expiryRisk: 0,
+                        };
+                        return (
+                        <tr key={w.id} className="hover:bg-gray-50">
+                          <td className={`${tableBodyCell} font-medium text-gray-900`}>{w.name}</td>
+                          <td className={tableBodyCell}>{w.section || '—'}</td>
+                          <td className={tableBodyCell}>{w.capacity} bags</td>
+                          <td className={tableBodyCell}>{w.current} bags</td>
+                          <td className={tableBodyCell}>{summary.batchCount}</td>
+                          <td className={tableBodyCell}>
+                            {summary.lowStock === 0 && summary.expiryRisk === 0 ? (
+                              <span className="text-gray-500">—</span>
+                            ) : (
+                              <div className="flex flex-wrap gap-1">
+                                {summary.lowStock > 0 && (
+                                  <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-medium text-red-700">
+                                    {summary.lowStock} low
+                                  </span>
+                                )}
+                                {summary.expiryRisk > 0 && (
+                                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">
+                                    {summary.expiryRisk} expiry
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                          <td className={`${tableBodyCell} text-right`}>
+                            <div className="flex items-center justify-end gap-2">
+                              <PanelOutlineButton
+                                icon={Eye}
+                                onClick={() => {
+                                  setSelectedWarehouse(w);
+                                  setIsWarehouseModalOpen(true);
+                                }}
+                              >
+                                View
+                              </PanelOutlineButton>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!confirm(`Delete warehouse ${w.name}? This cannot be undone.`)) return;
+                                  deleteWarehouse(w.id)
+                                    .then(() => refreshData())
+                                    .catch((error) => setStatusMessage(getUserMessage(error)));
+                                }}
+                                className="inline-flex items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-4 py-2.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
-              </div>
-              <div className="space-y-4">
-                {warehouses.map((w) => (
-                  <div key={w.id} className="border rounded p-4 flex items-center justify-between">
-                    <div>
-                      <p className="font-semibold">{w.name} • {w.section}</p>
-                      <p className="text-sm text-gray-600">Capacity: {w.capacity} bags • Current: {w.current} bags</p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <button onClick={() => { setSelectedWarehouse(w); setIsWarehouseModalOpen(true); }} className="px-4 py-2 bg-blue-600 text-white rounded">View</button>
-                      <button onClick={() => {
-                        if (!confirm(`Delete warehouse ${w.name}? This cannot be undone.`)) return;
-                        deleteWarehouse(w.id)
-                          .then(() => refreshData())
-                          .catch((error) => setStatusMessage(error.message));
-                      }} className="px-4 py-2 border rounded text-red-600">Delete</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              )}
             </div>
           )}
 
           {activeTab === 'history' && (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <h2 className="text-xl font-bold text-gray-900 mb-4">Dispatch History</h2>
-              <div className="space-y-3">
-                {dispatches.map((dispatch) => (
-                  <div
-                    key={dispatch.id}
-                    className="flex items-center justify-between rounded-lg border border-gray-100 px-4 py-3 text-sm"
-                  >
-                    <div>
-                      <p className="font-medium text-gray-900">
-                        {dispatch.product} · {dispatch.bags} bags
-                      </p>
-                      <p className="text-gray-600">
-                        {dispatch.destination} · {dispatch.date || 'Today'}
-                      </p>
-                    </div>
-                    <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-medium ${dispatch.statusTone}`}>
-                      {dispatch.status}
-                    </span>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 md:p-5">
+              <h2 className="text-lg font-bold text-gray-900 mb-3 sm:text-xl">Dispatch History</h2>
+              {dispatches.length === 0 ? (
+                <p className="text-sm text-gray-500">No dispatches yet.</p>
+              ) : (
+                <>
+                  <div className="overflow-x-auto rounded-lg border border-gray-200">
+                    <table className="w-full min-w-[520px] table-fixed divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className={`${tableHeadCell} w-[24%]`}>Batch</th>
+                          <th className={`${tableHeadCell} w-[16%]`}>Shipment</th>
+                          <th className={`${tableHeadCell} w-[24%]`}>Destination</th>
+                          <th className={`${tableHeadCell} w-[18%]`}>Status</th>
+                          <th className={`${tableHeadCell} w-[12%]`}>Date</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200 bg-white">
+                        {dispatchHistoryPagination.pageItems.map((dispatch) => (
+                          <tr key={dispatch.id} className="hover:bg-gray-50">
+                            <td
+                              className={`${tableBodyCell} truncate font-medium text-gray-900`}
+                              title={dispatch.batchCode}
+                            >
+                              {dispatch.batchCode}
+                            </td>
+                            <td className={tableBodyCell}>
+                              <span className="block truncate" title={dispatch.product}>
+                                {dispatch.product}
+                              </span>
+                              <span className="text-[11px] text-gray-500 sm:text-xs">
+                                {dispatch.bags} bags
+                              </span>
+                            </td>
+                            <td
+                              className={`${tableBodyCell} truncate`}
+                              title={dispatch.destination}
+                            >
+                              {dispatch.destination}
+                            </td>
+                            <td className={tableBodyCell}>
+                              <span
+                                className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-medium sm:text-xs ${dispatch.statusTone}`}
+                              >
+                                {dispatch.status}
+                              </span>
+                            </td>
+                            <td className={`${tableBodyCell} text-gray-500`}>
+                              {dispatch.date || '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                ))}
-              </div>
+                  <PaginationBar
+                    page={dispatchHistoryPagination.page}
+                    totalPages={dispatchHistoryPagination.totalPages}
+                    total={dispatchHistoryPagination.total}
+                    rangeStart={dispatchHistoryPagination.rangeStart}
+                    rangeEnd={dispatchHistoryPagination.rangeEnd}
+                    onPrev={dispatchHistoryPagination.goPrev}
+                    onNext={dispatchHistoryPagination.goNext}
+                    canPrev={dispatchHistoryPagination.canPrev}
+                    canNext={dispatchHistoryPagination.canNext}
+                    className="mt-3"
+                  />
+                </>
+              )}
             </div>
           )}
 
@@ -1118,8 +1178,9 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                   No issues reported yet.
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {issues.map((issue) => {
+                <>
+                  <div className="space-y-3">
+                    {issuesPagination.pageItems.map((issue) => {
                     const isResolved = issue.status === 'RESOLVED';
                     const transfer = issue.transfer || {};
                     const batchCode = transfer.batch?.batch_code || `Transfer #${transfer.id || issue.transfer_id}`;
@@ -1178,7 +1239,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                                   await resolveIssue(issue.id, resolutionNotes.trim());
                                   await refreshData();
                                 } catch (error) {
-                                  setStatusMessage(error.message || 'Failed to resolve issue.');
+                                  setStatusMessage(getUserMessage(error, 'Could not resolve this issue. Please try again.'));
                                 }
                               }}
                             >
@@ -1193,7 +1254,19 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                       </div>
                     );
                   })}
-                </div>
+                  </div>
+                  <PaginationBar
+                    page={issuesPagination.page}
+                    totalPages={issuesPagination.totalPages}
+                    total={issuesPagination.total}
+                    rangeStart={issuesPagination.rangeStart}
+                    rangeEnd={issuesPagination.rangeEnd}
+                    onPrev={issuesPagination.goPrev}
+                    onNext={issuesPagination.goNext}
+                    canPrev={issuesPagination.canPrev}
+                    canNext={issuesPagination.canNext}
+                  />
+                </>
               )}
             </div>
           )}
@@ -1208,21 +1281,20 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                   <p className="text-2xl font-bold text-gray-900">{dispatches.length}</p>
                 </div>
                 <div className="border border-gray-200 rounded-lg p-4">
-                  <p className="text-sm text-gray-600">Low Stock Items</p>
+                  <p className="text-sm text-gray-600">Low Stock Batches</p>
                   <p className="text-2xl font-bold text-gray-900">
                     {inventory.filter((item) => item.available <= item.threshold).length}
                   </p>
                 </div>
                 <div className="border border-gray-200 rounded-lg p-4">
                   <p className="text-sm text-gray-600">Delivered Rate</p>
-                  <p className="text-2xl font-bold text-gray-900">94%</p>
+                  <p className="text-2xl font-bold text-gray-900">{deliveredRate}%</p>
                 </div>
               </div>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <div className="border border-gray-200 rounded-lg p-4">
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-sm font-medium text-gray-700">Dispatch Volume (bags)</p>
-                    <button className="text-sm font-medium text-green-700">Export Report</button>
                   </div>
                   <div className="h-56">
                     <ResponsiveContainer width="100%" height="100%">
@@ -1255,6 +1327,84 @@ export function SupplierDashboard({ userProfile, onLogout }) {
           )}
         </main>
       </div>
+      {showWarehouseForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6">
+          <div className="w-full max-w-lg rounded-xl border border-gray-200 bg-white p-5 shadow-xl">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">Register Warehouse</h2>
+                <p className="text-sm text-gray-600 mt-0.5">
+                  Add a storage location for your fertilizer batches.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeWarehouseForm}
+                disabled={isSaving}
+                className="rounded-lg px-2 py-1 text-sm text-gray-500 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50"
+              >
+                Close
+              </button>
+            </div>
+            <form onSubmit={handleRegisterWarehouse} className="space-y-3">
+              <div>
+                <label htmlFor="warehouse-name" className="mb-1 block text-sm font-medium text-gray-700">
+                  Warehouse name
+                </label>
+                <input
+                  id="warehouse-name"
+                  type="text"
+                  placeholder="e.g. Main Warehouse"
+                  value={newWarehouse.name}
+                  onChange={(e) => setNewWarehouse({ ...newWarehouse, name: e.target.value })}
+                  disabled={isSaving}
+                  className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:border-transparent focus:ring-2 focus:ring-green-500 disabled:bg-gray-100"
+                />
+              </div>
+              <div>
+                <label htmlFor="warehouse-section" className="mb-1 block text-sm font-medium text-gray-700">
+                  Section
+                </label>
+                <input
+                  id="warehouse-section"
+                  type="text"
+                  placeholder="e.g. A1"
+                  value={newWarehouse.section}
+                  onChange={(e) => setNewWarehouse({ ...newWarehouse, section: e.target.value })}
+                  disabled={isSaving}
+                  className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:border-transparent focus:ring-2 focus:ring-green-500 disabled:bg-gray-100"
+                />
+              </div>
+              <div>
+                <label htmlFor="warehouse-capacity" className="mb-1 block text-sm font-medium text-gray-700">
+                  Capacity (bags)
+                </label>
+                <input
+                  id="warehouse-capacity"
+                  type="number"
+                  min="1"
+                  placeholder="e.g. 5000"
+                  value={newWarehouse.capacity}
+                  onChange={(e) => setNewWarehouse({ ...newWarehouse, capacity: e.target.value })}
+                  disabled={isSaving}
+                  className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:border-transparent focus:ring-2 focus:ring-green-500 disabled:bg-gray-100"
+                />
+              </div>
+              {warehouseFormError && (
+                <p className="text-sm text-red-600">{warehouseFormError}</p>
+              )}
+              <div className="flex items-center justify-end gap-3 border-t border-gray-100 pt-4">
+                <PanelOutlineButton type="button" tone="slate" onClick={closeWarehouseForm} disabled={isSaving}>
+                  Cancel
+                </PanelOutlineButton>
+                <PanelPrimaryButton type="submit" disabled={isSaving}>
+                  {isSaving ? 'Registering…' : 'Register Warehouse'}
+                </PanelPrimaryButton>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
       {isWarehouseModalOpen && (
         <WarehouseModal
           isOpen={isWarehouseModalOpen}
@@ -1262,6 +1412,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
           warehouse={selectedWarehouse}
           inventory={inventory}
           supplierId={userProfile.supplierRecordId}
+          existingBatches={batches}
           onRefresh={refreshData}
         />
       )}

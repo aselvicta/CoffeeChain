@@ -2,16 +2,21 @@ import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { 
   TrendingUp, Users, Package, ShoppingCart, 
-  BarChart3, LogOut, Menu, X, ChevronRight, AlertCircle,
-  CheckCircle, Clock, MapPin, Plus
+  BarChart3, LogOut, ChevronRight, AlertCircle,
+  CheckCircle, Clock, Plus, Pencil, Shield
 } from 'lucide-react';
 import { Logo } from './logo';
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { createUser, fetchAuditReport, fetchBatches, fetchBranches, fetchSuppliers, fetchTransfers, fetchUsers } from '../api/client';
+import { createUser, fetchAuditReport, fetchBatches, fetchBranches, fetchSuppliers, fetchTransfers, fetchUser, fetchUsers, updateUser } from '../api/client';
 import { NotificationBell } from './notification-bell';
 import { useNotifications } from '../hooks/use-notifications';
 import { REGION_LIST, TANZANIA_REGIONS } from '../data/tanzania-locations';
 import { buildDashboardPath, resolveDashboardTab } from '../utils/dashboard-routing';
+import { getUserMessage } from '../utils/user-messages';
+import { HISTORY_PAGE_SIZE } from '../utils/list-limits';
+import { usePaginatedList } from '../hooks/use-paginated-list';
+import { PaginationBar } from './ui/pagination-bar';
+import { IntegrityPanel } from './integrity-panel';
 
 const ANALYTICS_COLORS = ['#16a34a', '#84cc16', '#0f766e', '#22c55e', '#65a30d', '#15803d'];
 
@@ -64,11 +69,114 @@ function buildFertilizerDistribution(records) {
     }));
 }
 
+function shortenChartLabel(name, maxLength = 18) {
+  if (!name) return 'Unknown';
+  return name.length > maxLength ? `${name.slice(0, maxLength - 1)}…` : name;
+}
+
+function buildTopBranchPerformance(transfers, branchType, limit = 5) {
+  const scores = new Map();
+
+  transfers.forEach((transfer) => {
+    if (transfer.transfer_type !== 'BRANCH_TO_FARMER') return;
+    const branch = transfer.from_branch;
+    if (!branch || branch.branch_type !== branchType) return;
+
+    const branchId = branch.id;
+    const current = scores.get(branchId) || {
+      name: branch.name || 'Unknown',
+      bags: 0,
+      verified: 0,
+      distributions: 0,
+    };
+    const quantity = Number(transfer.quantity_bags) || 0;
+    current.bags += quantity;
+    current.distributions += 1;
+    if (transfer.status === 'VERIFIED') current.verified += quantity;
+    scores.set(branchId, current);
+  });
+
+  return Array.from(scores.values())
+    .sort((a, b) => b.bags - a.bags || b.verified - a.verified)
+    .slice(0, limit)
+    .map((entry) => ({
+      ...entry,
+      label: shortenChartLabel(entry.name),
+    }));
+}
+
+const EMPTY_USER_FORM = {
+  username: '',
+  password: '',
+  role: 'supplier',
+  first_name: '',
+  last_name: '',
+  email: '',
+  supplier_name: '',
+  supplier_region: '',
+  contact_phone: '',
+  branch_name: '',
+  branch_type: 'RETAILER',
+  district: '',
+  region: '',
+};
+
+const ROLE_BRANCH_TYPE = {
+  retailer: 'RETAILER',
+  cooperative: 'COOPERATIVE',
+  regulator: 'REGULATOR',
+};
+
+function resolveRegionName(region, district) {
+  if (region?.trim()) return region.trim();
+  if (!district?.trim()) return 'Unassigned';
+  const normalizedDistrict = district.trim().toLowerCase();
+  for (const [regionName, districts] of Object.entries(TANZANIA_REGIONS)) {
+    if (
+      districts.some((entry) => {
+        const normalizedEntry = entry.toLowerCase();
+        return (
+          normalizedEntry === normalizedDistrict ||
+          normalizedEntry.startsWith(`${normalizedDistrict} `) ||
+          normalizedDistrict.startsWith(`${normalizedEntry.split(' ')[0]} `) ||
+          normalizedEntry.split(' ')[0] === normalizedDistrict
+        );
+      })
+    ) {
+      return regionName;
+    }
+  }
+  return 'Unassigned';
+}
+
+function userFormFromRecord(record) {
+  const user = record?.user || {};
+  const role = record?.role || 'supplier';
+  const supplier = record?.supplier || null;
+  const branch = record?.branch || null;
+
+  return {
+    username: user.username || '',
+    password: '',
+    role,
+    first_name: user.first_name || '',
+    last_name: user.last_name || '',
+    email: user.email || '',
+    supplier_name: supplier?.name || '',
+    supplier_region: supplier?.region || '',
+    contact_phone: supplier?.contact_phone || '',
+    branch_name: branch?.name || '',
+    branch_type: branch?.branch_type || ROLE_BRANCH_TYPE[role] || 'RETAILER',
+    district: branch?.district || '',
+    region: branch?.region || supplier?.region || '',
+  };
+}
+
 export function AdminDashboard({ userProfile, onLogout }) {
   const dashboardRole = 'admin';
-  const dashboardTabs = ['overview', 'suppliers', 'retailers', 'cooperatives', 'users'];
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const dashboardTabs = ['overview', 'suppliers', 'retailers', 'cooperatives', 'users', 'integrity'];
   const [activeTab, setActiveTab] = useState('overview');
+  const [integrityHighlightId, setIntegrityHighlightId] = useState('');
   const [supplierQuery, setSupplierQuery] = useState('');
   const [supplierSort, setSupplierSort] = useState('name');
   const [supplierStatusFilter, setSupplierStatusFilter] = useState('all');
@@ -85,24 +193,12 @@ export function AdminDashboard({ userProfile, onLogout }) {
   const [batches, setBatches] = useState([]);
   const [transferData, setTransferData] = useState([]);
   const [showUserForm, setShowUserForm] = useState(false);
+  const [editingUserId, setEditingUserId] = useState(null);
+  const [userFormLoading, setUserFormLoading] = useState(false);
   const [userQuery, setUserQuery] = useState('');
   const [userRoleFilter, setUserRoleFilter] = useState('all');
   const [userSort, setUserSort] = useState('username');
-  const [userForm, setUserForm] = useState({
-    username: '',
-    password: '',
-    role: 'supplier',
-    first_name: '',
-    last_name: '',
-    email: '',
-    supplier_name: '',
-    supplier_region: '',
-    contact_phone: '',
-    branch_name: '',
-    branch_type: 'RETAILER',
-    district: '',
-    region: '',
-  });
+  const [userForm, setUserForm] = useState({ ...EMPTY_USER_FORM });
   const [userStatus, setUserStatus] = useState('');
   const [audit, setAudit] = useState({ dispatched: 0, received: 0, verified: 0, gap: 0 });
   const [statusMessage, setStatusMessage] = useState('');
@@ -112,6 +208,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
     refresh: refreshNotifications,
     markRead,
     markAllRead,
+    dismiss,
   } = useNotifications();
   const location = useLocation();
   const navigate = useNavigate();
@@ -129,6 +226,71 @@ export function AdminDashboard({ userProfile, onLogout }) {
     const nextTab = dashboardTabs.includes(tab) ? tab : 'overview';
     setActiveTab(nextTab);
     navigate(buildDashboardPath(dashboardRole, nextTab));
+  };
+
+  const openCreateUserForm = () => {
+    setEditingUserId(null);
+    setUserFormLoading(false);
+    setUserForm({ ...EMPTY_USER_FORM });
+    setUserStatus('');
+    setShowUserForm(true);
+  };
+
+  const openEditUserForm = async (record) => {
+    const userId = record?.user?.id;
+    if (!userId) return;
+
+    const listRecord = users.find((entry) => String(entry.user.id) === String(userId)) || record;
+    setEditingUserId(userId);
+    setUserForm(userFormFromRecord(listRecord));
+    setUserStatus('');
+    setUserFormLoading(true);
+    setShowUserForm(true);
+
+    try {
+      const freshRecord = await fetchUser(userId);
+      setUserForm(userFormFromRecord(freshRecord));
+    } catch (error) {
+      setUserStatus(getUserMessage(error));
+    } finally {
+      setUserFormLoading(false);
+    }
+  };
+
+  const closeUserForm = () => {
+    setShowUserForm(false);
+    setEditingUserId(null);
+    setUserFormLoading(false);
+    setUserForm({ ...EMPTY_USER_FORM });
+    setUserStatus('');
+  };
+
+  const handleSaveUser = async () => {
+    if (editingUserId) {
+      setUserStatus('');
+      try {
+        const payload = { ...userForm };
+        delete payload.username;
+        delete payload.role;
+        if (!payload.password) delete payload.password;
+        const updated = await updateUser(editingUserId, payload);
+        setUsers((prev) => prev.map((record) => (record.user.id === editingUserId ? updated : record)));
+        closeUserForm();
+      } catch (error) {
+        setUserStatus(getUserMessage(error));
+      }
+      return;
+    }
+
+    if (!userForm.username || !userForm.password) return;
+    setUserStatus('');
+    try {
+      const newUser = await createUser(userForm);
+      setUsers((prev) => [...prev, newUser]);
+      closeUserForm();
+    } catch (error) {
+      setUserStatus(getUserMessage(error));
+    }
   };
 
   useEffect(() => {
@@ -160,7 +322,8 @@ export function AdminDashboard({ userProfile, onLogout }) {
             .map((branch) => ({
               id: `RET-${branch.id.toString().padStart(3, '0')}`,
               name: branch.name,
-              district: branch.district || 'District',
+              region: branch.region || '',
+              district: branch.district || '',
               bagsAvailable: transferRecords
                 .filter((transfer) => transfer.to_branch?.id === branch.id)
                 .reduce((sum, transfer) => sum + transfer.quantity_bags, 0),
@@ -173,7 +336,8 @@ export function AdminDashboard({ userProfile, onLogout }) {
             .map((branch) => ({
               id: `AMCOS-${branch.id.toString().padStart(3, '0')}`,
               name: branch.name,
-              district: branch.district || 'District',
+              region: branch.region || '',
+              district: branch.district || '',
               members: branch.farmers_count || 0,
               verification: 'registered',
             }))
@@ -182,7 +346,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
         setUsers(userData);
         await refreshNotifications();
       } catch (error) {
-        setStatusMessage(error.message);
+        setStatusMessage(getUserMessage(error));
       }
     };
     loadData();
@@ -201,15 +365,34 @@ export function AdminDashboard({ userProfile, onLogout }) {
     [batches, transferData]
   );
 
+  const topRetailerData = useMemo(
+    () => buildTopBranchPerformance(transferData, 'RETAILER'),
+    [transferData]
+  );
+
+  const topAmcosData = useMemo(
+    () => buildTopBranchPerformance(transferData, 'COOPERATIVE'),
+    [transferData]
+  );
+
   const regionData = useMemo(() => {
     const grouped = [...retailers, ...cooperatives].reduce((acc, branch) => {
-      const region = branch.district || 'Region';
-      acc[region] = acc[region] || { region, cooperatives: 0, retailers: 0, farmers: 0 };
-      if (branch.id.startsWith('RET')) acc[region].retailers += 1;
-      if (branch.id.startsWith('AMCOS')) acc[region].cooperatives += 1;
+      const district = branch.district?.trim() || 'Unassigned';
+      const region = resolveRegionName(branch.region, district);
+      const key = `${region}::${district}`;
+      acc[key] = acc[key] || { region, district, cooperatives: 0, retailers: 0, farmers: 0 };
+      if (branch.id.startsWith('RET')) acc[key].retailers += 1;
+      if (branch.id.startsWith('AMCOS')) {
+        acc[key].cooperatives += 1;
+        acc[key].farmers += branch.members || 0;
+      }
       return acc;
     }, {});
-    return Object.values(grouped);
+    return Object.values(grouped).sort((a, b) => {
+      const regionCompare = a.region.localeCompare(b.region);
+      if (regionCompare !== 0) return regionCompare;
+      return a.district.localeCompare(b.district);
+    });
   }, [retailers, cooperatives]);
 
   const recentActivity = useMemo(
@@ -353,22 +536,19 @@ export function AdminDashboard({ userProfile, onLogout }) {
       });
   }, [cooperatives, cooperativeQuery, cooperativeSort, cooperativeStatusFilter]);
 
+  const supplierPagination = usePaginatedList(filteredSuppliers, HISTORY_PAGE_SIZE);
+  const retailerPagination = usePaginatedList(filteredRetailers, HISTORY_PAGE_SIZE);
+  const cooperativePagination = usePaginatedList(filteredCooperatives, HISTORY_PAGE_SIZE);
+  const userPagination = usePaginatedList(filteredUsers, HISTORY_PAGE_SIZE);
+
   return (
     <div className="min-h-screen bg-gray-50 flex">
       {/* Sidebar */}
-      <div className={`${sidebarOpen ? 'w-72' : 'w-20'} bg-gradient-to-b from-green-800 to-green-950 text-white transition-all duration-300 flex flex-col fixed left-0 top-0 h-screen z-30`}>
+      <div className="w-72 bg-gradient-to-b from-green-800 to-green-950 text-white flex flex-col fixed left-0 top-0 h-screen z-30">
         <div className="p-4 border-b border-green-700">
-          {sidebarOpen ? (
-            <div className="w-fit mx-auto bg-white rounded-xl px-4 py-2 shadow-lg">
-              <Logo size="md" variant="full" showText={false} />
-            </div>
-          ) : (
-            <div className="flex justify-center">
-              <div className="w-fit bg-white rounded-xl p-2 shadow-lg">
-                <Logo size="sm" showText={false} />
-              </div>
-            </div>
-          )}
+          <div className="w-fit mx-auto bg-white rounded-xl px-4 py-2 shadow-lg">
+            <Logo size="md" variant="full" showText={false} />
+          </div>
         </div>
 
         <nav className="flex-1 p-4 space-y-2">
@@ -378,6 +558,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
             { id: 'retailers', label: 'Retailers', icon: ShoppingCart },
             { id: 'cooperatives', label: 'Cooperatives', icon: Users },
             { id: 'users', label: 'User Accounts', icon: Users },
+            { id: 'integrity', label: 'Chain Integrity', icon: Shield },
           ].map((item) => (
             <button
               key={item.id}
@@ -389,26 +570,15 @@ export function AdminDashboard({ userProfile, onLogout }) {
               }`}
             >
               <item.icon className="h-5 w-5 flex-shrink-0" />
-              {sidebarOpen && <span className="font-medium">{item.label}</span>}
+              <span className="font-medium">{item.label}</span>
             </button>
           ))}
         </nav>
-
-        <div className="p-4 border-t border-green-700">
-          <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="w-full flex items-center justify-center p-3 rounded-lg hover:bg-green-700/50 transition-colors"
-          >
-            {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-          </button>
-        </div>
       </div>
 
       {/* Main Content */}
       <div
-        className={`flex-1 flex flex-col overflow-hidden ${
-          sidebarOpen ? 'ml-72' : 'ml-20'
-        }`}
+        className="flex-1 flex flex-col overflow-hidden ml-72"
       >
         {/* Header */}
         <header className="bg-white border-b border-gray-200 px-8 py-4">
@@ -423,7 +593,19 @@ export function AdminDashboard({ userProfile, onLogout }) {
                 unreadCount={unreadCount}
                 onMarkRead={markRead}
                 onMarkAllRead={markAllRead}
-                onNavigateTab={() => goToTab('overview')}
+                onDismiss={dismiss}
+                onNavigateTab={(tab, notification) => {
+                  if (tab === 'integrity') {
+                    const transferId =
+                      notification?.transferId ||
+                      notification?.metadata?.transfer_id ||
+                      '';
+                    setIntegrityHighlightId(String(transferId || ''));
+                    goToTab('integrity');
+                    return;
+                  }
+                  goToTab(tab || 'overview');
+                }}
               />
               <div className="text-right">
                 <p className="text-sm font-medium text-gray-900">{userProfile.name}</p>
@@ -551,32 +733,105 @@ export function AdminDashboard({ userProfile, onLogout }) {
                 </div>
               </div>
 
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                  <h3 className="text-lg font-bold text-gray-900 mb-1">Top Performing Retailers</h3>
+                  <p className="text-sm text-gray-600 mb-4">Ranked by bags sold to customers.</p>
+                  {topRetailerData.length === 0 ? (
+                    <p className="py-16 text-center text-sm text-gray-500">No retailer sales recorded yet.</p>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={280}>
+                      <BarChart
+                        data={topRetailerData}
+                        layout="vertical"
+                        margin={{ top: 8, right: 24, left: 8, bottom: 8 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" horizontal={false} />
+                        <XAxis type="number" stroke="#6b7280" allowDecimals={false} />
+                        <YAxis
+                          type="category"
+                          dataKey="label"
+                          stroke="#6b7280"
+                          width={112}
+                          tick={{ fontSize: 12 }}
+                        />
+                        <Tooltip
+                          formatter={(value, key) => [`${value} bags`, key === 'verified' ? 'Verified' : 'Sold']}
+                          labelFormatter={(_, items) => items?.[0]?.payload?.name || ''}
+                        />
+                        <Legend />
+                        <Bar dataKey="bags" fill="#16a34a" name="Bags sold" radius={[0, 6, 6, 0]} />
+                        <Bar dataKey="verified" fill="#84cc16" name="Verified" radius={[0, 6, 6, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                  <h3 className="text-lg font-bold text-gray-900 mb-1">Top Performing AMCOS</h3>
+                  <p className="text-sm text-gray-600 mb-4">Ranked by bags distributed to farmers.</p>
+                  {topAmcosData.length === 0 ? (
+                    <p className="py-16 text-center text-sm text-gray-500">No AMCOS distributions recorded yet.</p>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={280}>
+                      <BarChart
+                        data={topAmcosData}
+                        layout="vertical"
+                        margin={{ top: 8, right: 24, left: 8, bottom: 8 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" horizontal={false} />
+                        <XAxis type="number" stroke="#6b7280" allowDecimals={false} />
+                        <YAxis
+                          type="category"
+                          dataKey="label"
+                          stroke="#6b7280"
+                          width={112}
+                          tick={{ fontSize: 12 }}
+                        />
+                        <Tooltip
+                          formatter={(value, key) => [`${value} bags`, key === 'verified' ? 'Verified' : 'Distributed']}
+                          labelFormatter={(_, items) => items?.[0]?.payload?.name || ''}
+                        />
+                        <Legend />
+                        <Bar dataKey="bags" fill="#7c3aed" name="Bags distributed" radius={[0, 6, 6, 0]} />
+                        <Bar dataKey="verified" fill="#a78bfa" name="Verified" radius={[0, 6, 6, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+              </div>
+
               {/* Regional Overview */}
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-4">Regional Overview - Tanzania</h3>
+                <h3 className="text-lg font-bold text-gray-900 mb-1">Regional Overview — Tanzania</h3>
+                <p className="text-sm text-gray-600 mb-4">Cooperatives and retailers grouped by region and district.</p>
                 {statusMessage && <p className="mb-3 text-sm text-red-600">{statusMessage}</p>}
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-gray-200">
                         <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Region</th>
+                        <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">District</th>
                         <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Cooperatives</th>
                         <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Retailers</th>
                         <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Farmers</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {regionData.map((region, index) => (
-                        <tr key={index} className="border-b border-gray-100 hover:bg-gray-50">
-                          <td className="py-3 px-4">
-                            <div className="flex items-center gap-2">
-                              <MapPin className="h-4 w-4 text-green-600" />
-                              <span className="font-medium text-gray-900">{region.region}</span>
-                            </div>
+                      {regionData.length === 0 && (
+                        <tr>
+                          <td colSpan="5" className="py-6 text-center text-sm text-gray-500">
+                            No cooperative or retailer coverage recorded yet.
                           </td>
-                          <td className="py-3 px-4 text-gray-700">{region.cooperatives}</td>
-                          <td className="py-3 px-4 text-gray-700">{region.retailers}</td>
-                          <td className="py-3 px-4 text-gray-700">{region.farmers}</td>
+                        </tr>
+                      )}
+                      {regionData.map((row) => (
+                        <tr key={`${row.region}-${row.district}`} className="border-b border-gray-100 hover:bg-gray-50">
+                          <td className="py-3 px-4 font-medium text-gray-900">{row.region}</td>
+                          <td className="py-3 px-4 font-medium text-gray-900">{row.district}</td>
+                          <td className="py-3 px-4 text-gray-700">{row.cooperatives}</td>
+                          <td className="py-3 px-4 text-gray-700">{row.retailers}</td>
+                          <td className="py-3 px-4 text-gray-700">{row.farmers}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -664,7 +919,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
                           </td>
                         </tr>
                       )}
-                      {filteredSuppliers.map((supplier) => (
+                      {supplierPagination.pageItems.map((supplier) => (
                           <tr key={supplier.id} className="border-b border-gray-100 text-sm">
                             <td className="py-3 px-2">
                               <p className="font-semibold text-gray-900">{supplier.name}</p>
@@ -686,6 +941,17 @@ export function AdminDashboard({ userProfile, onLogout }) {
                     </tbody>
                   </table>
                 </div>
+                <PaginationBar
+                  page={supplierPagination.page}
+                  totalPages={supplierPagination.totalPages}
+                  total={supplierPagination.total}
+                  rangeStart={supplierPagination.rangeStart}
+                  rangeEnd={supplierPagination.rangeEnd}
+                  onPrev={supplierPagination.goPrev}
+                  onNext={supplierPagination.goNext}
+                  canPrev={supplierPagination.canPrev}
+                  canNext={supplierPagination.canNext}
+                />
               </div>
             </div>
           )}
@@ -741,7 +1007,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
                           </td>
                         </tr>
                       )}
-                      {filteredRetailers.map((retailer) => (
+                      {retailerPagination.pageItems.map((retailer) => (
                           <tr key={retailer.id} className="border-b border-gray-100 text-sm">
                             <td className="py-3 px-2">
                               <p className="font-semibold text-gray-900">{retailer.name}</p>
@@ -761,6 +1027,17 @@ export function AdminDashboard({ userProfile, onLogout }) {
                     </tbody>
                   </table>
                 </div>
+                <PaginationBar
+                  page={retailerPagination.page}
+                  totalPages={retailerPagination.totalPages}
+                  total={retailerPagination.total}
+                  rangeStart={retailerPagination.rangeStart}
+                  rangeEnd={retailerPagination.rangeEnd}
+                  onPrev={retailerPagination.goPrev}
+                  onNext={retailerPagination.goNext}
+                  canPrev={retailerPagination.canPrev}
+                  canNext={retailerPagination.canNext}
+                />
               </div>
             </div>
           )}
@@ -816,7 +1093,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
                           </td>
                         </tr>
                       )}
-                      {filteredCooperatives.map((coop) => (
+                      {cooperativePagination.pageItems.map((coop) => (
                           <tr key={coop.id} className="border-b border-gray-100 text-sm">
                             <td className="py-3 px-2">
                               <p className="font-semibold text-gray-900">{coop.name}</p>
@@ -836,6 +1113,17 @@ export function AdminDashboard({ userProfile, onLogout }) {
                     </tbody>
                   </table>
                 </div>
+                <PaginationBar
+                  page={cooperativePagination.page}
+                  totalPages={cooperativePagination.totalPages}
+                  total={cooperativePagination.total}
+                  rangeStart={cooperativePagination.rangeStart}
+                  rangeEnd={cooperativePagination.rangeEnd}
+                  onPrev={cooperativePagination.goPrev}
+                  onNext={cooperativePagination.goNext}
+                  canPrev={cooperativePagination.canPrev}
+                  canNext={cooperativePagination.canNext}
+                />
               </div>
             </div>
           )}
@@ -844,7 +1132,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
             <div className="space-y-6">
               <div className="flex justify-end">
                 <button
-                  onClick={() => setShowUserForm(true)}
+                  onClick={openCreateUserForm}
                   className="bg-green-600 text-white px-5 py-2.5 rounded-lg font-medium hover:bg-green-700 transition-colors flex items-center gap-2"
                 >
                   <Plus className="h-4 w-4" />
@@ -895,10 +1183,18 @@ export function AdminDashboard({ userProfile, onLogout }) {
                         <th className="py-3 px-2">Role</th>
                         <th className="py-3 px-2">Organization</th>
                         <th className="py-3 px-2">Email</th>
+                        <th className="py-3 px-2 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredUsers.map((record) => (
+                      {filteredUsers.length === 0 && (
+                        <tr>
+                          <td colSpan="5" className="py-6 text-center text-sm text-gray-500">
+                            No user accounts match your filters.
+                          </td>
+                        </tr>
+                      )}
+                      {userPagination.pageItems.map((record) => (
                         <tr key={record.user.id} className="border-b border-gray-100 text-sm">
                           <td className="py-3 px-2 font-semibold text-gray-900">{record.user.username}</td>
                           <td className="py-3 px-2 text-gray-700">{record.role}</td>
@@ -906,143 +1202,213 @@ export function AdminDashboard({ userProfile, onLogout }) {
                             {record.supplier?.name || record.branch?.name || 'Admin'}
                           </td>
                           <td className="py-3 px-2 text-gray-700">{record.user.email || '-'}</td>
+                          <td className="py-3 px-2 text-right">
+                            <button
+                              type="button"
+                              onClick={() => openEditUserForm(record)}
+                              className="inline-flex items-center gap-1.5 text-green-600 hover:text-green-800 font-medium text-sm"
+                            >
+                              <Pencil className="h-4 w-4" />
+                              Edit
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
+                <PaginationBar
+                  page={userPagination.page}
+                  totalPages={userPagination.totalPages}
+                  total={userPagination.total}
+                  rangeStart={userPagination.rangeStart}
+                  rangeEnd={userPagination.rangeEnd}
+                  onPrev={userPagination.goPrev}
+                  onNext={userPagination.goNext}
+                  canPrev={userPagination.canPrev}
+                  canNext={userPagination.canNext}
+                />
               </div>
 
               {showUserForm && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-6">
                   <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-5 md:ml-72">
                     <div className="flex items-center justify-between mb-4">
-                      <h2 className="text-lg font-bold text-gray-900">Add User</h2>
+                      <h2 className="text-lg font-bold text-gray-900">
+                        {editingUserId ? 'Edit User' : 'Add User'}
+                      </h2>
                       <button
-                        onClick={() => setShowUserForm(false)}
+                        onClick={closeUserForm}
                         className="text-gray-500 hover:text-gray-700"
                       >
                         Close
                       </button>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <input
-                        type="text"
-                        placeholder="Username"
-                        value={userForm.username}
-                        onChange={(e) => setUserForm({ ...userForm, username: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                      />
-                      <input
-                        type="password"
-                        placeholder="Password"
-                        value={userForm.password}
-                        onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                      />
-                      <select
-                        value={userForm.role}
-                        onChange={(e) => setUserForm({ ...userForm, role: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                      >
+                    {userFormLoading && (
+                      <p className="mb-3 text-sm text-gray-500">Loading user details…</p>
+                    )}
+                    <div
+                      key={editingUserId ?? 'new-user'}
+                      className="grid grid-cols-1 md:grid-cols-2 gap-3"
+                    >
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                        <input
+                          type="text"
+                          value={userForm.username}
+                          onChange={(e) => setUserForm({ ...userForm, username: e.target.value })}
+                          readOnly={Boolean(editingUserId)}
+                          className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent ${
+                            editingUserId ? 'bg-gray-100 text-gray-600 cursor-not-allowed' : ''
+                          }`}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          {editingUserId ? 'New password (optional)' : 'Password'}
+                        </label>
+                        <input
+                          type="password"
+                          value={userForm.password}
+                          onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+                        <select
+                          value={userForm.role}
+                          onChange={(e) => setUserForm({ ...userForm, role: e.target.value })}
+                          disabled={Boolean(editingUserId)}
+                          className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent ${
+                            editingUserId ? 'bg-gray-100 text-gray-600 cursor-not-allowed' : ''
+                          }`}
+                        >
                         <option value="admin">Admin</option>
                         <option value="supplier">Supplier</option>
                         <option value="retailer">Retailer</option>
                         <option value="cooperative">Cooperative</option>
                         <option value="regulator">Regulator</option>
-                      </select>
-                      <input
-                        type="text"
-                        placeholder="First name"
-                        value={userForm.first_name}
-                        onChange={(e) => setUserForm({ ...userForm, first_name: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                      />
-                      <input
-                        type="text"
-                        placeholder="Last name"
-                        value={userForm.last_name}
-                        onChange={(e) => setUserForm({ ...userForm, last_name: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                      />
-                      <input
-                        type="email"
-                        placeholder="Email"
-                        value={userForm.email}
-                        onChange={(e) => setUserForm({ ...userForm, email: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                      />
-                      <input
-                        type="text"
-                        placeholder="Supplier/Branch Name"
-                        value={userForm.role === 'supplier' ? userForm.supplier_name : userForm.branch_name}
-                        onChange={(e) =>
-                          setUserForm(
-                            userForm.role === 'supplier'
-                              ? { ...userForm, supplier_name: e.target.value }
-                              : { ...userForm, branch_name: e.target.value }
-                          )
-                        }
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                      />
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">First name</label>
+                        <input
+                          type="text"
+                          value={userForm.first_name}
+                          onChange={(e) => setUserForm({ ...userForm, first_name: e.target.value })}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Last name</label>
+                        <input
+                          type="text"
+                          value={userForm.last_name}
+                          onChange={(e) => setUserForm({ ...userForm, last_name: e.target.value })}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                        <input
+                          type="email"
+                          value={userForm.email}
+                          onChange={(e) => setUserForm({ ...userForm, email: e.target.value })}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                        />
+                      </div>
+                      {userForm.role !== 'admin' && (
+                        <>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          {userForm.role === 'supplier' ? 'Supplier name' : 'Branch name'}
+                        </label>
+                        <input
+                          type="text"
+                          value={userForm.role === 'supplier' ? userForm.supplier_name : userForm.branch_name}
+                          onChange={(e) =>
+                            setUserForm(
+                              userForm.role === 'supplier'
+                                ? { ...userForm, supplier_name: e.target.value }
+                                : { ...userForm, branch_name: e.target.value }
+                            )
+                          }
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                        />
+                      </div>
                       {userForm.role === 'supplier' ? (
                         <>
-                          <input
-                            type="text"
-                            placeholder="Supplier Region"
-                            value={userForm.supplier_region}
-                            onChange={(e) => setUserForm({ ...userForm, supplier_region: e.target.value })}
-                            list="supplier-region-options"
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                          />
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Supplier region</label>
+                            <input
+                              type="text"
+                              value={userForm.supplier_region}
+                              onChange={(e) => setUserForm({ ...userForm, supplier_region: e.target.value })}
+                              list="supplier-region-options"
+                              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                            />
+                          </div>
                           <datalist id="supplier-region-options">
                             {getRegionOptions(userForm.supplier_region).map((region) => (
                               <option key={region} value={region} />
                             ))}
                           </datalist>
-                          <input
-                            type="text"
-                            placeholder="Contact Phone"
-                            value={userForm.contact_phone}
-                            onChange={(e) => setUserForm({ ...userForm, contact_phone: e.target.value })}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                          />
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Contact phone</label>
+                            <input
+                              type="text"
+                              value={userForm.contact_phone}
+                              onChange={(e) => setUserForm({ ...userForm, contact_phone: e.target.value })}
+                              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                            />
+                          </div>
                         </>
                       ) : (
                         <>
-                          <select
-                            value={userForm.branch_type}
-                            onChange={(e) => setUserForm({ ...userForm, branch_type: e.target.value })}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                          >
-                            <option value="RETAILER">Retailer</option>
-                            <option value="COOPERATIVE">Cooperative</option>
-                            <option value="REGULATOR">Regulator</option>
-                          </select>
-                          <input
-                            type="text"
-                            placeholder="Region"
-                            value={userForm.region}
-                            onChange={(e) =>
-                              setUserForm({ ...userForm, region: e.target.value, district: '' })
-                            }
-                            list="region-options"
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                          />
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Branch type</label>
+                            <select
+                              value={userForm.branch_type}
+                              onChange={(e) => setUserForm({ ...userForm, branch_type: e.target.value })}
+                              disabled={Boolean(editingUserId)}
+                              className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent ${
+                                editingUserId ? 'bg-gray-100 text-gray-600 cursor-not-allowed' : ''
+                              }`}
+                            >
+                              <option value="RETAILER">Retailer</option>
+                              <option value="COOPERATIVE">Cooperative</option>
+                              <option value="REGULATOR">Regulator</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Region</label>
+                            <input
+                              type="text"
+                              value={userForm.region}
+                              onChange={(e) =>
+                                setUserForm({ ...userForm, region: e.target.value, district: '' })
+                              }
+                              list="region-options"
+                              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                            />
+                          </div>
                           <datalist id="region-options">
                             {getRegionOptions(userForm.region).map((region) => (
                               <option key={region} value={region} />
                             ))}
                           </datalist>
-                          <input
-                            type="text"
-                            placeholder={userForm.region ? 'District' : 'Select Region First'}
-                            value={userForm.district}
-                            onChange={(e) => setUserForm({ ...userForm, district: e.target.value })}
-                            list="district-options"
-                            disabled={!userForm.region}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent disabled:bg-gray-100"
-                          />
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">District</label>
+                            <input
+                              type="text"
+                              value={userForm.district}
+                              onChange={(e) => setUserForm({ ...userForm, district: e.target.value })}
+                              list="district-options"
+                              disabled={!userForm.region}
+                              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent disabled:bg-gray-100"
+                            />
+                          </div>
                           <datalist id="district-options">
                             {filteredDistrictOptions.map((district) => (
                               <option key={district} value={district} />
@@ -1050,30 +1416,30 @@ export function AdminDashboard({ userProfile, onLogout }) {
                           </datalist>
                         </>
                       )}
+                        </>
+                      )}
                     </div>
                     <div className="mt-4 flex items-center justify-between">
                       {userStatus && <p className="text-sm text-red-600">{userStatus}</p>}
                       <button
-                        onClick={async () => {
-                          if (!userForm.username || !userForm.password) return;
-                          setUserStatus('');
-                          try {
-                            const newUser = await createUser(userForm);
-                            setUsers((prev) => [...prev, newUser]);
-                            setShowUserForm(false);
-                          } catch (error) {
-                            setUserStatus(error.message);
-                          }
-                        }}
-                        className="bg-green-600 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-green-700 transition-colors"
+                        onClick={handleSaveUser}
+                        disabled={userFormLoading}
+                        className="bg-green-600 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-green-700 transition-colors ml-auto disabled:opacity-60 disabled:cursor-not-allowed"
                       >
-                        Create User
+                        {editingUserId ? 'Save Changes' : 'Create User'}
                       </button>
                     </div>
                   </div>
                 </div>
               )}
             </div>
+          )}
+
+          {activeTab === 'integrity' && (
+            <IntegrityPanel
+              highlightTransferId={integrityHighlightId}
+              onScanComplete={() => refreshNotifications()}
+            />
           )}
 
         </main>

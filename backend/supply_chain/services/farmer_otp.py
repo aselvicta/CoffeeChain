@@ -43,6 +43,54 @@ def _sanitize_sms_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return clean
 
 
+_INTERNAL_SMS_KEYS = (
+    "briq_http_status",
+    "briq_duration_ms",
+    "briq_api_message",
+    "briq_error",
+    "briq_attempted",
+    "backend_reached",
+    "api_accepted",
+    "transfer_id",
+    "sent_at",
+    "is_resend",
+)
+
+
+def _friendly_sms_error(error: str) -> str:
+    text = (error or "").strip()
+    lowered = text.lower()
+    if "insufficient credits" in lowered or "402" in lowered:
+        return "SMS credits are low. Please contact your administrator."
+    if "briq_api_key" in lowered or "briq_app_key" in lowered or "backend/.env" in lowered:
+        return "Verification messages are temporarily unavailable. Please try again later."
+    if "invalid" in lowered and "phone" in lowered:
+        return "The farmer phone number is invalid. Update it in the registry."
+    if "timeout" in lowered or "timed out" in lowered:
+        return "The messaging service took too long to respond. Please try again."
+    if not text or len(text) > 180 or ".env" in lowered or "http" in lowered:
+        return "We could not send a verification code. Please try again."
+    return text
+
+
+def _public_sms_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """API-safe SMS metadata for clients (no OTP digits or infra details)."""
+    clean = _sanitize_sms_payload(payload)
+    for key in _INTERNAL_SMS_KEYS:
+        clean.pop(key, None)
+    clean.pop("agent_code", None)
+    clean.pop("code_preview", None)
+
+    if clean.get("delivered"):
+        clean["user_message"] = clean.get("message") or (
+            "A receipt confirmation and verification code were sent. "
+            "Ask the farmer to check their phone."
+        )
+    else:
+        clean["user_message"] = _friendly_sms_error(str(clean.pop("error", "") or ""))
+    return clean
+
+
 def _normalize_delivery_method(method: str | None) -> str:
     key = (method or "sms").lower().strip()
     return key if key in _VALID_DELIVERY_METHODS else "sms"
@@ -69,14 +117,41 @@ def _dispatch_local_otp(
     *,
     quantity_bags: int | None = None,
     fertilizer_type: str = "",
+    farmer_name: str = "",
+    branch_name: str = "",
+    batch_code: str = "",
     is_resend: bool = False,
     delivery_method: str = "sms",
 ) -> tuple[str, dict[str, Any]]:
-    """Generate a local OTP and optionally still try Briq delivery."""
+    """Try Briq first; only generate a local agent code when Briq cannot deliver."""
     msisdn = normalize_phone_digits(phone_number)
     method = _normalize_delivery_method(delivery_method)
-    code = generate_code()
     otp_length = int(getattr(settings, "OTP_CODE_LENGTH", 6))
+    language = getattr(settings, "BRIQ_OTP_LANGUAGE", "en")
+
+    briq_handler = briq_resend_otp if is_resend else briq_request_otp
+    briq_payload = briq_handler(
+        phone_number,
+        quantity_bags=quantity_bags,
+        fertilizer_type=fertilizer_type,
+        farmer_name=farmer_name,
+        branch_name=branch_name,
+        batch_code=batch_code,
+        delivery_method=method,
+    )
+    briq_payload["otp_code_length"] = otp_length
+
+    if briq_payload.get("delivered"):
+        logger.info(
+            "Briq OTP delivered for %s method=%s resend=%s — verify via Briq API",
+            msisdn,
+            method,
+            is_resend,
+        )
+        return EXTERNAL_OTP_PLACEHOLDER, briq_payload
+
+    code = generate_code()
+    from .briq import build_channel_delivery_hint
 
     sms_payload: dict[str, Any] = {
         "provider": "local",
@@ -85,34 +160,19 @@ def _dispatch_local_otp(
         "delivery_method": method,
         "otp_code_length": otp_length,
         "agent_code": code,
-        "message": (
-            "Briq SMS/call may not reach the farmer. Use the agent code below "
-            "to complete verification."
+        "message": build_channel_delivery_hint(
+            delivery_method=method,
+            language=language,
+            quantity_bags=quantity_bags,
+            fertilizer_type=fertilizer_type,
+            farmer_name=farmer_name,
         ),
+        "briq_error": briq_payload.get("error"),
     }
-
-    briq_handler = briq_resend_otp if is_resend else briq_request_otp
-    briq_payload = briq_handler(
-        phone_number,
-        quantity_bags=quantity_bags,
-        fertilizer_type=fertilizer_type,
-        delivery_method=method,
-    )
-    sms_payload["briq_attempted"] = bool(briq_payload.get("delivered"))
-    if briq_payload.get("delivered"):
-        sms_payload["provider"] = "briq+local"
-        sms_payload["briq_api_message"] = briq_payload.get("briq_api_message")
-        sms_payload["briq_duration_ms"] = briq_payload.get("briq_duration_ms")
-        sms_payload["briq_http_status"] = briq_payload.get("briq_http_status")
-        sms_payload["handset_note"] = briq_payload.get("handset_note")
-    else:
-        sms_payload["briq_error"] = briq_payload.get("error")
-
     logger.info(
-        "Local OTP fallback code generated for %s method=%s briq_ok=%s",
+        "Local OTP fallback for %s method=%s (Briq delivery failed)",
         msisdn,
         method,
-        sms_payload.get("briq_attempted"),
     )
     return code, sms_payload
 
@@ -122,6 +182,9 @@ def dispatch_farmer_otp(
     *,
     quantity_bags: int | None = None,
     fertilizer_type: str = "",
+    farmer_name: str = "",
+    branch_name: str = "",
+    batch_code: str = "",
     is_resend: bool = False,
     delivery_method: str = "sms",
 ) -> tuple[str | None, dict[str, Any]]:
@@ -131,7 +194,7 @@ def dispatch_farmer_otp(
             "provider": "none",
             "delivered": False,
             "phone_number": phone_number,
-            "error": "Farmer OTP requires SMS_PROVIDER=briq in backend/.env",
+            "error": "SMS verification is not configured.",
         }
 
     if _local_fallback_enabled():
@@ -139,6 +202,9 @@ def dispatch_farmer_otp(
             phone_number,
             quantity_bags=quantity_bags,
             fertilizer_type=fertilizer_type,
+            farmer_name=farmer_name,
+            branch_name=branch_name,
+            batch_code=batch_code,
             is_resend=is_resend,
             delivery_method=delivery_method,
         )
@@ -149,6 +215,9 @@ def dispatch_farmer_otp(
         phone_number,
         quantity_bags=quantity_bags,
         fertilizer_type=fertilizer_type,
+        farmer_name=farmer_name,
+        branch_name=branch_name,
+        batch_code=batch_code,
         delivery_method=method,
     )
     if sms_payload.get("delivered"):
@@ -169,6 +238,11 @@ def verify_farmer_otp(otp_record, clean_code: str) -> dict[str, Any]:
             }
         if stored == clean_code:
             return {"verified": True, "remaining_attempts": 0}
+        # Code may have been delivered by Briq on another channel while DB still
+        # holds an older local fallback value — try Briq before rejecting.
+        briq_result = briq_verify_otp(otp_record.phone_number, clean_code)
+        if briq_result.get("verified"):
+            return briq_result
         remaining = max(0, 3 - (otp_record.attempts + 1))
         return {
             "verified": False,
@@ -198,7 +272,9 @@ def issue_distribution_otp(
             "detail": "OTP only applies to farmer distributions.",
         }
 
-    farmer = transfer.farmer
+    from .ministry_of_agriculture import refresh_farmer_from_registry
+
+    farmer = refresh_farmer_from_registry(transfer.farmer)
     farmer_phone = normalize_phone_digits(farmer.phone_number)
     if not farmer_phone or len(farmer_phone) < 11:
         return {
@@ -207,38 +283,54 @@ def issue_distribution_otp(
                 "Farmer phone number is invalid. Update the registry with a "
                 "Tanzanian number like 0712345678."
             ),
-            "sms": {
-                "delivered": False,
-                "phone_number": farmer.phone_number,
-                "error": "Invalid farmer phone number.",
-            },
+            "sms": _public_sms_payload(
+                {
+                    "delivered": False,
+                    "phone_number": farmer.phone_number,
+                    "error": "Invalid farmer phone number.",
+                }
+            ),
         }
 
     fertilizer_type = ""
+    batch_code = ""
     if transfer.batch_id:
         fertilizer_type = transfer.batch.fertilizer_type or ""
+        batch_code = transfer.batch.batch_code or ""
+
+    branch_name = ""
+    if transfer.from_branch_id:
+        branch_name = transfer.from_branch.name or ""
 
     method = _resolve_delivery_method(
         is_resend=is_resend,
         explicit_method=delivery_method,
     )
+
+    has_existing_otp = OTPVerification.objects.filter(transfer=transfer).exists()
+    # Briq resend replaces the active code — only use it when a session already exists.
+    use_resend = has_existing_otp
+
     logger.info(
-        "OTP dispatch start transfer_id=%s farmer_phone=%s resend=%s method=%s local_fallback=%s",
+        "OTP dispatch start transfer_id=%s farmer_phone=%s resend=%s method=%s local_fallback=%s existing=%s",
         transfer.id,
         farmer_phone,
-        is_resend,
+        use_resend,
         method,
         _local_fallback_enabled(),
+        has_existing_otp,
     )
     code, sms_payload = dispatch_farmer_otp(
         farmer_phone,
         quantity_bags=transfer.quantity_bags,
         fertilizer_type=fertilizer_type,
-        is_resend=is_resend,
+        farmer_name=farmer.name or "",
+        branch_name=branch_name,
+        batch_code=batch_code,
+        is_resend=use_resend,
         delivery_method=method,
     )
 
-    sms_payload = _sanitize_sms_payload(sms_payload)
     sms_payload.update(
         {
             "transfer_id": transfer.id,
@@ -247,6 +339,7 @@ def issue_distribution_otp(
             "is_resend": is_resend,
         }
     )
+    public_sms = _public_sms_payload(sms_payload)
 
     if not code or not sms_payload.get("delivered"):
         logger.warning(
@@ -257,11 +350,9 @@ def issue_distribution_otp(
         )
         return {
             "otp_sent": False,
-            "detail": (
-                sms_payload.get("error")
-                or "OTP could not be sent to the farmer phone."
-            ),
-            "sms": sms_payload,
+            "detail": public_sms.get("user_message")
+            or "OTP could not be sent to the farmer phone.",
+            "sms": public_sms,
             "otp_code_length": int(
                 sms_payload.get("otp_code_length") or settings.OTP_CODE_LENGTH
             ),
@@ -306,7 +397,7 @@ def issue_distribution_otp(
     return {
         "otp_sent": True,
         "otp": OTPVerificationSerializer(otp_record).data,
-        "sms": sms_payload,
+        "sms": public_sms,
         "otp_code_length": int(
             sms_payload.get("otp_code_length") or settings.OTP_CODE_LENGTH
         ),

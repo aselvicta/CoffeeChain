@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Warehouse, X } from 'lucide-react';
+import { getUserMessage } from '../utils/user-messages';
 
 const REGION_OPTIONS = [
   'Kagera', 'Mbeya', 'Mwanza', 'Arusha', 'Kilimanjaro',
@@ -64,7 +65,7 @@ export function RegisterWarehouseModal({ isOpen, warehouse, onClose, onSubmit })
         notes: formData.notes.trim(),
       });
     } catch (error) {
-      setErrorMessage(error.message || 'Failed to save warehouse.');
+      setErrorMessage(getUserMessage(error, 'Could not save warehouse. Please try again.'));
     } finally {
       setIsSubmitting(false);
     }
