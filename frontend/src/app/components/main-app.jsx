@@ -5,9 +5,11 @@ import { AdminDashboard } from './admin-dashboard';
 import { SupplierDashboard } from './supplier-dashboard';
 import { RetailerDashboard } from './retailer-dashboard';
 import { CooperativeDashboard } from './cooperative-dashboard';
+import { WarehouseManagerDashboard } from './warehouse-manager-dashboard';
 import { LanguageProvider } from './language-context';
 import { fetchProfile, getAccessToken, login, logout } from '../api/client';
 import { buildDashboardPath, resolveDashboardTab } from '../utils/dashboard-routing';
+import { Toaster } from 'sonner';
 
 const DASHBOARD_CONFIG = {
   admin: {
@@ -26,6 +28,10 @@ const DASHBOARD_CONFIG = {
     defaultTab: 'overview',
     validTabs: ['overview', 'farmers', 'fertilizer-in', 'fertilizer-out', 'verification', 'history', 'analytics'],
   },
+  warehouse_manager: {
+    defaultTab: 'overview',
+    validTabs: ['overview', 'pending', 'history'],
+  },
 };
 
 function normalizeRole(role) {
@@ -39,7 +45,7 @@ export function MainApp() {
   const navigate = useNavigate();
 
   const buildProfile = (profile) => {
-    const { user, role, supplier, branch } = profile;
+    const { user, role, supplier, branch, warehouse_manager } = profile;
     const displayName = user.first_name || user.username;
     if (role === 'supplier' && supplier) {
       return {
@@ -49,6 +55,17 @@ export function MainApp() {
         organization: supplier.name,
         supplierId: `SUP-${supplier.id.toString().padStart(3, '0')}`,
         supplierRecordId: supplier.id,
+      };
+    }
+    if (role === 'warehouse_manager' && warehouse_manager?.supplier) {
+      const linkedSupplier = warehouse_manager.supplier;
+      return {
+        role,
+        username: user.username,
+        name: displayName,
+        organization: linkedSupplier.name,
+        supplierId: `SUP-${linkedSupplier.id.toString().padStart(3, '0')}`,
+        supplierRecordId: linkedSupplier.id,
       };
     }
     if (role === 'retailer' && branch) {
@@ -192,6 +209,8 @@ export function MainApp() {
         return <RetailerDashboard userProfile={userProfile} onLogout={handleLogout} />;
       case 'cooperative':
         return <CooperativeDashboard userProfile={userProfile} onLogout={handleLogout} />;
+      case 'warehouse_manager':
+        return <WarehouseManagerDashboard userProfile={userProfile} onLogout={handleLogout} />;
       default:
         return <AdminDashboard userProfile={userProfile} onLogout={handleLogout} />;
     }
@@ -200,6 +219,7 @@ export function MainApp() {
   return (
     <LanguageProvider>
       {renderDashboard()}
+      <Toaster position="top-center" richColors closeButton duration={8000} />
     </LanguageProvider>
   );
 }

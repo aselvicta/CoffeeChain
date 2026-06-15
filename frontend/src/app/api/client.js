@@ -314,6 +314,17 @@ export function receiveTransfer(id) {
   return apiFetch(`/api/transfers/${id}/receive/`, { method: 'POST' });
 }
 
+export function approveTransfer(id) {
+  return apiFetch(`/api/transfers/${id}/approve/`, { method: 'POST' });
+}
+
+export function rejectTransfer(id, message) {
+  return apiFetch(`/api/transfers/${id}/reject/`, {
+    method: 'POST',
+    body: JSON.stringify({ message }),
+  });
+}
+
 export function sendOtp(id, options = {}) {
   return apiFetch(`/api/transfers/${id}/send_otp/`, {
     method: 'POST',

@@ -28,6 +28,7 @@ from .models import (
     OTPVerification,
     Supplier,
     Transfer,
+    WarehouseManager,
 )
 from .permissions import (
     BranchStaffOrAdmin,
@@ -37,8 +38,10 @@ from .permissions import (
     IsRegulator,
     IsRetailer,
     IsSupplier,
+    IsWarehouseManager,
     RegulatorOrAdmin,
     SupplierOrAdmin,
+    WarehouseManagerOrAdmin,
 )
 from .serializers import (
     AdminUserCreateSerializer,
@@ -56,6 +59,7 @@ from .serializers import (
     SupplierSerializer,
     TransferSerializer,
     UserSerializer,
+    WarehouseManagerSerializer,
 )
 from .services.blockchain import anchor_to_polygon, build_hash, build_payload_signature
 from .services.ipfs import normalize_receipt_access, save_receipt_local, store_file, store_json
@@ -71,7 +75,9 @@ from .services.notifications import (
     notify_for_otp_sent,
     notify_for_otp_verified,
     notify_for_transfer_created,
+    notify_for_transfer_pending,
     notify_for_transfer_received,
+    notify_for_transfer_rejected,
 )
 from .services.farmer_otp import issue_distribution_otp, verify_farmer_otp
 from .services.record_audit import (
@@ -94,6 +100,18 @@ DEFAULT_FERTILIZER_TYPES = [
     "Organic Compost",
 ]
 
+ROLE_GROUP_NAMES = {
+    "supplier": "Supplier",
+    "warehouse_manager": "WarehouseManager",
+    "retailer": "Retailer",
+    "cooperative": "Cooperative",
+    "regulator": "Regulator",
+}
+
+
+def group_name_for_role(role):
+    return ROLE_GROUP_NAMES.get(role)
+
 
 def resolve_role(user):
     if user.is_staff:
@@ -101,6 +119,8 @@ def resolve_role(user):
     group_names = set(user.groups.values_list("name", flat=True))
     if "Supplier" in group_names:
         return "supplier"
+    if "WarehouseManager" in group_names:
+        return "warehouse_manager"
     if "Retailer" in group_names:
         return "retailer"
     if "Cooperative" in group_names:
@@ -114,19 +134,33 @@ def build_user_payload(user):
     role = resolve_role(user)
     supplier = Supplier.objects.filter(user=user).first()
     branch = Branch.objects.filter(user=user).first()
+    warehouse_manager = (
+        WarehouseManager.objects.filter(user=user).select_related("supplier").first()
+    )
     return {
         "user": UserSerializer(user).data,
         "role": role,
         "supplier": SupplierSerializer(supplier).data if supplier else None,
         "branch": BranchSerializer(branch).data if branch else None,
+        "warehouse_manager": (
+            WarehouseManagerSerializer(warehouse_manager).data
+            if warehouse_manager
+            else None
+        ),
     }
 
 
 def get_batch_available_quantity(batch):
     dispatched_total = (
-        batch.transfers.filter(transfer_type=Transfer.SUPPLIER_TO_BRANCH).aggregate(
-            total=Sum("quantity_bags")
-        )["total"]
+        batch.transfers.filter(
+            transfer_type=Transfer.SUPPLIER_TO_BRANCH,
+            status__in=[
+                Transfer.PENDING,
+                Transfer.DISPATCHED,
+                Transfer.RECEIVED,
+                Transfer.VERIFIED,
+            ],
+        ).aggregate(total=Sum("quantity_bags"))["total"]
         or 0
     )
     return max(batch.quantity_bags - dispatched_total, 0)
@@ -276,7 +310,13 @@ class AdminUserViewSet(viewsets.ViewSet):
                 user.is_superuser = True
                 user.save(update_fields=["is_staff", "is_superuser"])
             else:
-                group, _ = Group.objects.get_or_create(name=role.capitalize())
+                group_name = group_name_for_role(role)
+                if not group_name:
+                    return Response(
+                        {"detail": "Unsupported role."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                group, _ = Group.objects.get_or_create(name=group_name)
                 user.groups.add(group)
 
             if role == "supplier":
@@ -286,6 +326,15 @@ class AdminUserViewSet(viewsets.ViewSet):
                     region=data.get("supplier_region", ""),
                     contact_phone=data.get("contact_phone", ""),
                 )
+            if role == "warehouse_manager":
+                supplier_id = data.get("supplier_id")
+                if not supplier_id:
+                    return Response(
+                        {"detail": "supplier_id is required for warehouse managers."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                supplier = get_object_or_404(Supplier, pk=supplier_id)
+                WarehouseManager.objects.create(user=user, supplier=supplier)
             if role in {"retailer", "cooperative", "regulator"}:
                 Branch.objects.create(
                     name=data.get("branch_name") or user.username,
@@ -358,8 +407,15 @@ class MeView(APIView):
         role = resolve_role(request.user)
         supplier = None
         branch = None
+        warehouse_manager = None
         if role == "supplier":
             supplier = Supplier.objects.filter(user=request.user).first()
+        if role == "warehouse_manager":
+            warehouse_manager = (
+                WarehouseManager.objects.filter(user=request.user)
+                .select_related("supplier")
+                .first()
+            )
         if role in {"retailer", "cooperative", "regulator"}:
             branch = Branch.objects.filter(user=request.user).first()
         payload = {
@@ -367,6 +423,11 @@ class MeView(APIView):
             "role": role,
             "supplier": SupplierSerializer(supplier).data if supplier else None,
             "branch": BranchSerializer(branch).data if branch else None,
+            "warehouse_manager": (
+                WarehouseManagerSerializer(warehouse_manager).data
+                if warehouse_manager
+                else None
+            ),
         }
         return Response(payload)
 
@@ -760,6 +821,14 @@ class TransferViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = super().get_queryset()
         params = self.request.query_params
+        role = resolve_role(self.request.user)
+
+        if role == "warehouse_manager":
+            manager = WarehouseManager.objects.filter(user=self.request.user).first()
+            if manager:
+                queryset = queryset.filter(from_supplier_id=manager.supplier_id)
+            else:
+                queryset = queryset.none()
 
         supplier_id = (params.get("supplier_id") or params.get("from_supplier_id") or "").strip()
         if supplier_id:
@@ -874,7 +943,22 @@ class TransferViewSet(viewsets.ModelViewSet):
                     }
                 )
 
-            transfer = serializer.save(created_by=self.request.user, warehouse=warehouse)
+            transfer = serializer.save(
+                created_by=self.request.user,
+                warehouse=warehouse,
+                status=Transfer.PENDING,
+            )
+            AuditLog.objects.create(
+                action="transfer_created",
+                user=self.request.user,
+                transfer=transfer,
+                details={
+                    "status": transfer.status,
+                    "transfer_type": transfer.transfer_type,
+                },
+            )
+            notify_for_transfer_pending(transfer, actor=self.request.user)
+            return
 
         AuditLog.objects.create(
             action="transfer_created",
@@ -898,6 +982,102 @@ class TransferViewSet(viewsets.ModelViewSet):
             action="transfer_updated",
             endpoint=endpoint,
         )
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated, WarehouseManagerOrAdmin])
+    def approve(self, request, pk=None):
+        transfer = self.get_object()
+        role = resolve_role(request.user)
+
+        if transfer.transfer_type != Transfer.SUPPLIER_TO_BRANCH:
+            return Response(
+                {"detail": "Only supplier dispatches require warehouse approval."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if transfer.status != Transfer.PENDING:
+            return Response(
+                {"detail": "Transfer is not pending approval."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if role == "warehouse_manager":
+            manager = WarehouseManager.objects.filter(user=request.user).first()
+            if not manager or transfer.from_supplier_id != manager.supplier_id:
+                return Response(
+                    {"detail": "You can only approve dispatches for your supplier."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        before = snapshot_transfer(transfer)
+        transfer.status = Transfer.DISPATCHED
+        transfer.save(update_fields=["status"])
+        changes = build_saved_field_changes(before, transfer)
+        AuditLog.objects.create(
+            action="transfer_approved",
+            user=request.user,
+            transfer=transfer,
+            details={
+                "via": "api",
+                "endpoint": request.path,
+                "model": "transfer",
+                "changes": changes,
+            },
+        )
+        notify_for_transfer_created(transfer, actor=request.user)
+        return Response(TransferSerializer(transfer).data)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated, WarehouseManagerOrAdmin])
+    def reject(self, request, pk=None):
+        transfer = self.get_object()
+        role = resolve_role(request.user)
+        message = (request.data.get("message") or "").strip()
+
+        if transfer.transfer_type != Transfer.SUPPLIER_TO_BRANCH:
+            return Response(
+                {"detail": "Only supplier dispatches can be rejected."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if transfer.status != Transfer.PENDING:
+            return Response(
+                {"detail": "Transfer is not pending approval."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not message:
+            return Response(
+                {"detail": "A rejection message is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if role == "warehouse_manager":
+            manager = WarehouseManager.objects.filter(user=request.user).first()
+            if not manager or transfer.from_supplier_id != manager.supplier_id:
+                return Response(
+                    {"detail": "You can only reject dispatches for your supplier."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        before = snapshot_transfer(transfer)
+        transfer.status = Transfer.REJECTED
+        transfer.rejection_message = message
+        transfer.rejected_at = timezone.now()
+        transfer.rejected_by = request.user
+        transfer.save(
+            update_fields=["status", "rejection_message", "rejected_at", "rejected_by"]
+        )
+        changes = build_saved_field_changes(before, transfer)
+        AuditLog.objects.create(
+            action="transfer_rejected",
+            user=request.user,
+            transfer=transfer,
+            details={
+                "via": "api",
+                "endpoint": request.path,
+                "model": "transfer",
+                "message": message,
+                "changes": changes,
+            },
+        )
+        notify_for_transfer_rejected(transfer, message, actor=request.user)
+        return Response(TransferSerializer(transfer).data)
 
     @action(detail=True, methods=["post"])
     def receive(self, request, pk=None):

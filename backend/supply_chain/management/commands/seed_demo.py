@@ -2,7 +2,7 @@ from django.contrib.auth.models import Group, User
 from django.core.management.base import BaseCommand
 from django.db.models import Sum
 
-from supply_chain.models import Branch, Farmer, FertilizerBatch, Supplier, Transfer, Warehouse
+from supply_chain.models import Branch, Farmer, FertilizerBatch, Supplier, Transfer, Warehouse, WarehouseManager
 from supply_chain.services.ministry_of_agriculture import fetch_farmers
 
 
@@ -12,6 +12,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         groups = {
             "Supplier": Group.objects.get_or_create(name="Supplier")[0],
+            "WarehouseManager": Group.objects.get_or_create(name="WarehouseManager")[0],
             "Retailer": Group.objects.get_or_create(name="Retailer")[0],
             "Cooperative": Group.objects.get_or_create(name="Cooperative")[0],
             "Regulator": Group.objects.get_or_create(name="Regulator")[0],
@@ -28,6 +29,11 @@ class Command(BaseCommand):
         supplier1.set_password("demo123")
         supplier1.save()
         supplier1.groups.add(groups["Supplier"])
+
+        wh_manager = User.objects.get_or_create(username="warehouse_mgr1")[0]
+        wh_manager.set_password("demo123")
+        wh_manager.save()
+        wh_manager.groups.add(groups["WarehouseManager"])
 
         supplier2 = User.objects.get_or_create(username="supplier2")[0]
         supplier2.set_password("demo123")
@@ -66,6 +72,13 @@ class Command(BaseCommand):
 
         supplier_a, _ = Supplier.objects.get_or_create(
             name="Mbeya Fertilizers Ltd", defaults={"user": supplier1, "region": "Mbeya"}
+        )
+        if supplier_a.user_id != supplier1.id:
+            supplier_a.user = supplier1
+            supplier_a.save(update_fields=["user"])
+        WarehouseManager.objects.get_or_create(
+            user=wh_manager,
+            defaults={"supplier": supplier_a},
         )
         Supplier.objects.get_or_create(
             name="Tanzania Agricultural Inputs", defaults={"user": supplier2, "region": "Dar es Salaam"}

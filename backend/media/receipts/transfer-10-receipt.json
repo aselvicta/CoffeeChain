@@ -2,26 +2,39 @@
   "transfer_id": 10,
   "transfer_type": "BRANCH_TO_FARMER",
   "batch": {
-    "id": 1,
-    "code": "TCB-TEST-001",
-    "fertilizer_type": "NPK"
+    "id": 3,
+    "code": "SUP-2026-003",
+    "fertilizer_type": "Urea"
   },
-  "quantity_bags": 12,
+  "quantity_bags": 100,
   "farmer": {
-    "ministry_id": "MOA-KAG-021",
-    "name": "Evarist Masawe",
-    "phone_number": "0712000021",
+    "ministry_id": "WALKIN-1-F83405E3A7",
+    "name": "David Raya",
+    "phone_number": "0748842476",
     "district": "Bukoba"
   },
   "cooperative": {
-    "id": 3,
-    "name": "Bukoba Coffee Farmers AMCOS",
+    "id": 1,
+    "name": "Bukoba Agro Shop",
     "district": "Bukoba",
     "region": "Kagera"
   },
   "supplier": null,
   "delivery_proof_file_cid": null,
-  "verified_at": "2026-05-28T14:19:49.360957+00:00",
-  "verified_by": "cooperative1",
-  "otp_attempts": 2
+  "verified_at": "2026-06-14T20:12:20.276944+00:00",
+  "verified_by": "retailer1",
+  "otp_attempts": 0,
+  "data_hash": "f9ba989fab619340f9d49d39d199a0558108b4f93e7ec46ab9c2885447f8d3b5",
+  "payload_signature": "SUP-2026-003|100|local-fd2349c9f5877d2a31464eb2bebcef03b40e0b296c728c|10|2026-06-14T20:12:20.276944+00:00",
+  "content_cid": "local-fd2349c9f5877d2a31464eb2bebcef03b40e0b296c728c",
+  "tx_hash": "0x5e969315ee4c0ea8df70692c2f1faa624565c8e422a26177f5fa55418b1e4bb0",
+  "network": "polygon-amoy",
+  "integrity": {
+    "payload_signature": "SUP-2026-003|100|local-fd2349c9f5877d2a31464eb2bebcef03b40e0b296c728c|10|2026-06-14T20:12:20.276944+00:00",
+    "data_hash": "f9ba989fab619340f9d49d39d199a0558108b4f93e7ec46ab9c2885447f8d3b5",
+    "content_cid": "local-fd2349c9f5877d2a31464eb2bebcef03b40e0b296c728c",
+    "tx_hash": "0x5e969315ee4c0ea8df70692c2f1faa624565c8e422a26177f5fa55418b1e4bb0",
+    "network": "polygon-amoy",
+    "explorer_url": "https://amoy.polygonscan.com/tx/0x5e969315ee4c0ea8df70692c2f1faa624565c8e422a26177f5fa55418b1e4bb0"
+  }
 }

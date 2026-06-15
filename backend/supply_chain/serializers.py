@@ -14,6 +14,7 @@ from .models import (
     Supplier,
     Transfer,
     Warehouse,
+    WarehouseManager,
 )
 
 
@@ -27,13 +28,21 @@ class AdminUserCreateSerializer(serializers.Serializer):
     username = serializers.CharField()
     password = serializers.CharField(write_only=True)
     role = serializers.ChoiceField(
-        choices=["admin", "supplier", "retailer", "cooperative", "regulator"]
+        choices=[
+            "admin",
+            "supplier",
+            "warehouse_manager",
+            "retailer",
+            "cooperative",
+            "regulator",
+        ]
     )
     first_name = serializers.CharField(required=False, allow_blank=True)
     last_name = serializers.CharField(required=False, allow_blank=True)
     email = serializers.EmailField(required=False, allow_blank=True)
     supplier_name = serializers.CharField(required=False, allow_blank=True)
     supplier_region = serializers.CharField(required=False, allow_blank=True)
+    supplier_id = serializers.IntegerField(required=False)
     contact_phone = serializers.CharField(required=False, allow_blank=True)
     branch_name = serializers.CharField(required=False, allow_blank=True)
     branch_type = serializers.ChoiceField(
@@ -65,6 +74,15 @@ class SupplierSerializer(serializers.ModelSerializer):
     class Meta:
         model = Supplier
         fields = ["id", "name", "region", "contact_phone", "user", "created_at"]
+
+
+class WarehouseManagerSerializer(serializers.ModelSerializer):
+    supplier = SupplierSerializer(read_only=True)
+    user = UserSerializer(read_only=True)
+
+    class Meta:
+        model = WarehouseManager
+        fields = ["id", "supplier", "user", "created_at"]
 
 
 class BranchSerializer(serializers.ModelSerializer):
@@ -226,6 +244,8 @@ class TransferSerializer(serializers.ModelSerializer):
             "ministry_verified",
             "discount_percent",
             "notes",
+            "rejection_message",
+            "rejected_at",
             "created_at",
         ]
         extra_kwargs = {

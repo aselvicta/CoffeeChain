@@ -71,6 +71,88 @@ def notify_admins(**kwargs):
     return _notify_users(User.objects.filter(is_staff=True), **kwargs)
 
 
+def _warehouse_managers_for_supplier(supplier):
+    if not supplier:
+        return User.objects.none()
+    return User.objects.filter(
+        warehouse_manager_profile__supplier_id=supplier.id
+    ).distinct()
+
+
+def notify_for_transfer_pending(transfer: Transfer, actor=None):
+    transfer = (
+        Transfer.objects.select_related(
+            "batch",
+            "from_supplier",
+            "to_branch",
+            "warehouse",
+        )
+        .filter(pk=transfer.pk)
+        .first()
+        or transfer
+    )
+    batch_code = transfer.batch.batch_code if transfer.batch else "Batch"
+    fertilizer = transfer.batch.fertilizer_type if transfer.batch else "Fertilizer"
+    bags = transfer.quantity_bags
+    supplier_name = (
+        transfer.from_supplier.name if transfer.from_supplier else "Supplier"
+    )
+    branch_name = transfer.to_branch.name if transfer.to_branch else "Branch"
+    warehouse_name = transfer.warehouse.name if transfer.warehouse else "Warehouse"
+
+    _notify_users(
+        _warehouse_managers_for_supplier(transfer.from_supplier),
+        notification_type=Notification.TYPE_DISPATCH,
+        title="Dispatch awaiting approval",
+        message=(
+            f"{bags} bags of {fertilizer} ({batch_code}) to {branch_name} "
+            f"need warehouse approval."
+        ),
+        details=f"Transfer #{transfer.id} • {warehouse_name}",
+        priority=Notification.PRIORITY_HIGH,
+        transfer=transfer,
+        metadata={"transfer_id": transfer.id, "tab": "pending"},
+    )
+
+    supplier_user = _supplier_user(transfer.from_supplier)
+    if supplier_user:
+        _create(
+            supplier_user,
+            notification_type=Notification.TYPE_DISPATCH,
+            title="Dispatch submitted",
+            message=f"{bags} bags to {branch_name} submitted for warehouse approval.",
+            details=f"Transfer #{transfer.id} • Pending manager confirmation.",
+            priority=Notification.PRIORITY_MEDIUM,
+            transfer=transfer,
+            metadata={"transfer_id": transfer.id, "tab": "dispatched"},
+        )
+
+
+def notify_for_transfer_rejected(transfer: Transfer, message: str, actor=None):
+    transfer = (
+        Transfer.objects.select_related("batch", "from_supplier", "to_branch", "warehouse")
+        .filter(pk=transfer.pk)
+        .first()
+        or transfer
+    )
+    batch_code = transfer.batch.batch_code if transfer.batch else "Batch"
+    branch_name = transfer.to_branch.name if transfer.to_branch else "Branch"
+
+    _create(
+        _supplier_user(transfer.from_supplier),
+        notification_type=Notification.TYPE_SYSTEM,
+        title="Dispatch not approved",
+        message=(
+            f"Warehouse manager rejected {transfer.quantity_bags} bags "
+            f"({batch_code}) to {branch_name}."
+        ),
+        details=message,
+        priority=Notification.PRIORITY_HIGH,
+        transfer=transfer,
+        metadata={"transfer_id": transfer.id, "tab": "dispatched", "rejected": True},
+    )
+
+
 def notify_for_transfer_created(transfer: Transfer, actor=None):
     transfer = (
         Transfer.objects.select_related(

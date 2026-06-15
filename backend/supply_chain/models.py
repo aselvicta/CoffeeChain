@@ -16,6 +16,21 @@ class Supplier(models.Model):
         return self.name
 
 
+class WarehouseManager(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="warehouse_manager_profile",
+    )
+    supplier = models.ForeignKey(
+        Supplier, on_delete=models.CASCADE, related_name="warehouse_managers"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user.username} @ {self.supplier.name}"
+
+
 class Branch(models.Model):
     RETAILER = "RETAILER"
     COOPERATIVE = "COOPERATIVE"
@@ -129,13 +144,17 @@ class Transfer(models.Model):
         (BRANCH_TO_FARMER, "Branch to Farmer"),
     ]
 
+    PENDING = "PENDING"
     DISPATCHED = "DISPATCHED"
     RECEIVED = "RECEIVED"
     VERIFIED = "VERIFIED"
+    REJECTED = "REJECTED"
     STATUS_CHOICES = [
+        (PENDING, "Pending Approval"),
         (DISPATCHED, "Dispatched"),
         (RECEIVED, "Received"),
         (VERIFIED, "Verified"),
+        (REJECTED, "Rejected"),
     ]
 
     batch = models.ForeignKey(
@@ -184,6 +203,15 @@ class Transfer(models.Model):
     )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True
+    )
+    rejection_message = models.TextField(blank=True, default="")
+    rejected_at = models.DateTimeField(null=True, blank=True)
+    rejected_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="rejected_transfers",
     )
     created_at = models.DateTimeField(auto_now_add=True)
     notes = models.TextField(blank=True)

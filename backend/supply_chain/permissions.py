@@ -48,6 +48,18 @@ class CooperativeOrAdmin(BasePermission):
         return IsCooperative().has_permission(request, view) or IsAdmin().has_permission(request, view)
 
 
+class IsWarehouseManager(BasePermission):
+    def has_permission(self, request, view):
+        return has_group(request.user, "WarehouseManager")
+
+
+class WarehouseManagerOrAdmin(BasePermission):
+    def has_permission(self, request, view):
+        return IsWarehouseManager().has_permission(request, view) or IsAdmin().has_permission(
+            request, view
+        )
+
+
 class BranchStaffOrAdmin(BasePermission):
     """Cooperatives and retailers that register or serve farmers."""
 

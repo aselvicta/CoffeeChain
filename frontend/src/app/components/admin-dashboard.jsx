@@ -114,6 +114,7 @@ const EMPTY_USER_FORM = {
   email: '',
   supplier_name: '',
   supplier_region: '',
+  supplier_id: '',
   contact_phone: '',
   branch_name: '',
   branch_type: 'RETAILER',
@@ -154,6 +155,7 @@ function userFormFromRecord(record) {
   const role = record?.role || 'supplier';
   const supplier = record?.supplier || null;
   const branch = record?.branch || null;
+  const warehouseManager = record?.warehouse_manager || null;
 
   return {
     username: user.username || '',
@@ -164,6 +166,7 @@ function userFormFromRecord(record) {
     email: user.email || '',
     supplier_name: supplier?.name || '',
     supplier_region: supplier?.region || '',
+    supplier_id: warehouseManager?.supplier?.id ? String(warehouseManager.supplier.id) : '',
     contact_phone: supplier?.contact_phone || '',
     branch_name: branch?.name || '',
     branch_type: branch?.branch_type || ROLE_BRANCH_TYPE[role] || 'RETAILER',
@@ -285,7 +288,11 @@ export function AdminDashboard({ userProfile, onLogout }) {
     if (!userForm.username || !userForm.password) return;
     setUserStatus('');
     try {
-      const newUser = await createUser(userForm);
+      const payload = { ...userForm };
+      if (payload.supplier_id) {
+        payload.supplier_id = Number(payload.supplier_id);
+      }
+      const newUser = await createUser(payload);
       setUsers((prev) => [...prev, newUser]);
       closeUserForm();
     } catch (error) {
@@ -309,6 +316,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
         setSuppliers(
           supplierData.map((supplier) => ({
             id: `SUP-${supplier.id.toString().padStart(3, '0')}`,
+            recordId: supplier.id,
             name: supplier.name,
             region: supplier.region || 'Region',
             phone: supplier.contact_phone || 'N/A',
@@ -432,7 +440,12 @@ export function AdminDashboard({ userProfile, onLogout }) {
       }
       const name = record.user.username.toLowerCase();
       const role = record.role?.toLowerCase() || '';
-      const org = (record.supplier?.name || record.branch?.name || '').toLowerCase();
+      const org = (
+        record.supplier?.name ||
+        record.warehouse_manager?.supplier?.name ||
+        record.branch?.name ||
+        ''
+      ).toLowerCase();
       const matchesQuery =
         !normalizedQuery ||
         name.includes(normalizedQuery) ||
@@ -447,8 +460,8 @@ export function AdminDashboard({ userProfile, onLogout }) {
         return (a.role || '').localeCompare(b.role || '');
       }
       if (userSort === 'organization') {
-        const orgA = a.supplier?.name || a.branch?.name || '';
-        const orgB = b.supplier?.name || b.branch?.name || '';
+        const orgA = a.supplier?.name || a.warehouse_manager?.supplier?.name || a.branch?.name || '';
+        const orgB = b.supplier?.name || b.warehouse_manager?.supplier?.name || b.branch?.name || '';
         return orgA.localeCompare(orgB);
       }
       return a.user.username.localeCompare(b.user.username);
@@ -1161,6 +1174,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
                     <option value="all">All Roles</option>
                     <option value="admin">Admin</option>
                     <option value="supplier">Supplier</option>
+                    <option value="warehouse_manager">Warehouse Manager</option>
                     <option value="retailer">Retailer</option>
                     <option value="cooperative">Cooperative</option>
                     <option value="regulator">Regulator</option>
@@ -1199,7 +1213,10 @@ export function AdminDashboard({ userProfile, onLogout }) {
                           <td className="py-3 px-2 font-semibold text-gray-900">{record.user.username}</td>
                           <td className="py-3 px-2 text-gray-700">{record.role}</td>
                           <td className="py-3 px-2 text-gray-700">
-                            {record.supplier?.name || record.branch?.name || 'Admin'}
+                            {record.supplier?.name ||
+                              record.warehouse_manager?.supplier?.name ||
+                              record.branch?.name ||
+                              'Admin'}
                           </td>
                           <td className="py-3 px-2 text-gray-700">{record.user.email || '-'}</td>
                           <td className="py-3 px-2 text-right">
@@ -1286,6 +1303,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
                         >
                         <option value="admin">Admin</option>
                         <option value="supplier">Supplier</option>
+                        <option value="warehouse_manager">Warehouse Manager</option>
                         <option value="retailer">Retailer</option>
                         <option value="cooperative">Cooperative</option>
                         <option value="regulator">Regulator</option>
@@ -1318,7 +1336,31 @@ export function AdminDashboard({ userProfile, onLogout }) {
                           className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
                         />
                       </div>
-                      {userForm.role !== 'admin' && (
+                      {userForm.role === 'warehouse_manager' && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Linked supplier
+                          </label>
+                          <select
+                            value={userForm.supplier_id}
+                            onChange={(e) =>
+                              setUserForm({ ...userForm, supplier_id: e.target.value })
+                            }
+                            disabled={Boolean(editingUserId)}
+                            className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent ${
+                              editingUserId ? 'bg-gray-100 text-gray-600 cursor-not-allowed' : ''
+                            }`}
+                          >
+                            <option value="">Select supplier</option>
+                            {suppliers.map((supplier) => (
+                              <option key={supplier.id} value={supplier.recordId}>
+                                {supplier.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                      {userForm.role !== 'admin' && userForm.role !== 'warehouse_manager' && (
                         <>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">

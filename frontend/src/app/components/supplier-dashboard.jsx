@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { Package, Send, History, BarChart3, LogOut, TrendingUp, Search, AlertCircle, CheckCircle2, Plus, Eye, Trash2 } from 'lucide-react';
+import { Package, Send, History, BarChart3, LogOut, TrendingUp, Search, AlertCircle, CheckCircle2, Plus, Eye, Trash2, MessageSquare, RotateCcw } from 'lucide-react';
 import { LineChart, Line, PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import { Logo } from './logo';
 import { NotificationBell } from './notification-bell';
@@ -13,8 +13,42 @@ import { buildDashboardPath, resolveDashboardTab } from '../utils/dashboard-rout
 import { buildMonthlyTrend } from '../utils/chart-trends';
 import { getUserMessage } from '../utils/user-messages';
 import { sortByDateDesc, HISTORY_PAGE_SIZE } from '../utils/list-limits';
+import { toast } from 'sonner';
 import { usePaginatedList } from '../hooks/use-paginated-list';
 import { PaginationBar } from './ui/pagination-bar';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from './ui/dialog';
+
+function mapSupplierTransfer(transfer, getDispatchStatusMeta) {
+  return {
+    id: transfer.id,
+    batchId: transfer.batch?.id,
+    batchCode: transfer.batch?.batch_code || '—',
+    product: transfer.batch?.fertilizer_type || '—',
+    bags: transfer.quantity_bags,
+    destinationId: transfer.to_branch?.id,
+    destination: transfer.to_branch?.name || 'Unknown',
+    recipient: transfer.to_branch?.name || transfer.receiver_name || 'Unknown',
+    rawStatus: transfer.status,
+    status: getDispatchStatusMeta(transfer.status).label,
+    statusTone: getDispatchStatusMeta(transfer.status).tone,
+    statusDescription: getDispatchStatusMeta(transfer.status).description,
+    rejectionMessage: transfer.rejection_message || '',
+    rejectedAt: transfer.rejected_at || '',
+    warehouseId: transfer.warehouse?.id || transfer.batch?.storage_location?.id,
+    warehouse: transfer.warehouse?.name || transfer.batch?.storage_location?.name || '—',
+    supplier: transfer.from_supplier?.name || '—',
+    date: transfer.created_at?.slice(0, 10),
+    createdAt: transfer.created_at || '',
+    confirmedAt: transfer.confirmed_at || '',
+  };
+}
 
 export function SupplierDashboard({ userProfile, onLogout }) {
   const dashboardRole = 'supplier';
@@ -54,6 +88,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
   const [readNotificationIds, setReadNotificationIds] = useState([]);
   const [dismissedNotificationIds, setDismissedNotificationIds] = useState([]);
   const [dispatchItems, setDispatchItems] = useState([createDispatchLineItem()]);
+  const [rejectedDispatchReview, setRejectedDispatchReview] = useState(null);
   const location = useLocation();
   const navigate = useNavigate();
   const {
@@ -81,6 +116,20 @@ export function SupplierDashboard({ userProfile, onLogout }) {
 
   const getDispatchStatusMeta = (status) => {
     const normalizedStatus = String(status || '').toUpperCase();
+    if (normalizedStatus === 'PENDING') {
+      return {
+        label: 'Pending Approval',
+        tone: 'bg-amber-100 text-amber-800',
+        description: 'Waiting for warehouse manager approval before dispatch.',
+      };
+    }
+    if (normalizedStatus === 'REJECTED') {
+      return {
+        label: 'Not Approved',
+        tone: 'bg-red-100 text-red-800',
+        description: 'Rejected by warehouse manager. See manager reply.',
+      };
+    }
     if (normalizedStatus === 'RECEIVED') {
       return {
         label: 'Received',
@@ -149,44 +198,10 @@ export function SupplierDashboard({ userProfile, onLogout }) {
           transfer.transfer_type === 'SUPPLIER_TO_BRANCH' &&
           transfer.from_supplier?.id === userProfile.supplierRecordId
       );
-      setDispatches(
-        supplierTransfers.map((transfer) => ({
-          id: transfer.id,
-          batchCode: transfer.batch?.batch_code || '—',
-          product: transfer.batch?.fertilizer_type,
-          bags: transfer.quantity_bags,
-          destination: transfer.to_branch?.name || 'Unknown',
-          recipient: transfer.to_branch?.name || transfer.receiver_name || 'Unknown',
-          rawStatus: transfer.status,
-          status: getDispatchStatusMeta(transfer.status).label,
-          statusTone: getDispatchStatusMeta(transfer.status).tone,
-          statusDescription: getDispatchStatusMeta(transfer.status).description,
-          warehouse: transfer.warehouse?.name || transfer.batch?.storage_location?.name || '—',
-          supplier: transfer.from_supplier?.name || '—',
-          date: transfer.created_at?.slice(0, 10),
-          createdAt: transfer.created_at || '',
-          confirmedAt: transfer.confirmed_at || '',
-        }))
-      );
+      setDispatches(supplierTransfers.map((transfer) => mapSupplierTransfer(transfer, getDispatchStatusMeta)));
       setDispatchedTransfers(
         [...supplierTransfers]
-          .map((transfer) => ({
-            id: transfer.id,
-            batchCode: transfer.batch?.batch_code || '—',
-            product: transfer.batch?.fertilizer_type || '—',
-            bags: transfer.quantity_bags,
-            destination: transfer.to_branch?.name || 'Unknown',
-            recipient: transfer.to_branch?.name || transfer.receiver_name || 'Unknown',
-            rawStatus: transfer.status,
-            status: getDispatchStatusMeta(transfer.status).label,
-            statusTone: getDispatchStatusMeta(transfer.status).tone,
-            statusDescription: getDispatchStatusMeta(transfer.status).description,
-            warehouse: transfer.warehouse?.name || transfer.batch?.storage_location?.name || '—',
-            supplier: transfer.from_supplier?.name || '—',
-            date: transfer.created_at?.slice(0, 10),
-            createdAt: transfer.created_at || '',
-            confirmedAt: transfer.confirmed_at || '',
-          }))
+          .map((transfer) => mapSupplierTransfer(transfer, getDispatchStatusMeta))
           .sort(
             (left, right) =>
               new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime()
@@ -415,6 +430,30 @@ export function SupplierDashboard({ userProfile, onLogout }) {
     const parsed = new Date(value);
     if (Number.isNaN(parsed.getTime())) return String(value).slice(0, 10) || '—';
     return parsed.toLocaleDateString();
+  };
+
+  const openRejectedReview = (dispatch) => {
+    setRejectedDispatchReview(dispatch);
+  };
+
+  const handleRedispatch = (dispatch) => {
+    setDispatchForm({
+      warehouseId: dispatch.warehouseId ? String(dispatch.warehouseId) : '',
+      destinationId: dispatch.destinationId ? String(dispatch.destinationId) : '',
+    });
+    setDispatchItems([
+      {
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        batchCode: dispatch.batchCode !== '—' ? dispatch.batchCode : '',
+        bags: dispatch.bags ? String(dispatch.bags) : '',
+      },
+    ]);
+    setRejectedDispatchReview(null);
+    goToTab('dispatch');
+    toast.info(
+      'Update the dispatch details if needed, then submit again for warehouse approval.',
+      { duration: 8000 }
+    );
   };
 
   const tableHeadCell =
@@ -764,7 +803,6 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                         return;
                       }
                       setIsSaving(true);
-                      setStatusMessage('');
                       try {
                         const destinationId = Number(dispatchForm.destinationId);
                         const warehouseId = Number(dispatchForm.warehouseId);
@@ -790,7 +828,6 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                               from_supplier_id: userProfile.supplierRecordId,
                               to_branch_id: destinationId,
                               quantity_bags: bags,
-                              status: 'DISPATCHED',
                             };
                           })
                           .filter(Boolean);
@@ -802,12 +839,13 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                         await Promise.all(lineItems.map((payload) => createTransfer(payload)));
                         setDispatchForm({ destinationId: '', warehouseId: '' });
                         setDispatchItems([createDispatchLineItem()]);
-                        setStatusMessage(
-                          `Dispatched ${dispatchCartTotal} bags in ${lineItems.length} transfer(s).`
+                        toast.success(
+                          `Submitted ${dispatchCartTotal} bags in ${lineItems.length} transfer(s) for warehouse approval.`,
+                          { duration: 8000 }
                         );
                         await refreshData();
                       } catch (error) {
-                        setStatusMessage(getUserMessage(error));
+                        toast.error(getUserMessage(error));
                       } finally {
                         setIsSaving(false);
                       }
@@ -816,15 +854,6 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                     {isSaving ? 'Dispatching...' : 'Dispatch'}
                   </PanelPrimaryButton>
                 </div>
-                {statusMessage && (
-                  <p
-                    className={`mt-3 text-sm ${
-                      statusMessage.startsWith('Dispatched') ? 'text-green-700' : 'text-red-600'
-                    }`}
-                  >
-                    {statusMessage}
-                  </p>
-                )}
               </div>
 
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
@@ -866,7 +895,9 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                 <div className="flex flex-wrap gap-1.5 sm:gap-2">
                   {[
                     { id: 'all', label: 'All' },
+                    { id: 'PENDING', label: 'Pending' },
                     { id: 'DISPATCHED', label: 'In transit' },
+                    { id: 'REJECTED', label: 'Not approved' },
                     { id: 'RECEIVED', label: 'Received' },
                     { id: 'VERIFIED', label: 'Verified' },
                   ].map((option) => (
@@ -917,15 +948,16 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                   ) : (
                     <>
                       <div className="overflow-x-auto rounded-lg border border-gray-200">
-                        <table className="w-full min-w-[640px] table-fixed divide-y divide-gray-200">
+                        <table className="w-full min-w-[720px] table-fixed divide-y divide-gray-200">
                           <thead className="bg-gray-50">
                             <tr>
-                              <th className={`${tableHeadCell} w-[22%]`}>Batch</th>
-                              <th className={`${tableHeadCell} w-[14%]`}>Shipment</th>
-                              <th className={`${tableHeadCell} w-[20%]`}>Receiver</th>
-                              <th className={`${tableHeadCell} hidden w-[16%] xl:table-cell`}>Warehouse</th>
-                              <th className={`${tableHeadCell} w-[18%]`}>Status</th>
+                              <th className={`${tableHeadCell} w-[18%]`}>Batch</th>
+                              <th className={`${tableHeadCell} w-[12%]`}>Shipment</th>
+                              <th className={`${tableHeadCell} w-[16%]`}>Receiver</th>
+                              <th className={`${tableHeadCell} hidden w-[14%] xl:table-cell`}>Warehouse</th>
+                              <th className={`${tableHeadCell} w-[14%]`}>Status</th>
                               <th className={`${tableHeadCell} w-[10%]`}>Date</th>
+                              <th className={`${tableHeadCell} w-[16%]`}>Actions</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-200 bg-white">
@@ -967,12 +999,38 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                                     <span className="mt-0.5 truncate text-[11px] text-gray-500">
                                       {dispatch.confirmedAt
                                         ? formatShortDate(dispatch.confirmedAt)
-                                        : 'Awaiting'}
+                                        : dispatch.rawStatus === 'REJECTED'
+                                          ? 'Needs correction'
+                                          : 'Awaiting'}
                                     </span>
                                   </div>
                                 </td>
                                 <td className={`${tableBodyCell} text-gray-500`}>
                                   {dispatch.date || '—'}
+                                </td>
+                                <td className={tableBodyCell}>
+                                  {dispatch.rawStatus === 'REJECTED' ? (
+                                    <div className="flex flex-col gap-1.5 sm:flex-row sm:flex-wrap">
+                                      <PanelOutlineButton
+                                        type="button"
+                                        icon={MessageSquare}
+                                        onClick={() => openRejectedReview(dispatch)}
+                                        className="!px-2 !py-1 text-xs"
+                                      >
+                                        Feedback
+                                      </PanelOutlineButton>
+                                      <PanelPrimaryButton
+                                        type="button"
+                                        icon={RotateCcw}
+                                        onClick={() => handleRedispatch(dispatch)}
+                                        className="!px-2 !py-1 text-xs"
+                                      >
+                                        Redispatch
+                                      </PanelPrimaryButton>
+                                    </div>
+                                  ) : (
+                                    <span className="text-xs text-gray-400">—</span>
+                                  )}
                                 </td>
                               </tr>
                             ))}
@@ -1416,6 +1474,68 @@ export function SupplierDashboard({ userProfile, onLogout }) {
           onRefresh={refreshData}
         />
       )}
+
+      <Dialog
+        open={Boolean(rejectedDispatchReview)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRejectedDispatchReview(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Dispatch not approved</DialogTitle>
+            <DialogDescription>
+              Review the warehouse manager feedback, correct the dispatch details, and submit again.
+            </DialogDescription>
+          </DialogHeader>
+
+          {rejectedDispatchReview ? (
+            <div className="space-y-4 text-sm">
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                <p className="font-semibold text-gray-900">
+                  {rejectedDispatchReview.batchCode} • {rejectedDispatchReview.product}
+                </p>
+                <p className="mt-1 text-gray-600">
+                  {rejectedDispatchReview.bags} bags to {rejectedDispatchReview.recipient}
+                </p>
+                <p className="text-gray-600">Warehouse: {rejectedDispatchReview.warehouse}</p>
+                <p className="text-gray-500">
+                  Originally submitted: {formatShortDate(rejectedDispatchReview.date)}
+                </p>
+              </div>
+
+              <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-red-700">
+                  Warehouse manager feedback
+                </p>
+                <p className="mt-2 text-red-900">{rejectedDispatchReview.rejectionMessage}</p>
+                {rejectedDispatchReview.rejectedAt ? (
+                  <p className="mt-2 text-xs text-red-700">
+                    Received {formatShortDate(rejectedDispatchReview.rejectedAt)}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          <DialogFooter className="gap-2">
+            <PanelOutlineButton type="button" onClick={() => setRejectedDispatchReview(null)}>
+              Close
+            </PanelOutlineButton>
+            {rejectedDispatchReview ? (
+              <PanelPrimaryButton
+                type="button"
+                icon={RotateCcw}
+                onClick={() => handleRedispatch(rejectedDispatchReview)}
+              >
+                Redispatch
+              </PanelPrimaryButton>
+            ) : null}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

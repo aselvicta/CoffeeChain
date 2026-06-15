@@ -38,17 +38,4 @@ class Migration(migrations.Migration):
             name='receiver_phone',
             field=models.CharField(blank=True, default='', max_length=50),
         ),
-        migrations.CreateModel(
-            name='Notification',
-            fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('title', models.CharField(max_length=255)),
-                ('body', models.TextField()),
-                ('type', models.CharField(choices=[('dispatch', 'Dispatch'), ('delivery', 'Delivery'), ('stock', 'Stock'), ('expiry', 'Expiry')], default='dispatch', max_length=20)),
-                ('transfer_ids', models.JSONField(blank=True, default=list)),
-                ('is_read', models.BooleanField(default=False)),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('user', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='notifications', to=settings.AUTH_USER_MODEL)),
-            ],
-        ),
     ]

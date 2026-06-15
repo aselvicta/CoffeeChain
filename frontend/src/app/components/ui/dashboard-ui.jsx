@@ -29,6 +29,12 @@ const TONES = {
     icon: 'text-gray-700',
     outline: 'border-gray-200 text-gray-800 hover:bg-gray-50',
   },
+  red: {
+    card: 'bg-red-50 hover:bg-red-100',
+    iconWrap: 'bg-red-100',
+    icon: 'text-red-700',
+    outline: 'border-red-200 text-red-800 hover:bg-red-50',
+  },
 };
 
 export function QuickActionCard({
