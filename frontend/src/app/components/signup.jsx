@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import {
-  ArrowLeft, Building2, CheckCircle, Eye, EyeOff,
+  ArrowLeft, Building2, CheckCircle, Eye, EyeOff, Loader2,
   Leaf, Lock, Mail, MapPin, Phone, ShieldCheck, Store, User, Users,
 } from 'lucide-react';
 import { registerPublic } from '../api/client';
@@ -488,8 +488,9 @@ export function SignupPage() {
                   type="button"
                   onClick={handleSubmit}
                   disabled={!canProceedStep2 || loading}
-                  className="w-full bg-green-600 text-white rounded-lg py-3 font-semibold hover:bg-green-700 transition-colors shadow-md disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="w-full flex items-center justify-center gap-2 bg-green-600 text-white rounded-lg py-3 font-semibold hover:bg-green-700 transition-colors shadow-md disabled:opacity-40 disabled:cursor-not-allowed"
                 >
+                  {loading && <Loader2 className="h-5 w-5 animate-spin" />}
                   {loading ? 'Submitting…' : 'Submit Registration Request'}
                 </button>
 

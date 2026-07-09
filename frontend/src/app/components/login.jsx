@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
-import { Lock, User } from 'lucide-react';
+import { Loader2, Lock, User } from 'lucide-react';
 import { useLanguage } from './language-context';
 import { Logo } from './logo';
 import { ImageWithFallback } from './figma/ImageWithFallback';
@@ -13,10 +13,12 @@ export function Login({ onLogin }) {
     password: '',
   });
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setLoading(true);
 
     try {
       await onLogin(credentials);
@@ -29,6 +31,8 @@ export function Login({ onLogin }) {
             : 'Jina la mtumiaji au nywila si sahihi.'
         )
       );
+    } finally {
+      setLoading(false);
     }
   };
   
@@ -92,9 +96,10 @@ export function Login({ onLogin }) {
                   onChange={(e) =>
                     setCredentials({ ...credentials, username: e.target.value })
                   }
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 disabled:bg-gray-50 disabled:text-gray-500"
                   placeholder={language === 'en' ? 'Enter username' : 'Weka jina la mtumiaji'}
                   required
+                  disabled={loading}
                 />
               </div>
 
@@ -109,17 +114,26 @@ export function Login({ onLogin }) {
                   onChange={(e) =>
                     setCredentials({ ...credentials, password: e.target.value })
                   }
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 disabled:bg-gray-50 disabled:text-gray-500"
                   placeholder={language === 'en' ? 'Enter password' : 'Weka nywila'}
                   required
+                  disabled={loading}
                 />
               </div>
 
               <button
                 type="submit"
-                className="w-full bg-green-600 text-white py-3 rounded-lg font-medium hover:bg-green-700 transition-colors shadow-md hover:shadow-lg"
+                disabled={loading}
+                className="w-full flex items-center justify-center gap-2 bg-green-600 text-white py-3 rounded-lg font-medium hover:bg-green-700 transition-colors shadow-md hover:shadow-lg disabled:opacity-70 disabled:cursor-not-allowed"
               >
-                {language === 'en' ? 'Login to CoffeeChain' : 'Ingia CoffeeChain'}
+                {loading && <Loader2 className="h-5 w-5 animate-spin" />}
+                {loading
+                  ? language === 'en'
+                    ? 'Logging in…'
+                    : 'Inaingia…'
+                  : language === 'en'
+                    ? 'Login to CoffeeChain'
+                    : 'Ingia CoffeeChain'}
               </button>
 
               <p className="text-center text-sm text-gray-500">

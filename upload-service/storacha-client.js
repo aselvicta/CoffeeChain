@@ -14,6 +14,30 @@ import { create } from "@storacha/client";
 import * as Proof from "@storacha/client/proof";
 import { Signer } from "@storacha/client/principal/ed25519";
 
+/** Accept multibase (M...) or comma-separated byte export from keygen. */
+export function normalizeStorachaKey(key) {
+  const trimmed = (key || "").trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith("M")) return trimmed;
+  if (trimmed.includes(",")) {
+    const bytes = Uint8Array.from(
+      trimmed.split(",").map((part) => {
+        const n = Number(part.trim());
+        if (!Number.isInteger(n) || n < 0 || n > 255) {
+          throw new Error(`Invalid STORACHA_KEY byte: ${part}`);
+        }
+        return n;
+      })
+    );
+    return `M${Buffer.from(bytes).toString("base64")}`;
+  }
+  return trimmed;
+}
+
+export function parseSigner(key) {
+  return Signer.parse(normalizeStorachaKey(key));
+}
+
 function readKey() {
   return process.env.STORACHA_KEY || process.env.STORACHA_PRINCIPAL || "";
 }
@@ -28,7 +52,7 @@ async function createDelegatedClient() {
   const proofBase64 = readProof();
   if (!key || !proofBase64) return null;
 
-  const principal = Signer.parse(key);
+  const principal = parseSigner(key);
   const client = await create({ principal });
   const proof = await Proof.parse(proofBase64);
   const space = await client.addSpace(proof);
