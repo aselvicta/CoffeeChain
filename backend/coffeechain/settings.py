@@ -65,6 +65,17 @@ DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 if DATABASE_URL:
     import dj_database_url
 
+    # Render/Heroku use postgres:// — normalize for dj-database-url
+    if DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+    if not DATABASE_URL.startswith(("postgresql://", "sqlite://")):
+        raise ValueError(
+            "DATABASE_URL is invalid. In Render, open your PostgreSQL service, "
+            "copy Internal Database URL (starts with postgresql://), and paste it "
+            "into the backend service Environment variables."
+        )
+
     DATABASES = {"default": dj_database_url.parse(DATABASE_URL, conn_max_age=600)}
 else:
     DATABASES = {
