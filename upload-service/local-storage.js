@@ -4,7 +4,9 @@ import path from "path";
 
 const FALLBACK_DIR =
   process.env.UPLOAD_FALLBACK_DIR ||
-  path.join(process.cwd(), "..", "backend", "media", "receipts");
+  (process.env.RENDER
+    ? path.join(process.cwd(), "data", "receipts")
+    : path.join(process.cwd(), "..", "backend", "media", "receipts"));
 
 function ensureDir() {
   fs.mkdirSync(FALLBACK_DIR, { recursive: true });

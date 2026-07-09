@@ -31,9 +31,11 @@ try {
 }
 
 app.get("/health", async (_req, res) => {
+  // Always 200 when the process is up — Render uses this for deploy health checks.
   if (!client) {
-    return res.status(503).json({
-      ok: false,
+    return res.json({
+      ok: true,
+      storacha: false,
       error: "Storacha client not initialized",
       fallback: "local",
     });
@@ -42,6 +44,7 @@ app.get("/health", async (_req, res) => {
     const spaceDid = await verifyUploadReady(client);
     return res.json({
       ok: true,
+      storacha: true,
       space: spaceDid,
       agent: client.agent.did(),
       mode: initMode,
@@ -49,8 +52,9 @@ app.get("/health", async (_req, res) => {
       fallback_available: true,
     });
   } catch (error) {
-    return res.status(503).json({
-      ok: false,
+    return res.json({
+      ok: true,
+      storacha: false,
       error: error.message,
       agent: client.agent.did(),
       fallback: "local",

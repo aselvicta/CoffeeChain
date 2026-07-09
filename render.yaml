@@ -42,6 +42,8 @@ services:
     startCommand: node index.js
     healthCheckPath: /health
     envVars:
+      - key: NODE_VERSION
+        value: "20.18.0"
       - key: STORACHA_KEY
         sync: false
       - key: STORACHA_PROOF
