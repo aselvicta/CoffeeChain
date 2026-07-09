@@ -1,0 +1,52 @@
+# Render Blueprint — CoffeeChain backend + upload service
+# Docs: https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: coffeechain-api
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt && python manage.py collectstatic --noinput
+    startCommand: bash start.sh
+    envVars:
+      - key: DJANGO_DEBUG
+        value: "false"
+      - key: CORS_ALLOW_ALL_ORIGINS
+        value: "false"
+      - key: CORS_ALLOWED_ORIGINS
+        value: https://coffeechain-rust.vercel.app
+      - key: PYTHON_VERSION
+        value: "3.12.8"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: coffeechain-db
+          property: connectionString
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DJANGO_ALLOWED_HOSTS
+        sync: false
+      - key: BACKEND_PUBLIC_URL
+        sync: false
+      - key: STORACHA_UPLOAD_URL
+        sync: false
+      - key: BRIQ_API_KEY
+        sync: false
+      - key: BRIQ_APP_KEY
+        sync: false
+
+  - type: web
+    name: coffeechain-upload
+    runtime: node
+    rootDir: upload-service
+    buildCommand: npm install
+    startCommand: node index.js
+    healthCheckPath: /health
+    envVars:
+      - key: STORACHA_KEY
+        sync: false
+      - key: STORACHA_PROOF
+        sync: false
+
+databases:
+  - name: coffeechain-db
+    plan: free
