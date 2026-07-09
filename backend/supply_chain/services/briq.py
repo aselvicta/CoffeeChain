@@ -450,6 +450,67 @@ def resend_otp(
         )
 
 
+def send_sms(phone_number: str, message: str) -> dict[str, Any]:
+    """Send a plain (non-OTP) SMS via Briq Karibu /v1/message/send-instant.
+
+    Body: { content, recipients: [msisdn], sender_id }
+    Returns a dict with ``delivered`` (bool) and optional ``error`` string.
+    Never raises — callers should treat failure as non-fatal.
+    """
+    api_key = getattr(settings, "BRIQ_API_KEY", "")
+    sender_id = (getattr(settings, "BRIQ_OTP_SENDER_ID", "") or "COFFEECHAIN").strip()
+    msisdn = normalize_phone_digits(phone_number or "")
+
+    if not api_key:
+        logger.warning("[Briq] send_sms skipped — BRIQ_API_KEY not configured")
+        return {"delivered": False, "error": "SMS not configured."}
+
+    if not msisdn or len(msisdn) < 9:
+        logger.warning("[Briq] send_sms skipped — invalid phone: %s", phone_number)
+        return {"delivered": False, "error": "Invalid phone number."}
+
+    # Briq caps a single SMS at 160 chars; truncate gracefully
+    content = message[:160]
+
+    timeout = int(getattr(settings, "BRIQ_REQUEST_TIMEOUT", 45))
+    try:
+        response = requests.post(
+            f"{_base_url()}/v1/message/send-instant",
+            headers=_api_headers(),
+            json={
+                "content": content,
+                "recipients": [msisdn],
+                "sender_id": sender_id,
+            },
+            timeout=timeout,
+        )
+        data: dict[str, Any] = {}
+        try:
+            data = response.json()
+        except ValueError:
+            pass
+
+        delivered = response.ok and bool(data.get("success", response.ok))
+        logger.info(
+            "[Briq] send_sms to=%s http=%s delivered=%s msg=%s",
+            msisdn, response.status_code, delivered,
+            data.get("message") or response.text[:120],
+        )
+        if delivered:
+            return {"delivered": True, "phone_number": msisdn, "job_id": data.get("data", {}).get("job_id")}
+        return {
+            "delivered": False,
+            "phone_number": msisdn,
+            "error": data.get("message") or f"HTTP {response.status_code}",
+        }
+    except requests.Timeout:
+        logger.warning("[Briq] send_sms timed out for %s", msisdn)
+        return {"delivered": False, "error": "SMS request timed out."}
+    except requests.RequestException as exc:
+        logger.exception("[Briq] send_sms failed")
+        return {"delivered": False, "error": str(exc)}
+
+
 def verify_otp(phone_number: str, code: str) -> dict[str, Any]:
     """Verify a farmer-submitted code with Briq. Returns verified + error details."""
     api_key = getattr(settings, "BRIQ_API_KEY", "")

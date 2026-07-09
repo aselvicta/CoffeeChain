@@ -9,10 +9,14 @@ import { WarehouseModal } from './warehouse-modal';
 import { StockInModal } from './stock-in-modal';
 import { createTransfer, createWarehouse, deleteWarehouse, fetchBatches, fetchBranches, fetchIssues, fetchTransfers, fetchWarehouseCatalog, fetchWarehouses, resolveIssue } from '../api/client';
 import { QuickActionCard, PanelPrimaryButton, PanelOutlineButton } from './ui/dashboard-ui';
+import { ConfirmDialog } from './ui/confirm-dialog';
 import { buildDashboardPath, resolveDashboardTab } from '../utils/dashboard-routing';
+import { REGION_LIST, TANZANIA_REGIONS } from '../data/tanzania-locations';
 import { buildMonthlyTrend } from '../utils/chart-trends';
 import { getUserMessage } from '../utils/user-messages';
 import { sortByDateDesc, HISTORY_PAGE_SIZE } from '../utils/list-limits';
+import { exportAnalyticsPdf, exportAnalyticsCsv } from '../utils/analytics-export';
+import { AnalyticsExportBar, filterByDateRange } from './ui/analytics-export-bar';
 import { toast } from 'sonner';
 import { usePaginatedList } from '../hooks/use-paginated-list';
 import { PaginationBar } from './ui/pagination-bar';
@@ -82,8 +86,9 @@ export function SupplierDashboard({ userProfile, onLogout }) {
   const [showWarehouseForm, setShowWarehouseForm] = useState(false);
   const [warehouseFormError, setWarehouseFormError] = useState('');
   const [selectedWarehouse, setSelectedWarehouse] = useState(null);
-  const [newWarehouse, setNewWarehouse] = useState({ name: '', section: '', capacity: '' });
+  const [newWarehouse, setNewWarehouse] = useState({ name: '', section: '', capacity: '', contact_name: '', contact_phone: '+255 ', address: '', region: '', district: '' });
   const [statusMessage, setStatusMessage] = useState('');
+  const [confirmDialog, setConfirmDialog] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const [readNotificationIds, setReadNotificationIds] = useState([]);
   const [dismissedNotificationIds, setDismissedNotificationIds] = useState([]);
@@ -398,7 +403,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
   const closeWarehouseForm = () => {
     setShowWarehouseForm(false);
     setWarehouseFormError('');
-    setNewWarehouse({ name: '', section: '', capacity: '' });
+    setNewWarehouse({ name: '', section: '', capacity: '', contact_name: '', contact_phone: '+255 ', address: '', region: '', district: '' });
   };
 
   const handleRegisterWarehouse = async (event) => {
@@ -415,6 +420,11 @@ export function SupplierDashboard({ userProfile, onLogout }) {
         section: newWarehouse.section.trim(),
         capacity_bags: Number(newWarehouse.capacity),
         current_bags: 0,
+        contact_name: newWarehouse.contact_name.trim(),
+        contact_phone: newWarehouse.contact_phone.trim(),
+        address: newWarehouse.address.trim(),
+        region: newWarehouse.region,
+        district: newWarehouse.district,
       });
       closeWarehouseForm();
       await refreshData();
@@ -547,6 +557,15 @@ export function SupplierDashboard({ userProfile, onLogout }) {
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
+      <ConfirmDialog
+        open={!!confirmDialog}
+        title={confirmDialog?.title}
+        message={confirmDialog?.message}
+        confirmLabel={confirmDialog?.confirmLabel}
+        danger={confirmDialog?.danger ?? true}
+        onConfirm={confirmDialog?.onConfirm}
+        onCancel={() => setConfirmDialog(null)}
+      />
       {/* Sidebar */}
       <div className="w-72 bg-gradient-to-b from-green-700 to-green-900 text-white flex flex-col">
         <div className="p-4 border-b border-green-600">
@@ -1126,12 +1145,17 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                               </PanelOutlineButton>
                               <button
                                 type="button"
-                                onClick={() => {
-                                  if (!confirm(`Delete warehouse ${w.name}? This cannot be undone.`)) return;
-                                  deleteWarehouse(w.id)
-                                    .then(() => refreshData())
-                                    .catch((error) => setStatusMessage(getUserMessage(error)));
-                                }}
+                                onClick={() => setConfirmDialog({
+                                  title: 'Delete Warehouse',
+                                  message: `Delete "${w.name}"? This cannot be undone.`,
+                                  confirmLabel: 'Yes, Delete',
+                                  onConfirm: () => {
+                                    setConfirmDialog(null);
+                                    deleteWarehouse(w.id)
+                                      .then(() => refreshData())
+                                      .catch((error) => setStatusMessage(getUserMessage(error)));
+                                  },
+                                })}
                                 className="inline-flex items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-4 py-2.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50"
                               >
                                 <Trash2 className="h-4 w-4" />
@@ -1331,8 +1355,46 @@ export function SupplierDashboard({ userProfile, onLogout }) {
 
           {activeTab === 'analytics' && (
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-4">
-              <h2 className="text-xl font-bold text-gray-900">Supplier Analytics</h2>
-              <p className="text-gray-600">Monitor dispatch volume, delivery performance, and low-stock alerts.</p>
+              <AnalyticsExportBar
+                title="Supplier Analytics"
+                subtitle="Monitor dispatch volume, delivery performance, and low-stock alerts."
+                onExcel={(from, to) => {
+                  const filtered = filterByDateRange(dispatches, from, to);
+                  exportAnalyticsCsv({
+                    role: 'Supplier',
+                    orgName: userProfile?.organization || userProfile?.name || '',
+                    filename: 'supplier_analytics',
+                    summaryRows: [
+                      { label: 'Total Dispatches', value: filtered.length },
+                      { label: 'Delivered', value: filtered.filter((d) => d.rawStatus === 'RECEIVED' || d.rawStatus === 'VERIFIED').length },
+                      { label: 'Delivery Rate', value: `${filtered.length ? Math.round((filtered.filter((d) => d.rawStatus === 'RECEIVED' || d.rawStatus === 'VERIFIED').length / filtered.length) * 100) : 0}%` },
+                      { label: 'Active Batches', value: batches.length },
+                      { label: 'Low Stock Batches', value: inventory.filter((i) => i.available <= i.threshold).length },
+                    ],
+                    tableHeaders: ['Date', 'Destination', 'Product', 'Bags', 'Warehouse', 'Status'],
+                    tableData: filtered.map((d) => [d.date, d.destination || '—', d.product || '—', d.bags ?? '—', d.warehouse || '—', d.status || '—']),
+                  });
+                }}
+                onPdf={(from, to) => {
+                  const filtered = filterByDateRange(dispatches, from, to);
+                  exportAnalyticsPdf({
+                    role: 'Supplier',
+                    orgName: userProfile?.organization || userProfile?.name || '',
+                    title: 'Supplier Analytics Report',
+                    subtitle: from || to ? `Period: ${from || '…'} to ${to || 'today'}` : 'Dispatch volume, delivery performance & stock overview',
+                    summaryRows: [
+                      { label: 'Total Dispatches', value: filtered.length },
+                      { label: 'Delivered', value: filtered.filter((d) => d.rawStatus === 'RECEIVED' || d.rawStatus === 'VERIFIED').length },
+                      { label: 'Delivery Rate', value: `${filtered.length ? Math.round((filtered.filter((d) => d.rawStatus === 'RECEIVED' || d.rawStatus === 'VERIFIED').length / filtered.length) * 100) : 0}%` },
+                      { label: 'Active Batches', value: batches.length },
+                      { label: 'Low Stock Batches', value: inventory.filter((i) => i.available <= i.threshold).length },
+                      { label: 'Active Warehouses', value: warehouses.length },
+                    ],
+                    tableHeaders: ['Date', 'Destination', 'Product', 'Bags', 'Warehouse', 'Status'],
+                    tableData: filtered.map((d) => [d.date, d.destination || '—', d.product || '—', d.bags ?? '—', d.warehouse || '—', d.status || '—']),
+                  });
+                }}
+              />
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="border border-gray-200 rounded-lg p-4">
                   <p className="text-sm text-gray-600">Dispatches (30 days)</p>
@@ -1405,49 +1467,110 @@ export function SupplierDashboard({ userProfile, onLogout }) {
               </button>
             </div>
             <form onSubmit={handleRegisterWarehouse} className="space-y-3">
-              <div>
-                <label htmlFor="warehouse-name" className="mb-1 block text-sm font-medium text-gray-700">
-                  Warehouse name
-                </label>
-                <input
-                  id="warehouse-name"
-                  type="text"
-                  placeholder="e.g. Main Warehouse"
-                  value={newWarehouse.name}
-                  onChange={(e) => setNewWarehouse({ ...newWarehouse, name: e.target.value })}
-                  disabled={isSaving}
-                  className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:border-transparent focus:ring-2 focus:ring-green-500 disabled:bg-gray-100"
-                />
+              {/* Core */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2">
+                  <label className="mb-1 block text-xs font-semibold text-gray-600">Warehouse name <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Main Warehouse"
+                    value={newWarehouse.name}
+                    onChange={(e) => setNewWarehouse({ ...newWarehouse, name: e.target.value })}
+                    disabled={isSaving}
+                    required
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-transparent focus:ring-2 focus:ring-green-500 disabled:bg-gray-100"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-gray-600">Section <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    placeholder="e.g. A1"
+                    value={newWarehouse.section}
+                    onChange={(e) => setNewWarehouse({ ...newWarehouse, section: e.target.value })}
+                    disabled={isSaving}
+                    required
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-transparent focus:ring-2 focus:ring-green-500 disabled:bg-gray-100"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-gray-600">Capacity (bags) <span className="text-red-500">*</span></label>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="e.g. 5000"
+                    value={newWarehouse.capacity}
+                    onChange={(e) => setNewWarehouse({ ...newWarehouse, capacity: e.target.value })}
+                    disabled={isSaving}
+                    required
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-transparent focus:ring-2 focus:ring-green-500 disabled:bg-gray-100"
+                  />
+                </div>
               </div>
-              <div>
-                <label htmlFor="warehouse-section" className="mb-1 block text-sm font-medium text-gray-700">
-                  Section
-                </label>
-                <input
-                  id="warehouse-section"
-                  type="text"
-                  placeholder="e.g. A1"
-                  value={newWarehouse.section}
-                  onChange={(e) => setNewWarehouse({ ...newWarehouse, section: e.target.value })}
-                  disabled={isSaving}
-                  className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:border-transparent focus:ring-2 focus:ring-green-500 disabled:bg-gray-100"
-                />
+
+              {/* Contact */}
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-wide pt-1">Contact Information</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-gray-600">Contact name <span className="text-gray-400 font-normal">(optional)</span></label>
+                  <input
+                    type="text"
+                    placeholder="Manager name"
+                    value={newWarehouse.contact_name}
+                    onChange={(e) => setNewWarehouse({ ...newWarehouse, contact_name: e.target.value })}
+                    disabled={isSaving}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-transparent focus:ring-2 focus:ring-green-500 disabled:bg-gray-100"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-gray-600">Contact phone <span className="text-gray-400 font-normal">(optional)</span></label>
+                  <input
+                    type="tel"
+                    placeholder="+255 7XX XXX XXX"
+                    value={newWarehouse.contact_phone}
+                    onChange={(e) => { if (e.target.value.startsWith('+255')) setNewWarehouse({ ...newWarehouse, contact_phone: e.target.value }); }}
+                    onFocus={(e) => { if (!newWarehouse.contact_phone) setNewWarehouse({ ...newWarehouse, contact_phone: '+255 ' }); e.target.setSelectionRange(e.target.value.length, e.target.value.length); }}
+                    disabled={isSaving}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-transparent focus:ring-2 focus:ring-green-500 disabled:bg-gray-100"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-gray-600">Region <span className="text-gray-400 font-normal">(optional)</span></label>
+                  <select
+                    value={newWarehouse.region}
+                    onChange={(e) => setNewWarehouse({ ...newWarehouse, region: e.target.value, district: '' })}
+                    disabled={isSaving}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-transparent focus:ring-2 focus:ring-green-500 disabled:bg-gray-100 bg-white"
+                  >
+                    <option value="">Select region…</option>
+                    {REGION_LIST.map((r) => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-gray-600">District <span className="text-gray-400 font-normal">(optional)</span></label>
+                  <select
+                    value={newWarehouse.district}
+                    onChange={(e) => setNewWarehouse({ ...newWarehouse, district: e.target.value })}
+                    disabled={isSaving || !newWarehouse.region}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-transparent focus:ring-2 focus:ring-green-500 disabled:bg-gray-100 bg-white"
+                  >
+                    <option value="">{newWarehouse.region ? 'Select district…' : 'Select region first'}</option>
+                    {(TANZANIA_REGIONS[newWarehouse.region] || []).map((d) => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-gray-600">Address <span className="text-gray-400 font-normal">(optional)</span></label>
+                  <input
+                    type="text"
+                    placeholder="Street / area"
+                    value={newWarehouse.address}
+                    onChange={(e) => setNewWarehouse({ ...newWarehouse, address: e.target.value })}
+                    disabled={isSaving}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-transparent focus:ring-2 focus:ring-green-500 disabled:bg-gray-100"
+                  />
+                </div>
               </div>
-              <div>
-                <label htmlFor="warehouse-capacity" className="mb-1 block text-sm font-medium text-gray-700">
-                  Capacity (bags)
-                </label>
-                <input
-                  id="warehouse-capacity"
-                  type="number"
-                  min="1"
-                  placeholder="e.g. 5000"
-                  value={newWarehouse.capacity}
-                  onChange={(e) => setNewWarehouse({ ...newWarehouse, capacity: e.target.value })}
-                  disabled={isSaving}
-                  className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:border-transparent focus:ring-2 focus:ring-green-500 disabled:bg-gray-100"
-                />
-              </div>
+
               {warehouseFormError && (
                 <p className="text-sm text-red-600">{warehouseFormError}</p>
               )}

@@ -172,6 +172,13 @@ export function fetchProfile() {
   return apiFetch('/api/me/');
 }
 
+export function updateMyProfile(payload) {
+  return apiFetch('/api/me/', {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
 export function fetchSuppliers() {
   return apiFetch('/api/suppliers/');
 }
@@ -471,4 +478,125 @@ export function markAllNotificationsRead() {
 
 export function deleteNotification(id) {
   return apiFetch(`/api/notifications/${id}/`, { method: 'DELETE' });
+}
+
+export function deleteUser(userId) {
+  return apiFetch(`/api/users/${userId}/`, { method: 'DELETE' });
+}
+
+export function toggleUserActive(userId, isActive) {
+  return apiFetch(`/api/users/${userId}/`, {
+    method: 'PATCH',
+    body: JSON.stringify({ is_active: isActive }),
+  });
+}
+
+export function registerPublic(payload) {
+  return fetch(`${API_BASE}/api/auth/register/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }).then(async (res) => {
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.detail || 'Registration failed.');
+    return data;
+  });
+}
+
+export function fetchPendingRegistrations(statusFilter = 'PENDING') {
+  const params = statusFilter && statusFilter !== 'all' ? `?status=${statusFilter}` : '?status=all';
+  return apiFetch(`/api/registrations/${params}`);
+}
+
+export function approvePendingRegistration(id) {
+  return apiFetch(`/api/registrations/${id}/approve/`, { method: 'POST' });
+}
+
+export function rejectPendingRegistration(id, reason = '') {
+  return apiFetch(`/api/registrations/${id}/reject/`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export function fetchReports(params = {}) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && v !== '') query.set(k, String(v));
+  });
+  return apiFetch(`/api/reports/?${query.toString()}`);
+}
+
+export function exportReportCsv(params = {}) {
+  const query = new URLSearchParams({ ...params, export: 'csv' });
+  const token = getAccessToken();
+  const url = `${API_BASE}/api/reports/?${query.toString()}`;
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `coffeechain-report.csv`;
+  // Fetch with auth then trigger download
+  return fetch(url, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  }).then(async (res) => {
+    if (!res.ok) throw new Error('Export failed');
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = `coffeechain-report-${params.type || 'transfers'}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(blobUrl);
+  });
+}
+
+export async function uploadUserImage(userId, role, file) {
+  const token = getAccessToken();
+  const formData = new FormData();
+  const field = role === 'supplier' ? 'store_image' : 'shop_image';
+  formData.append(field, file);
+
+  const endpoint = role === 'supplier'
+    ? `/api/suppliers/`
+    : `/api/branches/`;
+
+  // We need the entity id — caller should pass entityId instead, but this is a helper
+  // that patches the branch/supplier linked to the user
+  const res = await fetch(`${API_BASE}${endpoint}`, {
+    method: 'GET',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  return null;
+}
+
+export async function uploadEntityImage(entityType, entityId, file, retryOnUnauthorized = true) {
+  const token = getAccessToken();
+  const formData = new FormData();
+  const fieldName = entityType === 'supplier' ? 'store_image' : 'shop_image';
+  formData.append(fieldName, file);
+  const url = entityType === 'supplier'
+    ? `${API_BASE}/api/suppliers/${entityId}/`
+    : `${API_BASE}/api/branches/${entityId}/`;
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
+  });
+  if (res.status === 401 && retryOnUnauthorized) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) return uploadEntityImage(entityType, entityId, file, false);
+    clearSession();
+    notifySessionExpired();
+    throw new AuthError('Session expired.', 401);
+  }
+  if (!res.ok) throw new Error('Image upload failed.');
+  return res.json();
+}
+
+export function assignWarehouseManager(warehouseId, managerId) {
+  return apiFetch(`/api/warehouses/${warehouseId}/`, {
+    method: 'PATCH',
+    body: JSON.stringify({ assigned_manager_id: managerId }),
+  });
 }

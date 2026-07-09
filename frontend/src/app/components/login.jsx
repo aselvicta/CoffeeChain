@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router';
 import { Lock, User } from 'lucide-react';
 import { useLanguage } from './language-context';
 import { Logo } from './logo';
@@ -120,6 +121,16 @@ export function Login({ onLogin }) {
               >
                 {language === 'en' ? 'Login to CoffeeChain' : 'Ingia CoffeeChain'}
               </button>
+
+              <p className="text-center text-sm text-gray-500">
+                {language === 'en' ? "Don't have an account?" : 'Huna akaunti?'}{' '}
+                <Link
+                  to="/signup"
+                  className="text-green-700 font-semibold hover:underline"
+                >
+                  {language === 'en' ? 'Register here' : 'Jisajili hapa'}
+                </Link>
+              </p>
             </form>
           </div>
         </div>

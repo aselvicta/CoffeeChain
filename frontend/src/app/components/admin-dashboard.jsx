@@ -1,13 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { 
-  TrendingUp, Users, Package, ShoppingCart, 
-  BarChart3, LogOut, ChevronRight, AlertCircle,
-  CheckCircle, Clock, Plus, Pencil, Shield
+import {
+  AlertCircle, BarChart3, Building2, CheckCircle, ChevronRight, Clock,
+  Eye, Lock, LogOut, Package, Pencil, Plus, Search, Shield, ShoppingCart,
+  Trash2, TrendingUp, User, Users, UserX, UserCheck, Warehouse, X, AlertTriangle,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Logo } from './logo';
-import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { createUser, fetchAuditReport, fetchBatches, fetchBranches, fetchSuppliers, fetchTransfers, fetchUser, fetchUsers, updateUser } from '../api/client';
+import {
+  BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+} from 'recharts';
+import { createUser, fetchAuditReport, fetchBatches, fetchBranches, fetchSuppliers,
+  fetchTransfers, fetchUser, fetchUsers, updateUser, deleteUser, toggleUserActive,
+  fetchPendingRegistrations, approvePendingRegistration, rejectPendingRegistration,
+  fetchWarehouses, updateMyProfile, fetchProfile,
+} from '../api/client';
 import { NotificationBell } from './notification-bell';
 import { useNotifications } from '../hooks/use-notifications';
 import { REGION_LIST, TANZANIA_REGIONS } from '../data/tanzania-locations';
@@ -16,203 +24,1152 @@ import { getUserMessage } from '../utils/user-messages';
 import { HISTORY_PAGE_SIZE } from '../utils/list-limits';
 import { usePaginatedList } from '../hooks/use-paginated-list';
 import { PaginationBar } from './ui/pagination-bar';
+import { ConfirmDialog } from './ui/confirm-dialog';
 import { IntegrityPanel } from './integrity-panel';
+import { getRoleLabel, getRoleColor } from '../utils/role-labels';
+import { ReportsPanel } from './reports-panel';
 
 const ANALYTICS_COLORS = ['#16a34a', '#84cc16', '#0f766e', '#22c55e', '#65a30d', '#15803d'];
 
 function buildMonthlyAnalytics(records) {
   const buckets = new Map();
   const today = new Date();
-
-  for (let offset = 5; offset >= 0; offset -= 1) {
+  for (let offset = 5; offset >= 0; offset--) {
     const date = new Date(today.getFullYear(), today.getMonth() - offset, 1);
     const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-    buckets.set(key, {
-      month: date.toLocaleString('en-US', { month: 'short' }),
-      fertilizer: 0,
-      records: 0,
-    });
+    buckets.set(key, { month: date.toLocaleString('en-US', { month: 'short' }), fertilizer: 0, records: 0 });
   }
-
   records.forEach((record) => {
     const createdAt = record?.created_at;
     if (!createdAt) return;
-
     const createdDate = new Date(createdAt);
-    if (Number.isNaN(createdDate.getTime())) return;
-
+    if (isNaN(createdDate.getTime())) return;
     const key = `${createdDate.getFullYear()}-${String(createdDate.getMonth() + 1).padStart(2, '0')}`;
     const bucket = buckets.get(key);
     if (!bucket) return;
-
     bucket.fertilizer += Number(record.quantity_bags) || 0;
     bucket.records += 1;
   });
-
   return Array.from(buckets.values());
 }
 
 function buildFertilizerDistribution(records) {
   const grouped = records.reduce((acc, record) => {
     const name = record?.batch?.fertilizer_type || record?.fertilizer_type || 'Unknown';
-    const value = Number(record?.quantity_bags) || 0;
-    acc[name] = (acc[name] || 0) + value;
+    acc[name] = (acc[name] || 0) + (Number(record?.quantity_bags) || 0);
     return acc;
   }, {});
-
   return Object.entries(grouped)
-    .sort(([, valueA], [, valueB]) => valueB - valueA)
-    .map(([name, value], index) => ({
-      name,
-      value,
-      color: ANALYTICS_COLORS[index % ANALYTICS_COLORS.length],
-    }));
-}
-
-function shortenChartLabel(name, maxLength = 18) {
-  if (!name) return 'Unknown';
-  return name.length > maxLength ? `${name.slice(0, maxLength - 1)}…` : name;
+    .sort(([, a], [, b]) => b - a)
+    .map(([name, value], index) => ({ name, value, color: ANALYTICS_COLORS[index % ANALYTICS_COLORS.length] }));
 }
 
 function buildTopBranchPerformance(transfers, branchType, limit = 5) {
   const scores = new Map();
-
-  transfers.forEach((transfer) => {
-    if (transfer.transfer_type !== 'BRANCH_TO_FARMER') return;
-    const branch = transfer.from_branch;
+  transfers.forEach((t) => {
+    if (t.transfer_type !== 'BRANCH_TO_FARMER') return;
+    const branch = t.from_branch;
     if (!branch || branch.branch_type !== branchType) return;
-
-    const branchId = branch.id;
-    const current = scores.get(branchId) || {
-      name: branch.name || 'Unknown',
-      bags: 0,
-      verified: 0,
-      distributions: 0,
-    };
-    const quantity = Number(transfer.quantity_bags) || 0;
-    current.bags += quantity;
-    current.distributions += 1;
-    if (transfer.status === 'VERIFIED') current.verified += quantity;
-    scores.set(branchId, current);
+    const cur = scores.get(branch.id) || { name: branch.name || 'Unknown', bags: 0, verified: 0, distributions: 0 };
+    cur.bags += Number(t.quantity_bags) || 0;
+    cur.distributions += 1;
+    if (t.status === 'VERIFIED') cur.verified += Number(t.quantity_bags) || 0;
+    scores.set(branch.id, cur);
   });
-
   return Array.from(scores.values())
-    .sort((a, b) => b.bags - a.bags || b.verified - a.verified)
+    .sort((a, b) => b.bags - a.bags)
     .slice(0, limit)
-    .map((entry) => ({
-      ...entry,
-      label: shortenChartLabel(entry.name),
-    }));
+    .map((e) => ({ ...e, label: e.name.length > 18 ? e.name.slice(0, 17) + '…' : e.name }));
 }
-
-const EMPTY_USER_FORM = {
-  username: '',
-  password: '',
-  role: 'supplier',
-  first_name: '',
-  last_name: '',
-  email: '',
-  supplier_name: '',
-  supplier_region: '',
-  supplier_id: '',
-  contact_phone: '',
-  branch_name: '',
-  branch_type: 'RETAILER',
-  district: '',
-  region: '',
-};
-
-const ROLE_BRANCH_TYPE = {
-  retailer: 'RETAILER',
-  cooperative: 'COOPERATIVE',
-  regulator: 'REGULATOR',
-};
 
 function resolveRegionName(region, district) {
   if (region?.trim()) return region.trim();
   if (!district?.trim()) return 'Unassigned';
-  const normalizedDistrict = district.trim().toLowerCase();
-  for (const [regionName, districts] of Object.entries(TANZANIA_REGIONS)) {
-    if (
-      districts.some((entry) => {
-        const normalizedEntry = entry.toLowerCase();
-        return (
-          normalizedEntry === normalizedDistrict ||
-          normalizedEntry.startsWith(`${normalizedDistrict} `) ||
-          normalizedDistrict.startsWith(`${normalizedEntry.split(' ')[0]} `) ||
-          normalizedEntry.split(' ')[0] === normalizedDistrict
-        );
-      })
-    ) {
-      return regionName;
-    }
+  const nd = district.trim().toLowerCase();
+  for (const [r, districts] of Object.entries(TANZANIA_REGIONS)) {
+    if (districts.some((d) => d.toLowerCase().startsWith(nd) || nd.startsWith(d.toLowerCase().split(' ')[0])))
+      return r;
   }
   return 'Unassigned';
 }
 
-function userFormFromRecord(record) {
-  const user = record?.user || {};
-  const role = record?.role || 'supplier';
-  const supplier = record?.supplier || null;
-  const branch = record?.branch || null;
-  const warehouseManager = record?.warehouse_manager || null;
+// ─── Role-specific form configs ─────────────────────────────────────────────
 
-  return {
-    username: user.username || '',
-    password: '',
-    role,
-    first_name: user.first_name || '',
-    last_name: user.last_name || '',
-    email: user.email || '',
-    supplier_name: supplier?.name || '',
-    supplier_region: supplier?.region || '',
-    supplier_id: warehouseManager?.supplier?.id ? String(warehouseManager.supplier.id) : '',
-    contact_phone: supplier?.contact_phone || '',
-    branch_name: branch?.name || '',
-    branch_type: branch?.branch_type || ROLE_BRANCH_TYPE[role] || 'RETAILER',
-    district: branch?.district || '',
-    region: branch?.region || supplier?.region || '',
-  };
+const ROLE_TABS = [
+  { key: 'supplier', label: 'Suppliers', icon: Building2, color: 'text-blue-600' },
+  { key: 'retailer', label: 'Retailers', icon: ShoppingCart, color: 'text-emerald-600' },
+  { key: 'cooperative', label: 'Cooperatives', icon: Users, color: 'text-teal-600' },
+  { key: 'warehouse_manager', label: 'Warehouse Managers', icon: Warehouse, color: 'text-amber-600' },
+  { key: 'regulator', label: 'Regulators', icon: Shield, color: 'text-rose-600' },
+];
+
+const PHONE_PREFIX = '+255 ';
+
+function emptyFormForRole(role) {
+  const base = { username: '', password: '', first_name: '', last_name: '', email: '' };
+  if (role === 'supplier') return { ...base, supplier_name: '', supplier_region: '', contact_phone: PHONE_PREFIX };
+  if (role === 'warehouse_manager') return { ...base, supplier_id: '', warehouse_id: '' };
+  if (role === 'retailer') return { ...base, branch_name: '', branch_type: 'RETAILER', district: '', region: '', contact_phone: PHONE_PREFIX };
+  if (role === 'cooperative') return { ...base, branch_name: '', branch_type: 'COOPERATIVE', district: '', region: '', contact_phone: PHONE_PREFIX };
+  if (role === 'regulator') return { ...base, branch_name: '', branch_type: 'REGULATOR', district: '', region: '', contact_phone: PHONE_PREFIX };
+  return base;
 }
+
+function FieldLabel({ children, required }) {
+  return (
+    <label className="block text-xs font-semibold text-gray-600 mb-1">
+      {children}
+      {required ? <span className="text-red-500 ml-0.5">*</span> : <span className="text-gray-400 text-[10px] ml-1">(optional)</span>}
+    </label>
+  );
+}
+
+function FormInput({ label, required, className = '', ...props }) {
+  return (
+    <div>
+      {label && <FieldLabel required={required}>{label}</FieldLabel>}
+      <input
+        className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent border-gray-300 ${className}`}
+        {...props}
+      />
+    </div>
+  );
+}
+
+function FormSelect({ label, required, children, className = '', ...props }) {
+  return (
+    <div>
+      {label && <FieldLabel required={required}>{label}</FieldLabel>}
+      <select
+        className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent border-gray-300 bg-white ${className}`}
+        {...props}
+      >
+        {children}
+      </select>
+    </div>
+  );
+}
+
+// ─── User Form Modal ─────────────────────────────────────────────────────────
+
+function UserFormModal({ role, editingUser, suppliers, warehouses, onClose, onSaved }) {
+  const isEditing = !!editingUser;
+  const [form, setForm] = useState(() => {
+    if (isEditing) {
+      const u = editingUser.user || {};
+      const s = editingUser.supplier;
+      const b = editingUser.branch;
+      const wm = editingUser.warehouse_manager;
+      return {
+        username: u.username || '',
+        password: '',
+        first_name: u.first_name || '',
+        last_name: u.last_name || '',
+        email: u.email || '',
+        supplier_name: s?.name || '',
+        supplier_region: s?.region || '',
+        contact_phone: (() => { const p = s?.contact_phone || b?.contact_phone || ''; return p && !p.startsWith('+255') ? PHONE_PREFIX + p.replace(/^0/, '') : (p || PHONE_PREFIX); })(),
+        supplier_id: wm?.supplier?.id ? String(wm.supplier.id) : '',
+        warehouse_id: wm?.assigned_warehouse_id ? String(wm.assigned_warehouse_id) : '',
+        branch_name: b?.name || '',
+        branch_type: b?.branch_type || (role === 'retailer' ? 'RETAILER' : role === 'cooperative' ? 'COOPERATIVE' : 'REGULATOR'),
+        district: b?.district || '',
+        region: b?.region || s?.region || '',
+      };
+    }
+    return emptyFormForRole(role);
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const set = (field) => (e) => setForm((p) => ({ ...p, [field]: e.target.value }));
+
+  const commonRequired = form.first_name.trim() && form.last_name.trim() && form.email.trim();
+
+  const roleFieldsOk = (() => {
+    if (role === 'supplier') {
+      return form.supplier_name.trim() && form.contact_phone.trim() && form.supplier_region;
+    }
+    if (role === 'retailer' || role === 'cooperative' || role === 'regulator') {
+      return form.branch_name.trim() && form.contact_phone.trim() && form.region && form.district;
+    }
+    if (role === 'warehouse_manager') {
+      return !!form.supplier_id;
+    }
+    return true;
+  })();
+
+  const canSubmit = isEditing
+    ? !!(commonRequired && roleFieldsOk)
+    : !!(form.username.trim().length >= 3 && form.password.length >= 1 && commonRequired && roleFieldsOk);
+
+  const handleSubmit = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      if (isEditing) {
+        const payload = { ...form };
+        delete payload.username;
+        if (!payload.password) delete payload.password;
+        if (payload.supplier_id) payload.supplier_id = Number(payload.supplier_id);
+        if (payload.warehouse_id !== undefined) payload.warehouse_id = payload.warehouse_id ? Number(payload.warehouse_id) : null;
+        const updated = await updateUser(editingUser.user.id, payload);
+        onSaved(updated, true);
+        toast.success(`User "${form.username}" updated successfully.`);
+      } else {
+        const payload = { ...form, role };
+        if (payload.supplier_id) payload.supplier_id = Number(payload.supplier_id);
+        if (!payload.warehouse_id) delete payload.warehouse_id;
+        const created = await createUser(payload);
+        onSaved(created, false);
+        toast.success(`User "${form.username}" created successfully.`);
+      }
+      onClose();
+    } catch (err) {
+      setError(getUserMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const districtOptions = form.region ? (TANZANIA_REGIONS[form.region] || []) : [];
+  const roleLabel = getRoleLabel(role);
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-white rounded-t-2xl">
+          <h2 className="text-lg font-bold text-gray-900">
+            {isEditing ? `Edit ${roleLabel}` : `Add ${roleLabel}`}
+          </h2>
+          <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-600 rounded"><X className="h-5 w-5" /></button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {/* Login Credentials */}
+          <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+            <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Login Credentials</p>
+            <FormInput label="Username" required value={form.username} onChange={set('username')} placeholder="username" disabled={isEditing} />
+            <FormInput
+              label={isEditing ? 'New password' : 'Password'}
+              required={!isEditing}
+              type="password"
+              value={form.password}
+              onChange={set('password')}
+              placeholder={isEditing ? 'Leave blank to keep current' : 'Set password'}
+            />
+          </div>
+
+          {/* Personal */}
+          <div className="space-y-3">
+            <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Personal Info</p>
+            <div className="grid grid-cols-2 gap-3">
+              <FormInput label="First name" required value={form.first_name} onChange={set('first_name')} placeholder="First" />
+              <FormInput label="Last name" required value={form.last_name} onChange={set('last_name')} placeholder="Last" />
+            </div>
+            <FormInput label="Email" required type="email" value={form.email} onChange={set('email')} placeholder="email@example.com" />
+          </div>
+
+          {/* Role-specific */}
+          {(role === 'supplier') && (
+            <div className="space-y-3">
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Supplier Details</p>
+              <FormInput label="Company name" required value={form.supplier_name} onChange={set('supplier_name')} placeholder="Organisation name" />
+              <FormInput label="Contact phone" required value={form.contact_phone} onChange={(e) => { if (e.target.value.startsWith('+255')) set('contact_phone')(e); }} placeholder="+255 7XX XXX XXX" />
+              <FormSelect label="Region" required value={form.supplier_region} onChange={set('supplier_region')}>
+                <option value="">Select region…</option>
+                {REGION_LIST.map((r) => <option key={r} value={r}>{r}</option>)}
+              </FormSelect>
+            </div>
+          )}
+
+          {(role === 'retailer' || role === 'cooperative' || role === 'regulator') && (
+            <div className="space-y-3">
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">{roleLabel} Details</p>
+              <FormInput
+                label={role === 'regulator' ? 'Authority name' : 'Branch / Shop name'}
+                required
+                value={form.branch_name}
+                onChange={set('branch_name')}
+                placeholder={role === 'cooperative' ? 'e.g. Mbinga Central AMCOS' : 'e.g. Ruvuma Agri Shop'}
+              />
+              <FormInput label="Contact phone" required value={form.contact_phone} onChange={(e) => { if (e.target.value.startsWith('+255')) set('contact_phone')(e); }} placeholder="+255 7XX XXX XXX" />
+              <div className="grid grid-cols-2 gap-3">
+                <FormSelect label="Region" required value={form.region} onChange={(e) => setForm((p) => ({ ...p, region: e.target.value, district: '' }))}>
+                  <option value="">Select region…</option>
+                  {REGION_LIST.map((r) => <option key={r} value={r}>{r}</option>)}
+                </FormSelect>
+                <FormSelect label="District" required value={form.district} onChange={set('district')} disabled={!form.region}>
+                  <option value="">Select district…</option>
+                  {districtOptions.map((d) => <option key={d} value={d}>{d}</option>)}
+                </FormSelect>
+              </div>
+            </div>
+          )}
+
+          {role === 'warehouse_manager' && (
+            <div className="space-y-3">
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Assignment</p>
+              <FormSelect label="Supplier" required value={form.supplier_id} onChange={set('supplier_id')}>
+                <option value="">Select supplier…</option>
+                {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </FormSelect>
+              <FormSelect label="Assign to warehouse" value={form.warehouse_id} onChange={set('warehouse_id')}>
+                <option value="">Select warehouse…</option>
+                {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name} {w.section ? `(${w.section})` : ''}</option>)}
+              </FormSelect>
+            </div>
+          )}
+
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 flex gap-2">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              {error}
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-2">
+            <button
+              onClick={onClose}
+              className="flex-1 border border-gray-300 text-gray-700 rounded-lg py-2.5 text-sm font-medium hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSubmit}
+              disabled={!canSubmit || loading}
+              className="flex-1 bg-green-700 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-green-800 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {loading ? 'Saving…' : isEditing ? 'Save Changes' : `Create ${roleLabel}`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── User Detail Drawer ──────────────────────────────────────────────────────
+
+function UserDetailModal({ record, onClose, onEdit }) {
+  if (!record) return null;
+  const { user, role, supplier, branch, warehouse_manager } = record;
+  const entity = supplier || branch;
+  const roleColor = getRoleColor(role);
+  const roleLabel = getRoleLabel(role);
+
+  const imageUrl = supplier?.store_image_url || branch?.shop_image_url;
+  const phone = supplier?.contact_phone || branch?.contact_phone;
+  const region = supplier?.region || branch?.region;
+  const district = branch?.district;
+  const lat = supplier?.location_lat || branch?.location_lat;
+  const lng = supplier?.location_lng || branch?.location_lng;
+  const fullName = [user?.first_name, user?.last_name].filter(Boolean).join(' ');
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl shadow-xl w-full max-w-xl max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-start justify-between p-6 border-b border-gray-100">
+          <div className="flex items-center gap-4">
+            {imageUrl ? (
+              <img src={imageUrl} alt="" className="h-14 w-14 rounded-xl object-cover shrink-0" />
+            ) : (
+              <div className="h-14 w-14 rounded-xl bg-green-100 flex items-center justify-center shrink-0">
+                <User className="h-7 w-7 text-green-700" />
+              </div>
+            )}
+            <div>
+              <p className="text-lg font-bold text-gray-900">{fullName || user?.username}</p>
+              <p className="text-sm text-gray-500">@{user?.username}</p>
+              <div className="flex items-center gap-2 mt-1.5">
+                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold ${roleColor}`}>
+                  <Shield className="h-3 w-3" /> {roleLabel}
+                </span>
+                {user?.is_active ? (
+                  <span className="inline-flex items-center gap-1 text-xs text-green-700 font-semibold bg-green-100 px-2 py-0.5 rounded-full">
+                    <CheckCircle className="h-3 w-3" /> Active
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-xs text-red-600 font-semibold bg-red-100 px-2 py-0.5 rounded-full">
+                    <UserX className="h-3 w-3" /> Inactive
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => onEdit(record)}
+              className="flex items-center gap-1.5 text-sm text-green-700 border border-green-200 hover:bg-green-50 rounded-lg px-3 py-1.5 font-medium"
+            >
+              <Pencil className="h-3.5 w-3.5" /> Edit
+            </button>
+            <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="p-6 space-y-5">
+          {/* Account */}
+          <section>
+            <p className="text-xs font-bold text-green-700 uppercase tracking-widest mb-3">Account</p>
+            <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+              <DetailRow label="Username" value={user?.username} />
+              <DetailRow label="Email" value={user?.email || '—'} />
+            </div>
+          </section>
+
+          {/* Organisation */}
+          {entity && (
+            <>
+              <div className="border-t border-gray-100" />
+              <section>
+                <p className="text-xs font-bold text-green-700 uppercase tracking-widest mb-3">Organisation</p>
+                <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                  <DetailRow label="Name" value={entity.name} span />
+                  {phone && <DetailRow label="Phone" value={phone} />}
+                  {region && <DetailRow label="Region" value={region} />}
+                  {district && <DetailRow label="District" value={district} />}
+                  {branch && typeof branch.farmers_count === 'number' && (
+                    <DetailRow label="Registered farmers" value={String(branch.farmers_count)} />
+                  )}
+                </div>
+              </section>
+            </>
+          )}
+
+          {/* Warehouse assignment */}
+          {warehouse_manager && (
+            <>
+              <div className="border-t border-gray-100" />
+              <section>
+                <p className="text-xs font-bold text-green-700 uppercase tracking-widest mb-3">Warehouse Assignment</p>
+                <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                  <DetailRow label="Supplier" value={warehouse_manager.supplier?.name || '—'} />
+                  <DetailRow label="Warehouse" value={warehouse_manager.assigned_warehouse_name || 'Not assigned'} />
+                </div>
+              </section>
+            </>
+          )}
+
+          {/* Location */}
+          {lat && lng && (
+            <>
+              <div className="border-t border-gray-100" />
+              <section>
+                <p className="text-xs font-bold text-green-700 uppercase tracking-widest mb-3">Location</p>
+                <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                  <DetailRow label="Latitude" value={String(lat)} />
+                  <DetailRow label="Longitude" value={String(lng)} />
+                </div>
+                <a
+                  href={`https://maps.google.com?q=${lat},${lng}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-3 text-xs text-blue-600 hover:underline inline-flex items-center gap-1"
+                >
+                  View on Google Maps <ChevronRight className="h-3 w-3" />
+                </a>
+              </section>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DetailRow({ label, value, span }) {
+  return (
+    <div className={span ? 'col-span-2' : ''}>
+      <p className="text-xs font-semibold text-gray-500 mb-0.5">{label}</p>
+      <p className="text-sm font-medium text-gray-900">{value || '—'}</p>
+    </div>
+  );
+}
+
+function Row({ label, value, children }) {
+  return (
+    <div className="flex items-start justify-between gap-2 py-0.5">
+      <span className="text-xs text-gray-500 shrink-0 w-28">{label}</span>
+      <span className="text-sm font-medium text-gray-900 text-right">{children ?? (value || '—')}</span>
+    </div>
+  );
+}
+
+// ─── Per-role user table ─────────────────────────────────────────────────────
+
+function RoleUserTable({ role, users, suppliers, warehouses, onRefresh }) {
+  const [search, setSearch] = useState('');
+  const [showForm, setShowForm] = useState(false);
+  const [editingRecord, setEditingRecord] = useState(null);
+  const [detailRecord, setDetailRecord] = useState(null);
+  const [statusMsg, setStatusMsg] = useState('');
+  const [deleting, setDeleting] = useState(null);
+  const [togglingActive, setTogglingActive] = useState(null);
+  const [confirmDialog, setConfirmDialog] = useState(null); // { title, message, confirmLabel, danger, onConfirm }
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return users.filter((r) => {
+      if (r.role !== role) return false;
+      const name = (r.user?.username || '').toLowerCase();
+      const org = (r.supplier?.name || r.branch?.name || r.warehouse_manager?.supplier?.name || '').toLowerCase();
+      return !q || name.includes(q) || org.includes(q);
+    });
+  }, [users, role, search]);
+
+  const { page, pageItems, totalPages, setPage } = usePaginatedList(filtered, HISTORY_PAGE_SIZE);
+
+  const handleDelete = (record) => {
+    const username = record.user?.username;
+    setConfirmDialog({
+      title: 'Delete User',
+      message: `Are you sure you want to permanently delete "${username}"? This action cannot be undone.`,
+      confirmLabel: 'Yes, Delete',
+      danger: true,
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        setDeleting(record.user?.id);
+        try {
+          await deleteUser(record.user.id);
+          toast.success(`User "${username}" deleted successfully.`);
+          onRefresh();
+        } catch (err) {
+          toast.error(getUserMessage(err, 'Failed to delete user.'));
+        } finally {
+          setDeleting(null);
+        }
+      },
+    });
+  };
+
+  const handleToggleActive = (record) => {
+    const nowActive = record.user?.is_active;
+    const action = nowActive ? 'Deactivate' : 'Activate';
+    const username = record.user?.username;
+    setConfirmDialog({
+      title: `${action} User`,
+      message: `Are you sure you want to ${action.toLowerCase()} "${username}"?`,
+      confirmLabel: `Yes, ${action}`,
+      danger: nowActive,
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        setTogglingActive(record.user?.id);
+        try {
+          await toggleUserActive(record.user.id, !nowActive);
+          toast.success(`User "${username}" ${nowActive ? 'deactivated' : 'activated'} successfully.`);
+          onRefresh();
+        } catch (err) {
+          toast.error(getUserMessage(err, `Failed to ${action.toLowerCase()} user.`));
+        } finally {
+          setTogglingActive(null);
+        }
+      },
+    });
+  };
+
+  const openCreate = () => { setEditingRecord(null); setShowForm(true); };
+  const openEdit = (r) => { setDetailRecord(null); setEditingRecord(r); setShowForm(true); };
+
+  const roleConf = ROLE_TABS.find((t) => t.key === role);
+
+  return (
+    <div>
+      <ConfirmDialog
+        open={!!confirmDialog}
+        title={confirmDialog?.title}
+        message={confirmDialog?.message}
+        confirmLabel={confirmDialog?.confirmLabel}
+        danger={confirmDialog?.danger ?? true}
+        onConfirm={confirmDialog?.onConfirm}
+        onCancel={() => setConfirmDialog(null)}
+      />
+
+      {/* Toolbar */}
+      <div className="flex flex-col sm:flex-row gap-3 mb-5">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={`Search ${roleConf?.label || role}…`}
+            className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+          />
+        </div>
+        <button
+          onClick={openCreate}
+          className="flex items-center gap-2 bg-green-700 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-green-800 shrink-0"
+        >
+          <Plus className="h-4 w-4" />
+          Add {getRoleLabel(role)}
+        </button>
+      </div>
+
+      {/* Table */}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-gray-50 border-b border-gray-200">
+              <th className="text-left py-3 px-4 font-semibold text-gray-700">Username</th>
+              <th className="text-left py-3 px-4 font-semibold text-gray-700">Full Name</th>
+              <th className="text-left py-3 px-4 font-semibold text-gray-700">Organisation</th>
+              <th className="text-left py-3 px-4 font-semibold text-gray-700">Contact</th>
+              <th className="text-left py-3 px-4 font-semibold text-gray-700">Region</th>
+              <th className="text-left py-3 px-4 font-semibold text-gray-700">Status</th>
+              <th className="text-left py-3 px-4 font-semibold text-gray-700">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pageItems.length === 0 && (
+              <tr>
+                <td colSpan={7} className="py-10 text-center text-sm text-gray-400">
+                  No {roleConf?.label || role} found.
+                </td>
+              </tr>
+            )}
+            {pageItems.map((record) => {
+              const u = record.user || {};
+              const org = record.supplier?.name || record.branch?.name || record.warehouse_manager?.supplier?.name || '—';
+              const phone = record.supplier?.contact_phone || record.branch?.contact_phone || '—';
+              const region = record.supplier?.region || record.branch?.region || '—';
+              return (
+                <tr key={u.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                  <td className="py-3 px-4 font-medium text-gray-900">{u.username}</td>
+                  <td className="py-3 px-4 text-gray-700">
+                    {[u.first_name, u.last_name].filter(Boolean).join(' ') || <span className="text-gray-400">—</span>}
+                  </td>
+                  <td className="py-3 px-4 text-gray-700">{org}</td>
+                  <td className="py-3 px-4 text-gray-600">{phone}</td>
+                  <td className="py-3 px-4 text-gray-600">{region}</td>
+                  <td className="py-3 px-4">
+                    {u.is_active ? (
+                      <span className="inline-flex items-center gap-1 text-xs bg-green-100 text-green-700 rounded-full px-2 py-0.5 font-medium">
+                        <CheckCircle className="h-3 w-3" /> Active
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-xs bg-red-100 text-red-700 rounded-full px-2 py-0.5 font-medium">
+                        <UserX className="h-3 w-3" /> Inactive
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-3 px-4">
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => setDetailRecord(record)}
+                        title="View details"
+                        className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded"
+                      >
+                        <Eye className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => openEdit(record)}
+                        title="Edit"
+                        className="p-1.5 text-gray-500 hover:text-green-600 hover:bg-green-50 rounded"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => handleToggleActive(record)}
+                        disabled={togglingActive === u.id}
+                        title={u.is_active ? 'Deactivate' : 'Activate'}
+                        className={`p-1.5 rounded ${u.is_active
+                          ? 'text-gray-500 hover:text-amber-600 hover:bg-amber-50'
+                          : 'text-gray-500 hover:text-green-600 hover:bg-green-50'}`}
+                      >
+                        {u.is_active ? <UserX className="h-4 w-4" /> : <UserCheck className="h-4 w-4" />}
+                      </button>
+                      <button
+                        onClick={() => handleDelete(record)}
+                        disabled={deleting === u.id}
+                        title="Delete"
+                        className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {totalPages > 1 && (
+          <div className="px-4 py-3 border-t border-gray-100">
+            <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage} />
+          </div>
+        )}
+      </div>
+
+      {/* Modals */}
+      {showForm && (
+        <UserFormModal
+          role={editingRecord ? editingRecord.role : role}
+          editingUser={editingRecord}
+          suppliers={suppliers}
+          warehouses={warehouses}
+          onClose={() => { setShowForm(false); setEditingRecord(null); }}
+          onSaved={() => { setShowForm(false); setEditingRecord(null); onRefresh(); }}
+        />
+      )}
+      {detailRecord && (
+        <UserDetailModal
+          record={detailRecord}
+          onClose={() => setDetailRecord(null)}
+          onEdit={(r) => { setDetailRecord(null); openEdit(r); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Pending Registrations Tab ───────────────────────────────────────────────
+
+function PendingRegistrationsPanel() {
+  const [registrations, setRegistrations] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('PENDING');
+  const [statusMsg, setStatusMsg] = useState('');
+  const [actioning, setActioning] = useState(null);
+  const [rejectModalId, setRejectModalId] = useState(null);
+  const [rejectReason, setRejectReason] = useState('');
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const data = await fetchPendingRegistrations(filter);
+      setRegistrations(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setStatusMsg(getUserMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, [filter]);
+
+  const handleApprove = async (id) => {
+    setActioning(id);
+    try {
+      await approvePendingRegistration(id);
+      toast.success('Registration approved — account is now active.');
+      load();
+    } catch (err) {
+      toast.error(getUserMessage(err, 'Failed to approve registration.'));
+    } finally {
+      setActioning(null);
+    }
+  };
+
+  const handleReject = async () => {
+    setActioning(rejectModalId);
+    try {
+      await rejectPendingRegistration(rejectModalId, rejectReason);
+      setRejectModalId(null);
+      setRejectReason('');
+      toast.success('Registration rejected successfully.');
+      load();
+    } catch (err) {
+      toast.error(getUserMessage(err, 'Failed to reject registration.'));
+    } finally {
+      setActioning(null);
+    }
+  };
+
+  const ROLE_BADGE = { supplier: 'bg-blue-100 text-blue-700', retailer: 'bg-emerald-100 text-emerald-700', cooperative: 'bg-teal-100 text-teal-700' };
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+        <div>
+          <h2 className="text-xl font-bold text-gray-900">Registration Requests</h2>
+          <p className="text-sm text-gray-500">Review and approve or reject self-registration submissions.</p>
+        </div>
+        <div className="sm:ml-auto flex gap-2">
+          {['PENDING', 'APPROVED', 'REJECTED', 'all'].map((s) => (
+            <button
+              key={s}
+              onClick={() => setFilter(s)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium capitalize transition-colors ${filter === s ? 'bg-green-700 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+            >
+              {s === 'all' ? 'All' : s.charAt(0) + s.slice(1).toLowerCase()}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {statusMsg && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 flex justify-between">
+          {statusMsg}
+          <button onClick={() => setStatusMsg('')}><X className="h-4 w-4" /></button>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="py-12 text-center text-sm text-gray-400">Loading…</div>
+      ) : registrations.length === 0 ? (
+        <div className="py-12 text-center text-sm text-gray-400 bg-white rounded-xl border border-gray-200">
+          No {filter === 'all' ? '' : filter.toLowerCase()} registration requests found.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {registrations.map((reg) => (
+            <div key={reg.id} className="bg-white rounded-xl border border-gray-200 p-5">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <span className="font-semibold text-gray-900">{reg.username}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${ROLE_BADGE[reg.role] || 'bg-gray-100 text-gray-700'}`}>
+                      {getRoleLabel(reg.role)}
+                    </span>
+                    {reg.status !== 'PENDING' && (
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${reg.status === 'APPROVED' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                        {reg.status.charAt(0) + reg.status.slice(1).toLowerCase()}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm font-medium text-gray-700">{reg.organisation_name}</p>
+                  <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1 text-xs text-gray-500">
+                    {reg.email && <span>{reg.email}</span>}
+                    {reg.contact_phone && <span>{reg.contact_phone}</span>}
+                    {reg.region && <span>{reg.region}{reg.district ? `, ${reg.district}` : ''}</span>}
+                    <span>Submitted: {reg.created_at?.slice(0, 10)}</span>
+                  </div>
+                  {reg.rejection_reason && (
+                    <p className="mt-1 text-xs text-red-600">Reason: {reg.rejection_reason}</p>
+                  )}
+                </div>
+
+                {reg.status === 'PENDING' && (
+                  <div className="flex gap-2 shrink-0">
+                    <button
+                      onClick={() => handleApprove(reg.id)}
+                      disabled={actioning === reg.id}
+                      className="flex items-center gap-1.5 bg-green-700 text-white rounded-lg px-3 py-1.5 text-sm font-semibold hover:bg-green-800 disabled:opacity-50"
+                    >
+                      <UserCheck className="h-3.5 w-3.5" />
+                      Approve
+                    </button>
+                    <button
+                      onClick={() => { setRejectModalId(reg.id); setRejectReason(''); }}
+                      disabled={actioning === reg.id}
+                      className="flex items-center gap-1.5 border border-red-300 text-red-600 rounded-lg px-3 py-1.5 text-sm font-semibold hover:bg-red-50 disabled:opacity-50"
+                    >
+                      <UserX className="h-3.5 w-3.5" />
+                      Reject
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Reject modal */}
+      {rejectModalId && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md">
+            <h3 className="font-bold text-gray-900 mb-3">Reject Registration</h3>
+            <p className="text-sm text-gray-600 mb-4">Optionally provide a reason for rejection:</p>
+            <textarea
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              rows={3}
+              placeholder="Reason (optional)…"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400 mb-4"
+            />
+            <div className="flex gap-3">
+              <button
+                onClick={() => setRejectModalId(null)}
+                className="flex-1 border border-gray-300 rounded-lg py-2 text-sm font-medium text-gray-600 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleReject}
+                disabled={actioning === rejectModalId}
+                className="flex-1 bg-red-600 text-white rounded-lg py-2 text-sm font-semibold hover:bg-red-700 disabled:opacity-50"
+              >
+                {actioning === rejectModalId ? 'Rejecting…' : 'Confirm Reject'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Admin Profile Panel ─────────────────────────────────────────────────────
+
+function ensurePhonePrefix(val) {
+  const v = val || '';
+  return v.startsWith(PHONE_PREFIX) ? v : PHONE_PREFIX + v.replace(/^\+255\s?/, '');
+}
+
+function AdminProfilePanel({ userProfile }) {
+  const [form, setForm] = useState({
+    first_name: userProfile?.firstName || '',
+    last_name: userProfile?.lastName || '',
+    email: userProfile?.email || '',
+    username: userProfile?.username || '',
+    contact_phone: userProfile?.contactPhone ? ensurePhonePrefix(userProfile.contactPhone) : PHONE_PREFIX,
+    organization: userProfile?.organization || 'CoffeeChain Enterprises',
+  });
+  const [pwForm, setPwForm] = useState({ current_password: '', new_password: '', confirm_password: '' });
+  const [saving, setSaving] = useState(false);
+  const [savingPw, setSavingPw] = useState(false);
+  const [pwError, setPwError] = useState('');
+
+  // Fetch fresh profile data every time this panel mounts so phone/org are never stale
+  useEffect(() => {
+    fetchProfile().then((data) => {
+      setForm({
+        first_name: data.user?.first_name || '',
+        last_name: data.user?.last_name || '',
+        email: data.user?.email || '',
+        username: data.user?.username || '',
+        contact_phone: data.contact_phone ? ensurePhonePrefix(data.contact_phone) : PHONE_PREFIX,
+        organization: data.organization || 'CoffeeChain Enterprises',
+      });
+    }).catch(() => {});
+  }, []);
+
+  const initials = [form.first_name?.[0], form.last_name?.[0]]
+    .filter(Boolean).join('').toUpperCase() || form.username?.[0]?.toUpperCase() || 'A';
+
+  const setF = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const setPw = (k) => (e) => setPwForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const handlePhoneChange = (e) => {
+    const val = e.target.value;
+    setForm((f) => ({ ...f, contact_phone: val.startsWith(PHONE_PREFIX) ? val : PHONE_PREFIX }));
+  };
+
+  const handleSaveInfo = async (e) => {
+    e.preventDefault();
+    if (!form.username.trim() || form.username.trim().length < 3) {
+      toast.error('Username must be at least 3 characters.');
+      return;
+    }
+    if (!form.first_name.trim() || !form.last_name.trim() || !form.email.trim()) {
+      toast.error('First name, last name, and email are required.');
+      return;
+    }
+    if (!form.contact_phone.trim() || form.contact_phone.trim() === PHONE_PREFIX.trim()) {
+      toast.error('Phone number is required.');
+      return;
+    }
+    if (!form.organization.trim()) {
+      toast.error('Organization is required.');
+      return;
+    }
+    setSaving(true);
+    // Small artificial delay so the spinner is always visible even on fast localhost
+    await new Promise((r) => setTimeout(r, 400));
+    try {
+      const result = await updateMyProfile({
+        username: form.username.trim(),
+        first_name: form.first_name.trim(),
+        last_name: form.last_name.trim(),
+        email: form.email.trim(),
+        contact_phone: form.contact_phone.trim(),
+        organization: form.organization.trim(),
+      });
+      // Sync form from server response so values are always fresh
+      if (result?.user) {
+        setForm({
+          first_name: result.user.first_name || '',
+          last_name: result.user.last_name || '',
+          email: result.user.email || '',
+          username: result.user.username || '',
+          contact_phone: result.contact_phone ? ensurePhonePrefix(result.contact_phone) : PHONE_PREFIX,
+          organization: result.organization || 'CoffeeChain Enterprises',
+        });
+      }
+      toast.success('Profile updated successfully.');
+    } catch (err) {
+      toast.error(err.message || 'Failed to update profile.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleChangePassword = async (e) => {
+    e.preventDefault();
+    setPwError('');
+    if (!pwForm.current_password) { setPwError('Enter your current password.'); return; }
+    if (pwForm.new_password.length < 6) { setPwError('New password must be at least 6 characters.'); return; }
+    if (pwForm.new_password !== pwForm.confirm_password) { setPwError('Passwords do not match.'); return; }
+    setSavingPw(true);
+    await new Promise((r) => setTimeout(r, 400));
+    try {
+      await updateMyProfile({ current_password: pwForm.current_password, new_password: pwForm.new_password });
+      toast.success('Password changed successfully.');
+      setPwForm({ current_password: '', new_password: '', confirm_password: '' });
+    } catch (err) {
+      setPwError(err.message || 'Failed to change password.');
+    } finally {
+      setSavingPw(false);
+    }
+  };
+
+  const inputCls = 'w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition';
+  const labelCls = 'block text-xs font-semibold text-gray-600 mb-1';
+
+  return (
+    <div className="space-y-6">
+      {/* Profile header card */}
+      <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <div className="flex items-center gap-5">
+          <div className="h-16 w-16 rounded-full bg-green-600 flex items-center justify-center text-white text-2xl font-bold shrink-0">
+            {initials}
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">
+              {form.first_name || userProfile?.firstName || ''} {form.last_name || userProfile?.lastName || ''}
+            </h2>
+            <p className="text-sm text-gray-500">@{userProfile?.username}</p>
+            <span className="inline-block mt-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+              {userProfile?.level || 'Administrator'}
+            </span>
+            <p className="text-xs text-gray-400 mt-0.5">{form.organization}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Two-column layout for info and password */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Personal information */}
+        <div className="bg-white rounded-xl border border-gray-200 p-6">
+          <div className="flex items-center gap-2 mb-5">
+            <User className="h-4 w-4 text-green-700" />
+            <h3 className="text-xs font-bold text-green-700 uppercase tracking-wide">Personal Information</h3>
+          </div>
+          <form onSubmit={handleSaveInfo} className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelCls}>First Name <span className="text-red-500">*</span></label>
+                <input className={inputCls} value={form.first_name} onChange={setF('first_name')} placeholder="First name" />
+              </div>
+              <div>
+                <label className={labelCls}>Last Name <span className="text-red-500">*</span></label>
+                <input className={inputCls} value={form.last_name} onChange={setF('last_name')} placeholder="Last name" />
+              </div>
+            </div>
+            <div>
+              <label className={labelCls}>Email Address <span className="text-red-500">*</span></label>
+              <input className={inputCls} type="email" value={form.email} onChange={setF('email')} placeholder="admin@example.com" />
+            </div>
+            <div>
+              <label className={labelCls}>Phone Number <span className="text-red-500">*</span></label>
+              <input
+                className={inputCls}
+                type="tel"
+                value={form.contact_phone}
+                onChange={handlePhoneChange}
+                placeholder="+255 7XX XXX XXX"
+              />
+            </div>
+            <div>
+              <label className={labelCls}>Username <span className="text-red-500">*</span></label>
+              <input className={inputCls} value={form.username} onChange={setF('username')} placeholder="username" />
+            </div>
+            <div>
+              <label className={labelCls}>Organization <span className="text-red-500">*</span></label>
+              <input className={inputCls} value={form.organization} onChange={setF('organization')} placeholder="e.g. CoffeeChain Enterprises" />
+            </div>
+            <div className="pt-1">
+              <button
+                type="submit"
+                disabled={saving}
+                className="flex items-center gap-2 px-5 py-2.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 disabled:opacity-60 transition-colors"
+              >
+                {saving && (
+                  <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                  </svg>
+                )}
+                {saving ? 'Saving…' : 'Save Changes'}
+              </button>
+            </div>
+          </form>
+        </div>
+
+        {/* Change password */}
+        <div className="bg-white rounded-xl border border-gray-200 p-6">
+          <div className="flex items-center gap-2 mb-5">
+            <Lock className="h-4 w-4 text-green-700" />
+            <h3 className="text-xs font-bold text-green-700 uppercase tracking-wide">Change Password</h3>
+          </div>
+          <form onSubmit={handleChangePassword} className="space-y-4">
+            <div>
+              <label className={labelCls}>Current Password <span className="text-red-500">*</span></label>
+              <input className={inputCls} type="password" value={pwForm.current_password} onChange={setPw('current_password')} placeholder="Enter current password" />
+            </div>
+            <div>
+              <label className={labelCls}>New Password <span className="text-red-500">*</span></label>
+              <input className={inputCls} type="password" value={pwForm.new_password} onChange={setPw('new_password')} placeholder="Min. 6 characters" />
+            </div>
+            <div>
+              <label className={labelCls}>Confirm New Password <span className="text-red-500">*</span></label>
+              <input className={inputCls} type="password" value={pwForm.confirm_password} onChange={setPw('confirm_password')} placeholder="Repeat new password" />
+            </div>
+            {pwError && <p className="text-sm text-red-600">{pwError}</p>}
+            <div className="pt-1">
+              <button
+                type="submit"
+                disabled={savingPw}
+                className="flex items-center gap-2 px-5 py-2.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 disabled:opacity-60 transition-colors"
+              >
+                {savingPw && (
+                  <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                  </svg>
+                )}
+                {savingPw ? 'Updating…' : 'Update Password'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Admin Dashboard ────────────────────────────────────────────────────
 
 export function AdminDashboard({ userProfile, onLogout }) {
   const dashboardRole = 'admin';
-  const dashboardTabs = ['overview', 'suppliers', 'retailers', 'cooperatives', 'users', 'integrity'];
+  const dashboardTabs = ['overview', 'users', 'registrations', 'reports', 'integrity', 'profile'];
   const [activeTab, setActiveTab] = useState('overview');
+  const [activeRoleTab, setActiveRoleTab] = useState('supplier');
   const [integrityHighlightId, setIntegrityHighlightId] = useState('');
-  const [supplierQuery, setSupplierQuery] = useState('');
-  const [supplierSort, setSupplierSort] = useState('name');
-  const [supplierStatusFilter, setSupplierStatusFilter] = useState('all');
-  const [retailerQuery, setRetailerQuery] = useState('');
-  const [retailerSort, setRetailerSort] = useState('name');
-  const [retailerStatusFilter, setRetailerStatusFilter] = useState('all');
-  const [cooperativeQuery, setCooperativeQuery] = useState('');
-  const [cooperativeSort, setCooperativeSort] = useState('name');
-  const [cooperativeStatusFilter, setCooperativeStatusFilter] = useState('all');
+
   const [suppliers, setSuppliers] = useState([]);
   const [retailers, setRetailers] = useState([]);
   const [cooperatives, setCooperatives] = useState([]);
   const [users, setUsers] = useState([]);
   const [batches, setBatches] = useState([]);
   const [transferData, setTransferData] = useState([]);
-  const [showUserForm, setShowUserForm] = useState(false);
-  const [editingUserId, setEditingUserId] = useState(null);
-  const [userFormLoading, setUserFormLoading] = useState(false);
-  const [userQuery, setUserQuery] = useState('');
-  const [userRoleFilter, setUserRoleFilter] = useState('all');
-  const [userSort, setUserSort] = useState('username');
-  const [userForm, setUserForm] = useState({ ...EMPTY_USER_FORM });
-  const [userStatus, setUserStatus] = useState('');
+  const [warehouses, setWarehouses] = useState([]);
   const [audit, setAudit] = useState({ dispatched: 0, received: 0, verified: 0, gap: 0 });
   const [statusMessage, setStatusMessage] = useState('');
+
   const {
-    notifications,
-    unreadCount,
-    refresh: refreshNotifications,
-    markRead,
-    markAllRead,
-    dismiss,
+    notifications, unreadCount, refresh: refreshNotifications,
+    markRead, markAllRead, dismiss,
   } = useNotifications();
+
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -226,379 +1183,140 @@ export function AdminDashboard({ userProfile, onLogout }) {
   }, [location.pathname]);
 
   const goToTab = (tab) => {
-    const nextTab = dashboardTabs.includes(tab) ? tab : 'overview';
-    setActiveTab(nextTab);
-    navigate(buildDashboardPath(dashboardRole, nextTab));
+    const next = dashboardTabs.includes(tab) ? tab : 'overview';
+    setActiveTab(next);
+    navigate(buildDashboardPath(dashboardRole, next));
   };
 
-  const openCreateUserForm = () => {
-    setEditingUserId(null);
-    setUserFormLoading(false);
-    setUserForm({ ...EMPTY_USER_FORM });
-    setUserStatus('');
-    setShowUserForm(true);
-  };
-
-  const openEditUserForm = async (record) => {
-    const userId = record?.user?.id;
-    if (!userId) return;
-
-    const listRecord = users.find((entry) => String(entry.user.id) === String(userId)) || record;
-    setEditingUserId(userId);
-    setUserForm(userFormFromRecord(listRecord));
-    setUserStatus('');
-    setUserFormLoading(true);
-    setShowUserForm(true);
-
+  const loadData = async () => {
     try {
-      const freshRecord = await fetchUser(userId);
-      setUserForm(userFormFromRecord(freshRecord));
-    } catch (error) {
-      setUserStatus(getUserMessage(error));
-    } finally {
-      setUserFormLoading(false);
-    }
-  };
-
-  const closeUserForm = () => {
-    setShowUserForm(false);
-    setEditingUserId(null);
-    setUserFormLoading(false);
-    setUserForm({ ...EMPTY_USER_FORM });
-    setUserStatus('');
-  };
-
-  const handleSaveUser = async () => {
-    if (editingUserId) {
-      setUserStatus('');
-      try {
-        const payload = { ...userForm };
-        delete payload.username;
-        delete payload.role;
-        if (!payload.password) delete payload.password;
-        const updated = await updateUser(editingUserId, payload);
-        setUsers((prev) => prev.map((record) => (record.user.id === editingUserId ? updated : record)));
-        closeUserForm();
-      } catch (error) {
-        setUserStatus(getUserMessage(error));
-      }
-      return;
-    }
-
-    if (!userForm.username || !userForm.password) return;
-    setUserStatus('');
-    try {
-      const payload = { ...userForm };
-      if (payload.supplier_id) {
-        payload.supplier_id = Number(payload.supplier_id);
-      }
-      const newUser = await createUser(payload);
-      setUsers((prev) => [...prev, newUser]);
-      closeUserForm();
-    } catch (error) {
-      setUserStatus(getUserMessage(error));
-    }
-  };
-
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        const [supplierData, branchData, auditData, transferRecords, userData, batchRecords] = await Promise.all([
-          fetchSuppliers(),
-          fetchBranches(),
-          fetchAuditReport(),
-          fetchTransfers(),
-          fetchUsers(),
-          fetchBatches(),
-        ]);
-        setTransferData(transferRecords);
-        setBatches(batchRecords);
-        setSuppliers(
-          supplierData.map((supplier) => ({
-            id: `SUP-${supplier.id.toString().padStart(3, '0')}`,
-            recordId: supplier.id,
-            name: supplier.name,
-            region: supplier.region || 'Region',
-            phone: supplier.contact_phone || 'N/A',
-            status: 'registered',
-            lastDispatch: transferRecords.find((transfer) => transfer.from_supplier?.id === supplier.id)?.created_at?.slice(0, 10) || 'N/A',
+      const [supplierData, branchData, auditData, transferRecords, userData, batchRecords, warehouseData] = await Promise.all([
+        fetchSuppliers(),
+        fetchBranches(),
+        fetchAuditReport(),
+        fetchTransfers(),
+        fetchUsers(),
+        fetchBatches(),
+        fetchWarehouses(),
+      ]);
+      setTransferData(transferRecords);
+      setBatches(batchRecords);
+      setWarehouses(warehouseData);
+      setSuppliers(
+        supplierData.map((s) => ({
+          id: `SUP-${s.id.toString().padStart(3, '0')}`,
+          rawId: s.id,
+          name: s.name,
+          region: s.region || 'Region',
+          phone: s.contact_phone || 'N/A',
+          lastDispatch: transferRecords.find((t) => t.from_supplier?.id === s.id)?.created_at?.slice(0, 10) || 'N/A',
+        }))
+      );
+      setRetailers(
+        branchData
+          .filter((b) => b.branch_type === 'RETAILER')
+          .map((b) => ({
+            id: `RET-${b.id.toString().padStart(3, '0')}`,
+            name: b.name, region: b.region || '', district: b.district || '',
+            bagsAvailable: transferRecords.filter((t) => t.to_branch?.id === b.id).reduce((s, t) => s + t.quantity_bags, 0),
           }))
-        );
-        setRetailers(
-          branchData
-            .filter((branch) => branch.branch_type === 'RETAILER')
-            .map((branch) => ({
-              id: `RET-${branch.id.toString().padStart(3, '0')}`,
-              name: branch.name,
-              region: branch.region || '',
-              district: branch.district || '',
-              bagsAvailable: transferRecords
-                .filter((transfer) => transfer.to_branch?.id === branch.id)
-                .reduce((sum, transfer) => sum + transfer.quantity_bags, 0),
-              status: 'registered',
-            }))
-        );
-        setCooperatives(
-          branchData
-            .filter((branch) => branch.branch_type === 'COOPERATIVE')
-            .map((branch) => ({
-              id: `AMCOS-${branch.id.toString().padStart(3, '0')}`,
-              name: branch.name,
-              region: branch.region || '',
-              district: branch.district || '',
-              members: branch.farmers_count || 0,
-              verification: 'registered',
-            }))
-        );
-        setAudit(auditData);
-        setUsers(userData);
-        await refreshNotifications();
-      } catch (error) {
-        setStatusMessage(getUserMessage(error));
-      }
-    };
-    loadData();
-  }, []);
+      );
+      setCooperatives(
+        branchData
+          .filter((b) => b.branch_type === 'COOPERATIVE')
+          .map((b) => ({
+            id: `AMCOS-${b.id.toString().padStart(3, '0')}`,
+            name: b.name, region: b.region || '', district: b.district || '',
+            members: b.farmers_count || 0,
+          }))
+      );
+      setAudit(auditData);
+      setUsers(userData);
+      await refreshNotifications();
+    } catch (error) {
+      setStatusMessage(getUserMessage(error));
+    }
+  };
 
-  const monthlyData = useMemo(() => {
-    const analyticsSource = transferData.length > 0 ? transferData : batches;
-    return buildMonthlyAnalytics(analyticsSource);
-  }, [batches, transferData]);
+  useEffect(() => { loadData(); }, []);
 
-  const distributionData = useMemo(
-    () => {
-      const analyticsSource = transferData.length > 0 ? transferData : batches;
-      return buildFertilizerDistribution(analyticsSource);
-    },
-    [batches, transferData]
-  );
-
-  const topRetailerData = useMemo(
-    () => buildTopBranchPerformance(transferData, 'RETAILER'),
-    [transferData]
-  );
-
-  const topAmcosData = useMemo(
-    () => buildTopBranchPerformance(transferData, 'COOPERATIVE'),
-    [transferData]
-  );
+  const monthlyData = useMemo(() => buildMonthlyAnalytics(transferData.length > 0 ? transferData : batches), [batches, transferData]);
+  const distributionData = useMemo(() => buildFertilizerDistribution(transferData.length > 0 ? transferData : batches), [batches, transferData]);
+  const topRetailerData = useMemo(() => buildTopBranchPerformance(transferData, 'RETAILER'), [transferData]);
+  const topAmcosData = useMemo(() => buildTopBranchPerformance(transferData, 'COOPERATIVE'), [transferData]);
 
   const regionData = useMemo(() => {
-    const grouped = [...retailers, ...cooperatives].reduce((acc, branch) => {
-      const district = branch.district?.trim() || 'Unassigned';
-      const region = resolveRegionName(branch.region, district);
+    const grouped = [...retailers, ...cooperatives].reduce((acc, b) => {
+      const district = b.district?.trim() || 'Unassigned';
+      const region = resolveRegionName(b.region, district);
       const key = `${region}::${district}`;
       acc[key] = acc[key] || { region, district, cooperatives: 0, retailers: 0, farmers: 0 };
-      if (branch.id.startsWith('RET')) acc[key].retailers += 1;
-      if (branch.id.startsWith('AMCOS')) {
-        acc[key].cooperatives += 1;
-        acc[key].farmers += branch.members || 0;
-      }
+      if (b.id.startsWith('RET')) acc[key].retailers += 1;
+      if (b.id.startsWith('AMCOS')) { acc[key].cooperatives += 1; acc[key].farmers += b.members || 0; }
       return acc;
     }, {});
-    return Object.values(grouped).sort((a, b) => {
-      const regionCompare = a.region.localeCompare(b.region);
-      if (regionCompare !== 0) return regionCompare;
-      return a.district.localeCompare(b.district);
-    });
+    return Object.values(grouped).sort((a, b) => a.region.localeCompare(b.region) || a.district.localeCompare(b.district));
   }, [retailers, cooperatives]);
 
-  const recentActivity = useMemo(
-    () => [
-      { id: 1, type: 'dispatch', entity: 'Ledger Update', action: `${audit.dispatched} transfers dispatched`, time: 'Now', status: 'completed' },
-      { id: 2, type: 'verify', entity: 'OTP Verification', action: `${audit.verified} transfers verified`, time: 'Now', status: 'completed' },
-      { id: 3, type: 'pending', entity: 'Audit Gap', action: `${audit.gap} pending confirmations`, time: 'Now', status: audit.gap ? 'pending' : 'completed' },
-    ],
-    [audit]
+  const supplierOptions = useMemo(() =>
+    users.filter((r) => r.role === 'supplier').map((r) => ({ id: r.supplier?.id || r.user?.id, name: r.supplier?.name || r.user?.username })).filter((s) => s.id),
+    [users]
   );
 
-  useEffect(() => {
-    if (!showUserForm) return;
-    setUserForm({
-      username: '',
-      password: '',
-      role: 'supplier',
-      first_name: '',
-      last_name: '',
-      email: '',
-      supplier_name: '',
-      supplier_region: '',
-      contact_phone: '',
-      branch_name: '',
-      branch_type: 'RETAILER',
-      district: '',
-      region: '',
-    });
-    setUserStatus('');
-  }, [showUserForm]);
+  const TAB_CONFIG = [
+    { id: 'overview', label: 'Overview', icon: BarChart3 },
+    { id: 'users', label: 'User Management', icon: Users },
+    { id: 'registrations', label: 'Registrations', icon: UserCheck },
+    { id: 'reports', label: 'Reports', icon: TrendingUp },
+    { id: 'integrity', label: 'Chain Integrity', icon: Shield },
+    { id: 'profile', label: 'My Account', icon: User },
+  ];
 
-  const filteredUsers = useMemo(() => {
-    const normalizedQuery = userQuery.trim().toLowerCase();
-    const filtered = users.filter((record) => {
-      if (userProfile?.username && record.user.username === userProfile.username) {
-        return false;
-      }
-      const name = record.user.username.toLowerCase();
-      const role = record.role?.toLowerCase() || '';
-      const org = (
-        record.supplier?.name ||
-        record.warehouse_manager?.supplier?.name ||
-        record.branch?.name ||
-        ''
-      ).toLowerCase();
-      const matchesQuery =
-        !normalizedQuery ||
-        name.includes(normalizedQuery) ||
-        role.includes(normalizedQuery) ||
-        org.includes(normalizedQuery);
-      const matchesRole = userRoleFilter === 'all' || role === userRoleFilter;
-      return matchesQuery && matchesRole;
-    });
-
-    return filtered.sort((a, b) => {
-      if (userSort === 'role') {
-        return (a.role || '').localeCompare(b.role || '');
-      }
-      if (userSort === 'organization') {
-        const orgA = a.supplier?.name || a.warehouse_manager?.supplier?.name || a.branch?.name || '';
-        const orgB = b.supplier?.name || b.warehouse_manager?.supplier?.name || b.branch?.name || '';
-        return orgA.localeCompare(orgB);
-      }
-      return a.user.username.localeCompare(b.user.username);
-    });
-  }, [users, userQuery, userRoleFilter, userSort]);
-
-  const districtOptions = useMemo(() => {
-    if (!userForm.region) return [];
-    return TANZANIA_REGIONS[userForm.region] || [];
-  }, [userForm.region]);
-
-  const getRegionOptions = (value) => {
-    const query = value.trim().toLowerCase();
-    const filtered = REGION_LIST.filter((region) =>
-      region.toLowerCase().includes(query)
-    );
-    return filtered.slice(0, 10);
+  const TAB_TITLES = {
+    overview: 'Admin Dashboard',
+    users: 'User Management',
+    registrations: 'Registration Requests',
+    reports: 'Reports',
+    integrity: 'Chain Integrity',
+    profile: 'My Account',
   };
-
-  const filteredDistrictOptions = useMemo(() => {
-    const query = userForm.district.trim().toLowerCase();
-    const filtered = districtOptions.filter((district) =>
-      district.toLowerCase().includes(query)
-    );
-    return filtered.slice(0, 10);
-  }, [districtOptions, userForm.district]);
-
-  const filteredSuppliers = useMemo(() => {
-    const query = supplierQuery.trim().toLowerCase();
-    return suppliers
-      .filter((supplier) => {
-        const matchesQuery =
-          !query ||
-          supplier.name.toLowerCase().includes(query) ||
-          supplier.id.toLowerCase().includes(query) ||
-          supplier.region.toLowerCase().includes(query);
-        const matchesStatus =
-          supplierStatusFilter === 'all' || supplier.status === supplierStatusFilter;
-        return matchesQuery && matchesStatus;
-      })
-      .sort((a, b) => {
-        if (supplierSort === 'region') return a.region.localeCompare(b.region);
-        if (supplierSort === 'status') return a.status.localeCompare(b.status);
-        return a.name.localeCompare(b.name);
-      });
-  }, [suppliers, supplierQuery, supplierSort, supplierStatusFilter]);
-
-  const filteredRetailers = useMemo(() => {
-    const query = retailerQuery.trim().toLowerCase();
-    return retailers
-      .filter((retailer) => {
-        const matchesQuery =
-          !query ||
-          retailer.name.toLowerCase().includes(query) ||
-          retailer.id.toLowerCase().includes(query) ||
-          retailer.district.toLowerCase().includes(query);
-        const matchesStatus =
-          retailerStatusFilter === 'all' || retailer.status === retailerStatusFilter;
-        return matchesQuery && matchesStatus;
-      })
-      .sort((a, b) => {
-        if (retailerSort === 'district') return a.district.localeCompare(b.district);
-        if (retailerSort === 'status') return a.status.localeCompare(b.status);
-        return a.name.localeCompare(b.name);
-      });
-  }, [retailers, retailerQuery, retailerSort, retailerStatusFilter]);
-
-  const filteredCooperatives = useMemo(() => {
-    const query = cooperativeQuery.trim().toLowerCase();
-    return cooperatives
-      .filter((coop) => {
-        const matchesQuery =
-          !query ||
-          coop.name.toLowerCase().includes(query) ||
-          coop.id.toLowerCase().includes(query) ||
-          coop.district.toLowerCase().includes(query);
-        const matchesStatus =
-          cooperativeStatusFilter === 'all' || coop.verification === cooperativeStatusFilter;
-        return matchesQuery && matchesStatus;
-      })
-      .sort((a, b) => {
-        if (cooperativeSort === 'district') return a.district.localeCompare(b.district);
-        if (cooperativeSort === 'status') return a.verification.localeCompare(b.verification);
-        return a.name.localeCompare(b.name);
-      });
-  }, [cooperatives, cooperativeQuery, cooperativeSort, cooperativeStatusFilter]);
-
-  const supplierPagination = usePaginatedList(filteredSuppliers, HISTORY_PAGE_SIZE);
-  const retailerPagination = usePaginatedList(filteredRetailers, HISTORY_PAGE_SIZE);
-  const cooperativePagination = usePaginatedList(filteredCooperatives, HISTORY_PAGE_SIZE);
-  const userPagination = usePaginatedList(filteredUsers, HISTORY_PAGE_SIZE);
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
-      {/* Sidebar */}
-      <div className="w-72 bg-gradient-to-b from-green-800 to-green-950 text-white flex flex-col fixed left-0 top-0 h-screen z-30">
-        <div className="p-4 border-b border-green-700">
+      {/* Sidebar — matches supplier / warehouse-manager / retailer style */}
+      <div className="w-72 bg-gradient-to-b from-green-700 to-green-900 text-white flex flex-col shrink-0">
+        <div className="p-4 border-b border-green-600">
           <div className="w-fit mx-auto bg-white rounded-xl px-4 py-2 shadow-lg">
             <Logo size="md" variant="full" showText={false} />
           </div>
         </div>
 
-        <nav className="flex-1 p-4 space-y-2">
-          {[
-            { id: 'overview', label: 'Overview', icon: BarChart3 },
-            { id: 'suppliers', label: 'Suppliers', icon: Package },
-            { id: 'retailers', label: 'Retailers', icon: ShoppingCart },
-            { id: 'cooperatives', label: 'Cooperatives', icon: Users },
-            { id: 'users', label: 'User Accounts', icon: Users },
-            { id: 'integrity', label: 'Chain Integrity', icon: Shield },
-          ].map((item) => (
+        <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
+          {TAB_CONFIG.map(({ id, label, icon: Icon }) => (
             <button
-              key={item.id}
-              onClick={() => goToTab(item.id)}
+              key={id}
+              onClick={() => goToTab(id)}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
-                activeTab === item.id
-                  ? 'bg-green-700 text-white'
-                  : 'text-green-100 hover:bg-green-700/50'
+                activeTab === id
+                  ? 'bg-green-600 text-white'
+                  : 'text-green-100 hover:bg-green-600/50'
               }`}
             >
-              <item.icon className="h-5 w-5 flex-shrink-0" />
-              <span className="font-medium">{item.label}</span>
+              <Icon className="h-5 w-5" />
+              <span className="font-medium">{label}</span>
             </button>
           ))}
         </nav>
       </div>
 
-      {/* Main Content */}
-      <div
-        className="flex-1 flex flex-col overflow-hidden ml-72"
-      >
+      {/* Main content */}
+      <div className="flex-1 min-w-0 flex flex-col">
         {/* Header */}
         <header className="bg-white border-b border-gray-200 px-8 py-4">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">Admin Dashboard</h1>
-              <p className="text-sm text-gray-600">Welcome back, {userProfile.name}</p>
+              <h1 className="text-2xl font-bold text-gray-900">{TAB_TITLES[activeTab] || 'Admin Dashboard'}</h1>
+              <p className="text-sm text-gray-600">{userProfile?.name} · Administrator</p>
             </div>
             <div className="flex items-center gap-4">
               <NotificationBell
@@ -609,11 +1327,8 @@ export function AdminDashboard({ userProfile, onLogout }) {
                 onDismiss={dismiss}
                 onNavigateTab={(tab, notification) => {
                   if (tab === 'integrity') {
-                    const transferId =
-                      notification?.transferId ||
-                      notification?.metadata?.transfer_id ||
-                      '';
-                    setIntegrityHighlightId(String(transferId || ''));
+                    const tid = notification?.transferId || notification?.metadata?.transfer_id || '';
+                    setIntegrityHighlightId(String(tid || ''));
                     goToTab('integrity');
                     return;
                   }
@@ -621,8 +1336,8 @@ export function AdminDashboard({ userProfile, onLogout }) {
                 }}
               />
               <div className="text-right">
-                <p className="text-sm font-medium text-gray-900">{userProfile.name}</p>
-                <p className="text-xs text-gray-500">{userProfile.level}</p>
+                <p className="text-sm font-medium text-gray-900">{userProfile?.name}</p>
+                <p className="text-xs text-gray-500">{userProfile?.level || 'Administrator'}</p>
               </div>
               <button
                 onClick={onLogout}
@@ -635,855 +1350,168 @@ export function AdminDashboard({ userProfile, onLogout }) {
           </div>
         </header>
 
-        {/* Content */}
-        <main className="flex-1 overflow-y-auto p-8">
+        {/* Page body */}
+        <main className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-4 md:p-6 lg:p-8">
+          {/* Overview */}
           {activeTab === 'overview' && (
             <div className="space-y-6">
-              {/* Key Metrics */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              {statusMessage && <p className="text-sm text-red-600">{statusMessage}</p>}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
                 {[
-                  { 
-                    label: 'Total Suppliers', 
-                    value: `${suppliers.length}`, 
-                    change: 'Registered suppliers', 
-                    icon: Package,
-                    color: 'bg-blue-500',
-                    trend: 'up'
-                  },
-                  { 
-                    label: 'Active Retailers', 
-                    value: `${retailers.length}`, 
-                    change: 'Registered retailers', 
-                    icon: ShoppingCart,
-                    color: 'bg-green-500',
-                    trend: 'up'
-                  },
-                  { 
-                    label: 'Cooperatives', 
-                    value: `${cooperatives.length}`, 
-                    change: 'Registered AMCOS', 
-                    icon: Users,
-                    color: 'bg-purple-500',
-                    trend: 'up'
-                  },
-                  { 
-                    label: 'Distributions Verified', 
-                    value: `${audit.verified}`, 
-                    change: `${audit.gap} pending`, 
-                    icon: CheckCircle,
-                    color: 'bg-amber-500',
-                    trend: 'up'
-                  },
-                ].map((metric, index) => (
-                  <div key={index} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className={`${metric.color} p-3 rounded-lg`}>
-                        <metric.icon className="h-6 w-6 text-white" />
-                      </div>
-                      <TrendingUp className="h-5 w-5 text-green-500" />
+                  { label: 'Total Suppliers', value: `${suppliers.length}`, sub: 'Registered suppliers', icon: Package, color: 'bg-blue-500' },
+                  { label: 'Active Retailers', value: `${retailers.length}`, sub: 'Registered retailers', icon: ShoppingCart, color: 'bg-green-500' },
+                  { label: 'Cooperatives', value: `${cooperatives.length}`, sub: 'Registered AMCOS', icon: Users, color: 'bg-purple-500' },
+                  { label: 'Verified Distributions', value: `${audit.verified}`, sub: `${audit.gap} pending`, icon: CheckCircle, color: 'bg-amber-500' },
+                ].map((m, i) => (
+                  <div key={i} className="bg-white rounded-xl border border-gray-200 p-5">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className={`${m.color} p-2.5 rounded-lg`}><m.icon className="h-5 w-5 text-white" /></div>
+                      <TrendingUp className="h-4 w-4 text-green-500" />
                     </div>
-                    <h3 className="text-2xl font-bold text-gray-900 mb-1">{metric.value}</h3>
-                    <p className="text-sm font-medium text-gray-600 mb-2">{metric.label}</p>
-                    <p className="text-xs text-green-600">{metric.change}</p>
+                    <h3 className="text-2xl font-bold text-gray-900 mb-0.5">{m.value}</h3>
+                    <p className="text-sm font-medium text-gray-600">{m.label}</p>
+                    <p className="text-xs text-green-600 mt-0.5">{m.sub}</p>
                   </div>
                 ))}
               </div>
 
-              {/* Charts */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Monthly Trends */}
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                  <h3 className="text-lg font-bold text-gray-900 mb-4">Monthly Trends</h3>
-                  <ResponsiveContainer width="100%" height={300}>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                <div className="bg-white rounded-xl border border-gray-200 p-5">
+                  <h3 className="text-base font-bold text-gray-900 mb-4">Monthly Trends</h3>
+                  <ResponsiveContainer width="100%" height={260}>
                     <LineChart data={monthlyData}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                      <XAxis dataKey="month" stroke="#6b7280" />
-                      <YAxis stroke="#6b7280" />
+                      <XAxis dataKey="month" stroke="#6b7280" fontSize={12} />
+                      <YAxis stroke="#6b7280" fontSize={12} />
                       <Tooltip />
                       <Legend />
-                      <Line 
-                        type="monotone" 
-                        dataKey="fertilizer" 
-                        stroke="#16a34a" 
-                        strokeWidth={2}
-                        name="Fertilizer bags"
-                      />
-                      <Line 
-                        type="monotone" 
-                        dataKey="records" 
-                        stroke="#ea580c" 
-                        strokeWidth={2}
-                        name="Records"
-                      />
+                      <Line type="monotone" dataKey="fertilizer" stroke="#16a34a" strokeWidth={2} name="Fertilizer bags" />
+                      <Line type="monotone" dataKey="records" stroke="#ea580c" strokeWidth={2} name="Records" />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
+                <div className="bg-white rounded-xl border border-gray-200 p-5">
+                  <h3 className="text-base font-bold text-gray-900 mb-4">Fertilizer Distribution</h3>
+                  <ResponsiveContainer width="100%" height={260}>
+                    <PieChart>
+                      <Pie data={distributionData} cx="50%" cy="50%" outerRadius={90} dataKey="value"
+                        label={({ name, value }) => `${name}: ${value}`}>
+                        {distributionData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+                      </Pie>
+                      <Tooltip formatter={(v) => [`${v} bags`, 'Qty']} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
 
-                {/* Distribution Breakdown */}
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                  <h3 className="text-lg font-bold text-gray-900 mb-4">Fertilizer Distribution</h3>
-                  <div className="flex items-center justify-center">
-                    <ResponsiveContainer width="100%" height={300}>
-                      <PieChart>
-                        <Pie
-                          data={distributionData}
-                          cx="50%"
-                          cy="50%"
-                          labelLine={false}
-                          label={({ name, value }) => `${name}: ${value} bags`}
-                          outerRadius={100}
-                          fill="#8884d8"
-                          dataKey="value"
-                        >
-                          {distributionData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={entry.color} />
-                          ))}
-                        </Pie>
-                          <Tooltip formatter={(value) => [`${value} bags`, 'Quantity']} />
-                      </PieChart>
-                    </ResponsiveContainer>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                {[
+                  { title: 'Top Performing Retailers', data: topRetailerData, color1: '#16a34a', color2: '#84cc16' },
+                  { title: 'Top Performing AMCOS', data: topAmcosData, color1: '#7c3aed', color2: '#a78bfa' },
+                ].map(({ title, data, color1, color2 }) => (
+                  <div key={title} className="bg-white rounded-xl border border-gray-200 p-5">
+                    <h3 className="text-base font-bold text-gray-900 mb-3">{title}</h3>
+                    {data.length === 0 ? (
+                      <p className="py-12 text-center text-sm text-gray-400">No data yet.</p>
+                    ) : (
+                      <ResponsiveContainer width="100%" height={220}>
+                        <BarChart data={data} layout="vertical" margin={{ right: 20 }}>
+                          <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e5e7eb" />
+                          <XAxis type="number" stroke="#6b7280" fontSize={11} allowDecimals={false} />
+                          <YAxis type="category" dataKey="label" stroke="#6b7280" width={100} fontSize={11} />
+                          <Tooltip />
+                          <Legend />
+                          <Bar dataKey="bags" fill={color1} name="Bags" radius={[0, 4, 4, 0]} />
+                          <Bar dataKey="verified" fill={color2} name="Verified" radius={[0, 4, 4, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    )}
                   </div>
-                </div>
+                ))}
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                  <h3 className="text-lg font-bold text-gray-900 mb-1">Top Performing Retailers</h3>
-                  <p className="text-sm text-gray-600 mb-4">Ranked by bags sold to customers.</p>
-                  {topRetailerData.length === 0 ? (
-                    <p className="py-16 text-center text-sm text-gray-500">No retailer sales recorded yet.</p>
-                  ) : (
-                    <ResponsiveContainer width="100%" height={280}>
-                      <BarChart
-                        data={topRetailerData}
-                        layout="vertical"
-                        margin={{ top: 8, right: 24, left: 8, bottom: 8 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" horizontal={false} />
-                        <XAxis type="number" stroke="#6b7280" allowDecimals={false} />
-                        <YAxis
-                          type="category"
-                          dataKey="label"
-                          stroke="#6b7280"
-                          width={112}
-                          tick={{ fontSize: 12 }}
-                        />
-                        <Tooltip
-                          formatter={(value, key) => [`${value} bags`, key === 'verified' ? 'Verified' : 'Sold']}
-                          labelFormatter={(_, items) => items?.[0]?.payload?.name || ''}
-                        />
-                        <Legend />
-                        <Bar dataKey="bags" fill="#16a34a" name="Bags sold" radius={[0, 6, 6, 0]} />
-                        <Bar dataKey="verified" fill="#84cc16" name="Verified" radius={[0, 6, 6, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  )}
-                </div>
-
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                  <h3 className="text-lg font-bold text-gray-900 mb-1">Top Performing AMCOS</h3>
-                  <p className="text-sm text-gray-600 mb-4">Ranked by bags distributed to farmers.</p>
-                  {topAmcosData.length === 0 ? (
-                    <p className="py-16 text-center text-sm text-gray-500">No AMCOS distributions recorded yet.</p>
-                  ) : (
-                    <ResponsiveContainer width="100%" height={280}>
-                      <BarChart
-                        data={topAmcosData}
-                        layout="vertical"
-                        margin={{ top: 8, right: 24, left: 8, bottom: 8 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" horizontal={false} />
-                        <XAxis type="number" stroke="#6b7280" allowDecimals={false} />
-                        <YAxis
-                          type="category"
-                          dataKey="label"
-                          stroke="#6b7280"
-                          width={112}
-                          tick={{ fontSize: 12 }}
-                        />
-                        <Tooltip
-                          formatter={(value, key) => [`${value} bags`, key === 'verified' ? 'Verified' : 'Distributed']}
-                          labelFormatter={(_, items) => items?.[0]?.payload?.name || ''}
-                        />
-                        <Legend />
-                        <Bar dataKey="bags" fill="#7c3aed" name="Bags distributed" radius={[0, 6, 6, 0]} />
-                        <Bar dataKey="verified" fill="#a78bfa" name="Verified" radius={[0, 6, 6, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  )}
-                </div>
-              </div>
-
-              {/* Regional Overview */}
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-1">Regional Overview — Tanzania</h3>
-                <p className="text-sm text-gray-600 mb-4">Cooperatives and retailers grouped by region and district.</p>
-                {statusMessage && <p className="mb-3 text-sm text-red-600">{statusMessage}</p>}
+              <div className="bg-white rounded-xl border border-gray-200 p-5">
+                <h3 className="text-base font-bold text-gray-900 mb-4">Regional Overview</h3>
                 <div className="overflow-x-auto">
-                  <table className="w-full">
+                  <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-gray-200">
-                        <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Region</th>
-                        <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">District</th>
-                        <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Cooperatives</th>
-                        <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Retailers</th>
-                        <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Farmers</th>
+                        {['Region', 'District', 'Cooperatives', 'Retailers', 'Farmers'].map((h) => (
+                          <th key={h} className="text-left py-3 px-4 font-semibold text-gray-700">{h}</th>
+                        ))}
                       </tr>
                     </thead>
                     <tbody>
                       {regionData.length === 0 && (
-                        <tr>
-                          <td colSpan="5" className="py-6 text-center text-sm text-gray-500">
-                            No cooperative or retailer coverage recorded yet.
-                          </td>
-                        </tr>
+                        <tr><td colSpan={5} className="py-8 text-center text-gray-400">No data yet.</td></tr>
                       )}
                       {regionData.map((row) => (
                         <tr key={`${row.region}-${row.district}`} className="border-b border-gray-100 hover:bg-gray-50">
                           <td className="py-3 px-4 font-medium text-gray-900">{row.region}</td>
-                          <td className="py-3 px-4 font-medium text-gray-900">{row.district}</td>
-                          <td className="py-3 px-4 text-gray-700">{row.cooperatives}</td>
-                          <td className="py-3 px-4 text-gray-700">{row.retailers}</td>
-                          <td className="py-3 px-4 text-gray-700">{row.farmers}</td>
+                          <td className="py-3 px-4 text-gray-700">{row.district}</td>
+                          <td className="py-3 px-4 text-gray-600">{row.cooperatives}</td>
+                          <td className="py-3 px-4 text-gray-600">{row.retailers}</td>
+                          <td className="py-3 px-4 text-gray-600">{row.farmers}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
               </div>
-
-              {/* Recent Activity */}
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-4">Recent Activity</h3>
-                <div className="space-y-4">
-                  {recentActivity.map((activity) => (
-                    <div key={activity.id} className="flex items-start gap-4 p-4 bg-gray-50 rounded-lg">
-                      <div className={`p-2 rounded-lg ${
-                        activity.status === 'completed' ? 'bg-green-100' : 'bg-yellow-100'
-                      }`}>
-                        {activity.status === 'completed' ? (
-                          <CheckCircle className="h-5 w-5 text-green-600" />
-                        ) : (
-                          <Clock className="h-5 w-5 text-yellow-600" />
-                        )}
-                      </div>
-                      <div className="flex-1">
-                        <p className="font-medium text-gray-900">{activity.entity}</p>
-                        <p className="text-sm text-gray-600">{activity.action}</p>
-                        <p className="text-xs text-gray-500 mt-1">{activity.time}</p>
-                      </div>
-                      <ChevronRight className="h-5 w-5 text-gray-400" />
-                    </div>
-                  ))}
-                </div>
-              </div>
             </div>
           )}
 
-          {activeTab === 'suppliers' && (
-            <div className="space-y-6">
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                <div className="mb-4 text-center">
-                  <h2 className="text-2xl font-bold text-gray-900">Suppliers Management</h2>
-                  <p className="text-base text-gray-600">Monitor fertilizer suppliers and their dispatch activity.</p>
-                </div>
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
-                  <input
-                    type="text"
-                    value={supplierQuery}
-                    onChange={(e) => setSupplierQuery(e.target.value)}
-                    placeholder="Search suppliers..."
-                    className="w-full md:w-72 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  />
-                  <select
-                    value={supplierStatusFilter}
-                    onChange={(e) => setSupplierStatusFilter(e.target.value)}
-                    className="w-full md:w-44 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  >
-                    <option value="all">All Status</option>
-                    <option value="registered">Registered</option>
-                  </select>
-                  <select
-                    value={supplierSort}
-                    onChange={(e) => setSupplierSort(e.target.value)}
-                    className="w-full md:w-44 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  >
-                    <option value="name">Sort by Name</option>
-                    <option value="region">Sort by Region</option>
-                    <option value="status">Sort by Status</option>
-                  </select>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left">
-                    <thead>
-                      <tr className="border-b border-gray-200 text-sm text-gray-600">
-                        <th className="py-3 px-2">Supplier</th>
-                        <th className="py-3 px-2">Region</th>
-                        <th className="py-3 px-2">Phone</th>
-                        <th className="py-3 px-2">Last Dispatch</th>
-                        <th className="py-3 px-2">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredSuppliers.length === 0 && (
-                        <tr>
-                          <td colSpan="5" className="py-6 text-center text-sm text-gray-500">
-                            No suppliers yet. Add a supplier to see them here.
-                          </td>
-                        </tr>
-                      )}
-                      {supplierPagination.pageItems.map((supplier) => (
-                          <tr key={supplier.id} className="border-b border-gray-100 text-sm">
-                            <td className="py-3 px-2">
-                              <p className="font-semibold text-gray-900">{supplier.name}</p>
-                              <p className="text-xs text-gray-500">{supplier.id}</p>
-                            </td>
-                            <td className="py-3 px-2 text-gray-700">{supplier.region}</td>
-                            <td className="py-3 px-2 text-gray-700">{supplier.phone}</td>
-                            <td className="py-3 px-2 text-gray-700">{supplier.lastDispatch}</td>
-                            <td className="py-3 px-2">
-                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                supplier.status === 'registered' ? 'bg-green-100 text-green-700' :
-                                'bg-gray-100 text-gray-600'
-                              }`}>
-                                {supplier.status}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                    </tbody>
-                  </table>
-                </div>
-                <PaginationBar
-                  page={supplierPagination.page}
-                  totalPages={supplierPagination.totalPages}
-                  total={supplierPagination.total}
-                  rangeStart={supplierPagination.rangeStart}
-                  rangeEnd={supplierPagination.rangeEnd}
-                  onPrev={supplierPagination.goPrev}
-                  onNext={supplierPagination.goNext}
-                  canPrev={supplierPagination.canPrev}
-                  canNext={supplierPagination.canNext}
-                />
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'retailers' && (
-            <div className="space-y-6">
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                <div className="mb-4 text-center">
-                  <h2 className="text-2xl font-bold text-gray-900">Retailers Management</h2>
-                  <p className="text-base text-gray-600">Track retail shops and fertilizer stock levels.</p>
-                </div>
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
-                  <input
-                    type="text"
-                    value={retailerQuery}
-                    onChange={(e) => setRetailerQuery(e.target.value)}
-                    placeholder="Search retailers..."
-                    className="w-full md:w-72 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  />
-                  <select
-                    value={retailerStatusFilter}
-                    onChange={(e) => setRetailerStatusFilter(e.target.value)}
-                    className="w-full md:w-44 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  >
-                    <option value="all">All Status</option>
-                    <option value="registered">Registered</option>
-                  </select>
-                  <select
-                    value={retailerSort}
-                    onChange={(e) => setRetailerSort(e.target.value)}
-                    className="w-full md:w-44 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  >
-                    <option value="name">Sort by Name</option>
-                    <option value="district">Sort by District</option>
-                    <option value="status">Sort by Status</option>
-                  </select>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left">
-                    <thead>
-                      <tr className="border-b border-gray-200 text-sm text-gray-600">
-                        <th className="py-3 px-2">Retailer</th>
-                        <th className="py-3 px-2">District</th>
-                        <th className="py-3 px-2">Bags Available</th>
-                        <th className="py-3 px-2">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredRetailers.length === 0 && (
-                        <tr>
-                          <td colSpan="4" className="py-6 text-center text-sm text-gray-500">
-                            No retailers yet. Add a retailer to see them here.
-                          </td>
-                        </tr>
-                      )}
-                      {retailerPagination.pageItems.map((retailer) => (
-                          <tr key={retailer.id} className="border-b border-gray-100 text-sm">
-                            <td className="py-3 px-2">
-                              <p className="font-semibold text-gray-900">{retailer.name}</p>
-                              <p className="text-xs text-gray-500">{retailer.id}</p>
-                            </td>
-                            <td className="py-3 px-2 text-gray-700">{retailer.district}</td>
-                            <td className="py-3 px-2 text-gray-700">{retailer.bagsAvailable}</td>
-                            <td className="py-3 px-2">
-                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                retailer.status === 'registered' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'
-                              }`}>
-                                {retailer.status}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                    </tbody>
-                  </table>
-                </div>
-                <PaginationBar
-                  page={retailerPagination.page}
-                  totalPages={retailerPagination.totalPages}
-                  total={retailerPagination.total}
-                  rangeStart={retailerPagination.rangeStart}
-                  rangeEnd={retailerPagination.rangeEnd}
-                  onPrev={retailerPagination.goPrev}
-                  onNext={retailerPagination.goNext}
-                  canPrev={retailerPagination.canPrev}
-                  canNext={retailerPagination.canNext}
-                />
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'cooperatives' && (
-            <div className="space-y-6">
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                <div className="mb-4 text-center">
-                  <h2 className="text-2xl font-bold text-gray-900">Cooperatives Management</h2>
-                  <p className="text-base text-gray-600">Coordinate AMCOS distribution and verification workflows.</p>
-                </div>
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
-                  <input
-                    type="text"
-                    value={cooperativeQuery}
-                    onChange={(e) => setCooperativeQuery(e.target.value)}
-                    placeholder="Search cooperatives..."
-                    className="w-full md:w-72 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  />
-                  <select
-                    value={cooperativeStatusFilter}
-                    onChange={(e) => setCooperativeStatusFilter(e.target.value)}
-                    className="w-full md:w-44 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  >
-                    <option value="all">All Status</option>
-                    <option value="registered">Registered</option>
-                  </select>
-                  <select
-                    value={cooperativeSort}
-                    onChange={(e) => setCooperativeSort(e.target.value)}
-                    className="w-full md:w-44 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  >
-                    <option value="name">Sort by Name</option>
-                    <option value="district">Sort by District</option>
-                    <option value="status">Sort by Status</option>
-                  </select>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left">
-                    <thead>
-                      <tr className="border-b border-gray-200 text-sm text-gray-600">
-                        <th className="py-3 px-2">Cooperative</th>
-                        <th className="py-3 px-2">District</th>
-                        <th className="py-3 px-2">Members</th>
-                        <th className="py-3 px-2">Verification</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredCooperatives.length === 0 && (
-                        <tr>
-                          <td colSpan="4" className="py-6 text-center text-sm text-gray-500">
-                            No cooperatives yet. Add a cooperative to see them here.
-                          </td>
-                        </tr>
-                      )}
-                      {cooperativePagination.pageItems.map((coop) => (
-                          <tr key={coop.id} className="border-b border-gray-100 text-sm">
-                            <td className="py-3 px-2">
-                              <p className="font-semibold text-gray-900">{coop.name}</p>
-                              <p className="text-xs text-gray-500">{coop.id}</p>
-                            </td>
-                            <td className="py-3 px-2 text-gray-700">{coop.district}</td>
-                            <td className="py-3 px-2 text-gray-700">{coop.members}</td>
-                            <td className="py-3 px-2">
-                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                coop.verification === 'registered' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
-                              }`}>
-                                {coop.verification}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                    </tbody>
-                  </table>
-                </div>
-                <PaginationBar
-                  page={cooperativePagination.page}
-                  totalPages={cooperativePagination.totalPages}
-                  total={cooperativePagination.total}
-                  rangeStart={cooperativePagination.rangeStart}
-                  rangeEnd={cooperativePagination.rangeEnd}
-                  onPrev={cooperativePagination.goPrev}
-                  onNext={cooperativePagination.goNext}
-                  canPrev={cooperativePagination.canPrev}
-                  canNext={cooperativePagination.canNext}
-                />
-              </div>
-            </div>
-          )}
-
+          {/* User Management */}
           {activeTab === 'users' && (
-            <div className="space-y-6">
-              <div className="flex justify-end">
-                <button
-                  onClick={openCreateUserForm}
-                  className="bg-green-600 text-white px-5 py-2.5 rounded-lg font-medium hover:bg-green-700 transition-colors flex items-center gap-2"
-                >
-                  <Plus className="h-4 w-4" />
-                  Add User
-                </button>
+            <div className="space-y-5">
+              {/* Role sub-tabs */}
+              <div className="flex gap-1 bg-gray-100 rounded-xl p-1 overflow-x-auto">
+                {ROLE_TABS.map(({ key, label, icon: Icon, color }) => (
+                  <button
+                    key={key}
+                    onClick={() => setActiveRoleTab(key)}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
+                      activeRoleTab === key ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    <Icon className={`h-4 w-4 ${activeRoleTab === key ? color : ''}`} />
+                    {label}
+                    <span className="text-xs text-gray-400">
+                      ({users.filter((u) => u.role === key).length})
+                    </span>
+                  </button>
+                ))}
               </div>
 
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                <div className="mb-4 text-center">
-                  <h3 className="text-2xl font-bold text-gray-900">User Accounts</h3>
-                  <p className="text-base text-gray-600">Create and manage platform access by role.</p>
-                </div>
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
-                  <input
-                    type="text"
-                    placeholder="Search users..."
-                    value={userQuery}
-                    onChange={(e) => setUserQuery(e.target.value)}
-                    className="w-full md:w-52 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  />
-                  <select
-                    value={userRoleFilter}
-                    onChange={(e) => setUserRoleFilter(e.target.value)}
-                    className="w-full md:w-44 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  >
-                    <option value="all">All Roles</option>
-                    <option value="admin">Admin</option>
-                    <option value="supplier">Supplier</option>
-                    <option value="warehouse_manager">Warehouse Manager</option>
-                    <option value="retailer">Retailer</option>
-                    <option value="cooperative">Cooperative</option>
-                    <option value="regulator">Regulator</option>
-                  </select>
-                  <select
-                    value={userSort}
-                    onChange={(e) => setUserSort(e.target.value)}
-                    className="w-full md:w-44 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  >
-                    <option value="username">Sort by Username</option>
-                    <option value="role">Sort by Role</option>
-                    <option value="organization">Sort by Organization</option>
-                  </select>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left">
-                    <thead>
-                      <tr className="border-b border-gray-200 text-sm text-gray-600">
-                        <th className="py-3 px-2">Username</th>
-                        <th className="py-3 px-2">Role</th>
-                        <th className="py-3 px-2">Organization</th>
-                        <th className="py-3 px-2">Email</th>
-                        <th className="py-3 px-2 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredUsers.length === 0 && (
-                        <tr>
-                          <td colSpan="5" className="py-6 text-center text-sm text-gray-500">
-                            No user accounts match your filters.
-                          </td>
-                        </tr>
-                      )}
-                      {userPagination.pageItems.map((record) => (
-                        <tr key={record.user.id} className="border-b border-gray-100 text-sm">
-                          <td className="py-3 px-2 font-semibold text-gray-900">{record.user.username}</td>
-                          <td className="py-3 px-2 text-gray-700">{record.role}</td>
-                          <td className="py-3 px-2 text-gray-700">
-                            {record.supplier?.name ||
-                              record.warehouse_manager?.supplier?.name ||
-                              record.branch?.name ||
-                              'Admin'}
-                          </td>
-                          <td className="py-3 px-2 text-gray-700">{record.user.email || '-'}</td>
-                          <td className="py-3 px-2 text-right">
-                            <button
-                              type="button"
-                              onClick={() => openEditUserForm(record)}
-                              className="inline-flex items-center gap-1.5 text-green-600 hover:text-green-800 font-medium text-sm"
-                            >
-                              <Pencil className="h-4 w-4" />
-                              Edit
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <PaginationBar
-                  page={userPagination.page}
-                  totalPages={userPagination.totalPages}
-                  total={userPagination.total}
-                  rangeStart={userPagination.rangeStart}
-                  rangeEnd={userPagination.rangeEnd}
-                  onPrev={userPagination.goPrev}
-                  onNext={userPagination.goNext}
-                  canPrev={userPagination.canPrev}
-                  canNext={userPagination.canNext}
-                />
-              </div>
-
-              {showUserForm && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-6">
-                  <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-5 md:ml-72">
-                    <div className="flex items-center justify-between mb-4">
-                      <h2 className="text-lg font-bold text-gray-900">
-                        {editingUserId ? 'Edit User' : 'Add User'}
-                      </h2>
-                      <button
-                        onClick={closeUserForm}
-                        className="text-gray-500 hover:text-gray-700"
-                      >
-                        Close
-                      </button>
-                    </div>
-                    {userFormLoading && (
-                      <p className="mb-3 text-sm text-gray-500">Loading user details…</p>
-                    )}
-                    <div
-                      key={editingUserId ?? 'new-user'}
-                      className="grid grid-cols-1 md:grid-cols-2 gap-3"
-                    >
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
-                        <input
-                          type="text"
-                          value={userForm.username}
-                          onChange={(e) => setUserForm({ ...userForm, username: e.target.value })}
-                          readOnly={Boolean(editingUserId)}
-                          className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent ${
-                            editingUserId ? 'bg-gray-100 text-gray-600 cursor-not-allowed' : ''
-                          }`}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          {editingUserId ? 'New password (optional)' : 'Password'}
-                        </label>
-                        <input
-                          type="password"
-                          value={userForm.password}
-                          onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
-                        <select
-                          value={userForm.role}
-                          onChange={(e) => setUserForm({ ...userForm, role: e.target.value })}
-                          disabled={Boolean(editingUserId)}
-                          className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent ${
-                            editingUserId ? 'bg-gray-100 text-gray-600 cursor-not-allowed' : ''
-                          }`}
-                        >
-                        <option value="admin">Admin</option>
-                        <option value="supplier">Supplier</option>
-                        <option value="warehouse_manager">Warehouse Manager</option>
-                        <option value="retailer">Retailer</option>
-                        <option value="cooperative">Cooperative</option>
-                        <option value="regulator">Regulator</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">First name</label>
-                        <input
-                          type="text"
-                          value={userForm.first_name}
-                          onChange={(e) => setUserForm({ ...userForm, first_name: e.target.value })}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Last name</label>
-                        <input
-                          type="text"
-                          value={userForm.last_name}
-                          onChange={(e) => setUserForm({ ...userForm, last_name: e.target.value })}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                        <input
-                          type="email"
-                          value={userForm.email}
-                          onChange={(e) => setUserForm({ ...userForm, email: e.target.value })}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                        />
-                      </div>
-                      {userForm.role === 'warehouse_manager' && (
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Linked supplier
-                          </label>
-                          <select
-                            value={userForm.supplier_id}
-                            onChange={(e) =>
-                              setUserForm({ ...userForm, supplier_id: e.target.value })
-                            }
-                            disabled={Boolean(editingUserId)}
-                            className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent ${
-                              editingUserId ? 'bg-gray-100 text-gray-600 cursor-not-allowed' : ''
-                            }`}
-                          >
-                            <option value="">Select supplier</option>
-                            {suppliers.map((supplier) => (
-                              <option key={supplier.id} value={supplier.recordId}>
-                                {supplier.name}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      )}
-                      {userForm.role !== 'admin' && userForm.role !== 'warehouse_manager' && (
-                        <>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          {userForm.role === 'supplier' ? 'Supplier name' : 'Branch name'}
-                        </label>
-                        <input
-                          type="text"
-                          value={userForm.role === 'supplier' ? userForm.supplier_name : userForm.branch_name}
-                          onChange={(e) =>
-                            setUserForm(
-                              userForm.role === 'supplier'
-                                ? { ...userForm, supplier_name: e.target.value }
-                                : { ...userForm, branch_name: e.target.value }
-                            )
-                          }
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                        />
-                      </div>
-                      {userForm.role === 'supplier' ? (
-                        <>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Supplier region</label>
-                            <input
-                              type="text"
-                              value={userForm.supplier_region}
-                              onChange={(e) => setUserForm({ ...userForm, supplier_region: e.target.value })}
-                              list="supplier-region-options"
-                              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                            />
-                          </div>
-                          <datalist id="supplier-region-options">
-                            {getRegionOptions(userForm.supplier_region).map((region) => (
-                              <option key={region} value={region} />
-                            ))}
-                          </datalist>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Contact phone</label>
-                            <input
-                              type="text"
-                              value={userForm.contact_phone}
-                              onChange={(e) => setUserForm({ ...userForm, contact_phone: e.target.value })}
-                              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                            />
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Branch type</label>
-                            <select
-                              value={userForm.branch_type}
-                              onChange={(e) => setUserForm({ ...userForm, branch_type: e.target.value })}
-                              disabled={Boolean(editingUserId)}
-                              className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent ${
-                                editingUserId ? 'bg-gray-100 text-gray-600 cursor-not-allowed' : ''
-                              }`}
-                            >
-                              <option value="RETAILER">Retailer</option>
-                              <option value="COOPERATIVE">Cooperative</option>
-                              <option value="REGULATOR">Regulator</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Region</label>
-                            <input
-                              type="text"
-                              value={userForm.region}
-                              onChange={(e) =>
-                                setUserForm({ ...userForm, region: e.target.value, district: '' })
-                              }
-                              list="region-options"
-                              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                            />
-                          </div>
-                          <datalist id="region-options">
-                            {getRegionOptions(userForm.region).map((region) => (
-                              <option key={region} value={region} />
-                            ))}
-                          </datalist>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">District</label>
-                            <input
-                              type="text"
-                              value={userForm.district}
-                              onChange={(e) => setUserForm({ ...userForm, district: e.target.value })}
-                              list="district-options"
-                              disabled={!userForm.region}
-                              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent disabled:bg-gray-100"
-                            />
-                          </div>
-                          <datalist id="district-options">
-                            {filteredDistrictOptions.map((district) => (
-                              <option key={district} value={district} />
-                            ))}
-                          </datalist>
-                        </>
-                      )}
-                        </>
-                      )}
-                    </div>
-                    <div className="mt-4 flex items-center justify-between">
-                      {userStatus && <p className="text-sm text-red-600">{userStatus}</p>}
-                      <button
-                        onClick={handleSaveUser}
-                        disabled={userFormLoading}
-                        className="bg-green-600 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-green-700 transition-colors ml-auto disabled:opacity-60 disabled:cursor-not-allowed"
-                      >
-                        {editingUserId ? 'Save Changes' : 'Create User'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
+              <RoleUserTable
+                key={activeRoleTab}
+                role={activeRoleTab}
+                users={users}
+                suppliers={supplierOptions}
+                warehouses={warehouses}
+                onRefresh={loadData}
+              />
             </div>
           )}
 
+          {/* Registrations */}
+          {activeTab === 'registrations' && <PendingRegistrationsPanel />}
+
+          {/* Reports */}
+          {activeTab === 'reports' && <ReportsPanel />}
+
+          {/* Integrity */}
           {activeTab === 'integrity' && (
             <IntegrityPanel
-              highlightTransferId={integrityHighlightId}
-              onScanComplete={() => refreshNotifications()}
+              userProfile={userProfile}
+              initialHighlightId={integrityHighlightId}
+              onClearHighlight={() => setIntegrityHighlightId('')}
             />
           )}
 
+          {activeTab === 'profile' && (
+            <AdminProfilePanel userProfile={userProfile} />
+          )}
         </main>
       </div>
     </div>

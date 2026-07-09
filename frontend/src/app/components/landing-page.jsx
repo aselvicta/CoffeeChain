@@ -24,13 +24,15 @@ export function LandingPage() {
             <div className="bg-white rounded-2xl p-3 shadow-xl">
               <Logo size="lg" variant="full" theme="dark" showText={false} />
             </div>
-            <Link 
-              to="/login"
-              className="bg-white text-green-900 px-6 py-2.5 rounded-xl font-semibold hover:bg-green-50 transition-colors shadow-md inline-flex items-center gap-2"
-            >
-              Ingia
-              <ArrowRight className="h-4 w-4" />
-            </Link>
+            <div className="flex items-center gap-3">
+              <Link 
+                to="/login"
+                className="bg-white text-green-900 px-6 py-2.5 rounded-xl font-semibold hover:bg-green-50 transition-colors shadow-md inline-flex items-center gap-2"
+              >
+                Ingia
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </div>
           </div>
         </nav>
 
@@ -49,7 +51,14 @@ export function LandingPage() {
                   to="/login"
                   className="bg-white text-green-900 px-8 py-4 rounded-lg font-semibold hover:bg-green-50 transition-colors inline-flex items-center gap-2"
                 >
-                  Anzisha Mfumo
+                  Ingia Mfumoni
+                  <ArrowRight className="h-5 w-5" />
+                </Link>
+                <Link
+                  to="/signup"
+                  className="bg-green-600 border-2 border-green-500 text-white px-8 py-4 rounded-lg font-semibold hover:bg-green-500 transition-colors inline-flex items-center gap-2"
+                >
+                  Jisajili Sasa
                   <ArrowRight className="h-5 w-5" />
                 </Link>
                 <a 

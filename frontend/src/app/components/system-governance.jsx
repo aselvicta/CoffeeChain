@@ -2,10 +2,12 @@ import { useState } from 'react';
 import { Users, Plus, Edit, Trash2, Shield, UserCog, Building2, MapPin } from 'lucide-react';
 import { useLanguage } from './language-context';
 import { TrustSeal } from './trust-seal';
+import { ConfirmDialog } from './ui/confirm-dialog';
 
 export function SystemGovernance() {
   const { t, language } = useLanguage();
   const [showAddForm, setShowAddForm] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState(null);
   const [formData, setFormData] = useState({
     username: '',
     fullName: '',
@@ -133,9 +135,15 @@ export function SystemGovernance() {
   };
 
   const handleDeleteUser = (userId) => {
-    if (confirm(language === 'en' ? 'Are you sure you want to delete this user?' : 'Una uhakika unataka kufuta mtumiaji huyu?')) {
-      setUsers(users.filter(u => u.id !== userId));
-    }
+    setConfirmDialog({
+      title: language === 'en' ? 'Delete User' : 'Futa Mtumiaji',
+      message: language === 'en' ? 'Are you sure you want to delete this user? This cannot be undone.' : 'Una uhakika unataka kufuta mtumiaji huyu? Hii haiwezi kutenduliwa.',
+      confirmLabel: language === 'en' ? 'Yes, Delete' : 'Ndiyo, Futa',
+      onConfirm: () => {
+        setUsers(users.filter(u => u.id !== userId));
+        setConfirmDialog(null);
+      },
+    });
   };
 
   const handleToggleStatus = (userId) => {
@@ -153,6 +161,15 @@ export function SystemGovernance() {
 
   return (
     <div className="space-y-6">
+      <ConfirmDialog
+        open={!!confirmDialog}
+        title={confirmDialog?.title}
+        message={confirmDialog?.message}
+        confirmLabel={confirmDialog?.confirmLabel}
+        danger={true}
+        onConfirm={confirmDialog?.onConfirm}
+        onCancel={() => setConfirmDialog(null)}
+      />
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">

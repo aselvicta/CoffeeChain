@@ -22,6 +22,7 @@ import { getUserMessage } from '../utils/user-messages';
 import { HISTORY_PAGE_SIZE } from '../utils/list-limits';
 import { usePaginatedList } from '../hooks/use-paginated-list';
 import { PaginationBar } from './ui/pagination-bar';
+import { getBranchTypeLabel, getRoleColor } from '../utils/role-labels';
 
 function VerifiedDateCell({ value }) {
   if (!value) return '—';
@@ -213,10 +214,10 @@ function DetailModal({ item, onClose, initialView = 'compare' }) {
                   <ul className="mt-2 space-y-2 text-sm text-red-800">
                     {changes.map((change) => (
                       <li key={`${change.field}-${change.database}`}>
-                        <span className="font-medium capitalize">{change.field}:</span>{' '}
-                        database <strong>{String(change.database ?? '—')}</strong>
-                        {' → '}
-                        receipt <strong>{String(change.receipt ?? '—')}</strong>
+                        <span className="font-medium capitalize">{change.field}</span>{' '}
+                        changed from <strong>{String(change.receipt ?? '—')}</strong>
+                        {' to '}
+                        <strong>{String(change.database ?? '—')}</strong>
                       </li>
                     ))}
                   </ul>
@@ -436,12 +437,23 @@ export function IntegrityPanel({ highlightTransferId = '', onScanComplete }) {
     try {
       const result = await compareIntegrityTransfer(row.transfer_id, { notify: true });
       setCompareResults((current) => ({ ...current, [row.transfer_id]: result }));
-      if (result.notified) {
+      if (result.notified || result.restored) {
         onScanComplete?.();
+      }
+      if (result.restored) {
+        setInfoMessage(`Transfer #${row.transfer_id} restored — data now matches the original receipt. Admin notified.`);
+        setErrorMessage('');
       }
       openModal({ ...row, ...result }, 'compare');
     } catch (error) {
-      setErrorMessage(getUserMessage(error, 'Compare failed.'));
+      const msg = getUserMessage(error, null);
+      if (msg) {
+        setErrorMessage(`Compare failed for Transfer #${row.transfer_id}: ${msg}`);
+      } else if (error?.message?.toLowerCase().includes('network') || error?.message?.toLowerCase().includes('fetch')) {
+        setErrorMessage(`Could not reach the server while comparing Transfer #${row.transfer_id}. Check your connection and try again.`);
+      } else {
+        setErrorMessage(`Transfer #${row.transfer_id}: comparison could not be completed. The receipt may be unavailable or the transfer has no anchor.`);
+      }
     } finally {
       setComparingId(null);
     }
@@ -454,6 +466,7 @@ export function IntegrityPanel({ highlightTransferId = '', onScanComplete }) {
     }
     setScanning(true);
     setErrorMessage('');
+    setInfoMessage('');
     try {
       const data = await scanIntegrityFiltered({
         branchId,
@@ -467,14 +480,42 @@ export function IntegrityPanel({ highlightTransferId = '', onScanComplete }) {
         mapped[item.transfer_id] = item;
       });
       setCompareResults((current) => ({ ...current, ...mapped }));
-      if (data.summary?.alerts_sent) {
+      if (data.summary?.alerts_sent || data.summary?.restored_sent) {
         onScanComplete?.();
       }
-      setInfoMessage(
-        `Compared ${data.summary?.total || 0} transfers — ${data.summary?.mismatch || 0} mismatch(es).`
-      );
+      const total = data.summary?.total || 0;
+      const mismatches = data.summary?.mismatch || 0;
+      const alerts = data.summary?.alerts_sent || 0;
+      const restored = data.summary?.restored_sent || 0;
+      if (mismatches > 0) {
+        // Build a detailed mismatch summary
+        const mismatchItems = (data.results || []).filter((r) => r.status === 'mismatch');
+        const details = mismatchItems.map((r) => {
+          const changeDesc = (r.changes || [])
+            .filter((c) => c.field !== 'data hash')
+            .map((c) => `${c.field} changed from ${c.receipt ?? '—'} to ${c.database ?? '—'}`)
+            .join('; ');
+          return `Transfer #${r.transfer_id} (${r.batch_code || 'no batch'})${changeDesc ? ` — ${changeDesc}` : ''}`;
+        });
+        setErrorMessage(
+          `⚠ ${mismatches} mismatch${mismatches > 1 ? 'es' : ''} found out of ${total} transfers.${alerts > 0 ? ` Admin notified via SMS and notification.` : ''}${restored > 0 ? ` ${restored} transfer${restored > 1 ? 's' : ''} restored to receipt values.` : ''}\n${details.join('\n')}`
+        );
+      } else if (restored > 0) {
+        setInfoMessage(
+          `${restored} transfer${restored > 1 ? 's' : ''} restored — data now matches original receipt${restored > 1 ? 's' : ''}. Admin notified via SMS and notification.`
+        );
+      } else {
+        setInfoMessage(`All ${total} transfer${total !== 1 ? 's' : ''} verified — no mismatches found.`);
+      }
     } catch (error) {
-      setErrorMessage(getUserMessage(error, 'Batch compare failed.'));
+      const msg = getUserMessage(error, null);
+      if (msg) {
+        setErrorMessage(`Scan failed: ${msg}`);
+      } else if (error?.message?.toLowerCase().includes('network') || error?.message?.toLowerCase().includes('fetch')) {
+        setErrorMessage('Could not reach the server. Check your connection and try again.');
+      } else {
+        setErrorMessage('Batch compare could not be completed. Some receipts may be unavailable or transfers lack anchors.');
+      }
     } finally {
       setScanning(false);
     }
@@ -598,13 +639,23 @@ export function IntegrityPanel({ highlightTransferId = '', onScanComplete }) {
       </div>
 
       {errorMessage && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-          {errorMessage}
+        <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-red-600" />
+            <div className="space-y-1">
+              {errorMessage.split('\n').map((line, i) => (
+                <p key={i} className={i === 0 ? 'font-semibold' : 'text-red-700'}>{line}</p>
+              ))}
+            </div>
+          </div>
         </div>
       )}
       {infoMessage && (
-        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-          {infoMessage}
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+            <span>{infoMessage}</span>
+          </div>
         </div>
       )}
 
@@ -668,7 +719,14 @@ export function IntegrityPanel({ highlightTransferId = '', onScanComplete }) {
                           <div className="font-medium text-gray-900">{item.batch_code || '—'}</div>
                           <div className="text-xs text-gray-500">{item.farmer_name || '—'}</div>
                         </td>
-                        <td className="px-4 py-3 text-gray-700">{item.branch_name || '—'}</td>
+                        <td className="px-4 py-3">
+                          <div className="text-gray-900 font-medium">{item.branch_name || '—'}</div>
+                          {item.branch_type && (
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold mt-0.5 ${getRoleColor(item.branch_type === 'RETAILER' ? 'retailer' : item.branch_type === 'COOPERATIVE' ? 'cooperative' : 'regulator')}`}>
+                              {getBranchTypeLabel(item.branch_type)}
+                            </span>
+                          )}
+                        </td>
                         <td className="px-4 py-3 text-gray-700 whitespace-nowrap">
                           <VerifiedDateCell value={item.verified_at} />
                         </td>

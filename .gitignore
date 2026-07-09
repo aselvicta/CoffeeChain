@@ -16,3 +16,25 @@ build/
 *.log
 *.pid
 coverage/
+
+# Local uploads / receipts (generated at runtime)
+backend/media/
+
+# Credentials & secrets
+*.pem
+*.key
+credentials.json
+**/proof.txt
+**/storacha-proof*
+**/.storacha/
+
+# Internal docs — only root README.md should appear on GitHub
+*.md
+!README.md
+
+# Keep env templates (safe examples, no real keys)
+!**/.env.example
+
+# Hardhat / contract build cache
+smart-contracts/cache/
+smart-contracts/artifacts/

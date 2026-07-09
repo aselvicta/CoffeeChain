@@ -18,6 +18,9 @@ from .views import (
     MeView,
     NotificationViewSet,
     OTPVerificationViewSet,
+    PendingRegistrationViewSet,
+    PublicRegisterView,
+    ReportsView,
     SupplierViewSet,
     TransferViewSet,
     WarehouseCatalogView,
@@ -39,6 +42,7 @@ router.register("warehouses", WarehouseViewSet)
 router.register("otps", OTPVerificationViewSet)
 router.register("anchors", BlockchainAnchorViewSet)
 router.register("audit-logs", AuditLogViewSet)
+router.register("registrations", PendingRegistrationViewSet, basename="registrations")
 
 
 urlpatterns = [
@@ -46,6 +50,8 @@ urlpatterns = [
     path("warehouse-catalog/", WarehouseCatalogView.as_view(), name="warehouse-catalog"),
     path("fertilizer-types/", FertilizerTypeCatalogView.as_view(), name="fertilizer-types"),
     path("reports/audit/", AuditReportView.as_view(), name="audit-report"),
+    path("reports/", ReportsView.as_view(), name="reports"),
+    path("auth/register/", PublicRegisterView.as_view(), name="public-register"),
     path("integrity/", IntegrityCheckView.as_view(), name="integrity-check"),
     path("integrity/scan/", IntegrityScanView.as_view(), name="integrity-scan"),
     path("integrity/<int:transfer_id>/", IntegrityTransferView.as_view(), name="integrity-transfer"),

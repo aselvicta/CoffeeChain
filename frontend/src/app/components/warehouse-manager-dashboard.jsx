@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import {
+  AlertCircle,
   BarChart3,
   CheckCircle2,
   Clock,
@@ -9,18 +10,36 @@ import {
   LogOut,
   Package,
   Search,
+  TrendingUp,
   Truck,
   Warehouse,
   XCircle,
 } from 'lucide-react';
+import {
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  PieChart,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from 'recharts';
 import { toast } from 'sonner';
 import { Logo } from './logo';
 import { NotificationBell } from './notification-bell';
 import { useNotifications } from '../hooks/use-notifications';
+import { fetchWarehouses, fetchWarehouseCatalog } from '../api/client';
 import { approveTransfer, fetchTransfers, rejectTransfer } from '../api/client';
 import { buildDashboardPath, resolveDashboardTab } from '../utils/dashboard-routing';
 import { getUserMessage } from '../utils/user-messages';
 import { sortByDateDesc, HISTORY_PAGE_SIZE } from '../utils/list-limits';
+import { exportAnalyticsPdf, exportAnalyticsCsv } from '../utils/analytics-export';
+import { AnalyticsExportBar, filterByDateRange } from './ui/analytics-export-bar';
 import { usePaginatedList } from '../hooks/use-paginated-list';
 import { PaginationBar } from './ui/pagination-bar';
 import {
@@ -373,9 +392,11 @@ function TransferList({ items, busyId, onReview, emptyMessage }) {
 
 export function WarehouseManagerDashboard({ userProfile, onLogout }) {
   const dashboardRole = 'warehouse_manager';
-  const dashboardTabs = ['overview', 'pending', 'history'];
+  const dashboardTabs = ['overview', 'pending', 'inventory', 'history', 'analytics'];
   const [activeTab, setActiveTab] = useState('overview');
   const [transfers, setTransfers] = useState([]);
+  const [warehouses, setWarehouses] = useState([]);
+  const [warehouseCatalog, setWarehouseCatalog] = useState([]);
   const [busyId, setBusyId] = useState(null);
   const [selectedTransfer, setSelectedTransfer] = useState(null);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -415,6 +436,13 @@ export function WarehouseManagerDashboard({ userProfile, onLogout }) {
   };
 
   const refreshData = async () => {
+    try {
+      const [whData, catalogData] = await Promise.all([fetchWarehouses(), fetchWarehouseCatalog()]);
+      setWarehouses(whData || []);
+      setWarehouseCatalog(catalogData || []);
+    } catch {
+      // non-critical
+    }
     const data = await fetchTransfers({
       transfer_type: 'SUPPLIER_TO_BRANCH',
       supplier_id: userProfile.supplierRecordId,
@@ -465,6 +493,32 @@ export function WarehouseManagerDashboard({ userProfile, onLogout }) {
 
   const pendingPagination = usePaginatedList(filteredPending, HISTORY_PAGE_SIZE);
   const historyPagination = usePaginatedList(filteredHistory, HISTORY_PAGE_SIZE);
+
+  // ── Analytics chart data ─────────────────────────────────────────────────
+  const dispatchTrend = useMemo(() => {
+    const counts = {};
+    transfers.forEach((t) => {
+      const d = (t.date || '').slice(0, 10);
+      if (!d) return;
+      counts[d] = counts[d] || { date: d, total: 0, received: 0, rejected: 0 };
+      counts[d].total += 1;
+      if (t.rawStatus === 'RECEIVED' || t.rawStatus === 'VERIFIED') counts[d].received += 1;
+      if (t.rawStatus === 'REJECTED') counts[d].rejected += 1;
+    });
+    return Object.values(counts).sort((a, b) => a.date.localeCompare(b.date)).slice(-30);
+  }, [transfers]);
+
+  const statusBreakdown = useMemo(() => {
+    const map = { PENDING: 0, DISPATCHED: 0, RECEIVED: 0, VERIFIED: 0, REJECTED: 0 };
+    transfers.forEach((t) => { if (map[t.rawStatus] !== undefined) map[t.rawStatus] += 1; });
+    return [
+      { name: 'Pending', value: map.PENDING, color: '#f59e0b' },
+      { name: 'In Transit', value: map.DISPATCHED, color: '#3b82f6' },
+      { name: 'Received', value: map.RECEIVED, color: '#10b981' },
+      { name: 'Verified', value: map.VERIFIED, color: '#059669' },
+      { name: 'Rejected', value: map.REJECTED, color: '#dc2626' },
+    ].filter((s) => s.value > 0);
+  }, [transfers]);
 
   const closeReview = () => {
     setReviewOpen(false);
@@ -521,7 +575,9 @@ export function WarehouseManagerDashboard({ userProfile, onLogout }) {
   const sidebarItems = [
     { id: 'overview', label: 'Overview', icon: BarChart3 },
     { id: 'pending', label: 'Pending Approval', icon: Clock, badge: pendingTransfers.length },
+    { id: 'inventory', label: 'Warehouse Inventory', icon: Warehouse },
     { id: 'history', label: 'Dispatch History', icon: History },
+    { id: 'analytics', label: 'Analytics', icon: TrendingUp },
   ];
 
   return (
@@ -589,6 +645,45 @@ export function WarehouseManagerDashboard({ userProfile, onLogout }) {
         <main className="flex-1 p-6 overflow-auto">
           {activeTab === 'overview' && (
             <div className="space-y-6">
+              <AnalyticsExportBar
+                title="Warehouse Overview"
+                subtitle="Dispatch approvals, inventory, and warehouse activity."
+                onExcel={(from, to) => {
+                  const filtered = filterByDateRange(transfers, from, to);
+                  exportAnalyticsCsv({
+                    role: 'Warehouse Manager',
+                    orgName: userProfile?.organization || userProfile?.name || '',
+                    filename: 'warehouse_analytics',
+                    summaryRows: [
+                      { label: 'Total Dispatches', value: filtered.length },
+                      { label: 'Pending Approval', value: pendingTransfers.length },
+                      { label: 'In Transit', value: filtered.filter((t) => t.rawStatus === 'DISPATCHED').length },
+                      { label: 'Received', value: filtered.filter((t) => t.rawStatus === 'RECEIVED' || t.rawStatus === 'VERIFIED').length },
+                      { label: 'Rejected', value: filtered.filter((t) => t.rawStatus === 'REJECTED').length },
+                    ],
+                    tableHeaders: ['Date', 'Supplier', 'Product', 'Bags', 'Destination', 'Status'],
+                    tableData: filtered.map((t) => [t.date, t.supplier || '—', t.product || '—', t.bags ?? '—', t.destination || '—', t.rawStatus || '—']),
+                  });
+                }}
+                onPdf={(from, to) => {
+                  const filtered = filterByDateRange(transfers, from, to);
+                  exportAnalyticsPdf({
+                    role: 'Warehouse Manager',
+                    orgName: userProfile?.organization || userProfile?.name || '',
+                    title: 'Warehouse Analytics Report',
+                    subtitle: from || to ? `Period: ${from || '…'} to ${to || 'today'}` : 'Dispatch approvals, inventory status & transfer history',
+                    summaryRows: [
+                      { label: 'Total Dispatches', value: filtered.length },
+                      { label: 'Pending Approval', value: pendingTransfers.length },
+                      { label: 'Approved & In Transit', value: filtered.filter((t) => t.rawStatus === 'DISPATCHED').length },
+                      { label: 'Received', value: filtered.filter((t) => t.rawStatus === 'RECEIVED' || t.rawStatus === 'VERIFIED').length },
+                      { label: 'Rejected', value: filtered.filter((t) => t.rawStatus === 'REJECTED').length },
+                    ],
+                    tableHeaders: ['Date', 'Supplier', 'Product', 'Bags', 'Destination', 'Status'],
+                    tableData: filtered.map((t) => [t.date, t.supplier || '—', t.product || '—', t.bags ?? '—', t.destination || '—', t.rawStatus || '—']),
+                  });
+                }}
+              />
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <QuickActionCard
                   icon={Clock}
@@ -606,7 +701,7 @@ export function WarehouseManagerDashboard({ userProfile, onLogout }) {
                 />
                 <QuickActionCard
                   icon={Package}
-                  tone="green"
+                  tone="red"
                   title={`${transfers.filter((t) => t.rawStatus === 'REJECTED').length} not approved`}
                   description="Rejected dispatches returned to supplier"
                   onClick={() => {
@@ -705,6 +800,265 @@ export function WarehouseManagerDashboard({ userProfile, onLogout }) {
                 canPrev={historyPagination.canPrev}
                 canNext={historyPagination.canNext}
               />
+            </div>
+          )}
+
+          {/* Inventory tab */}
+          {activeTab === 'inventory' && (
+            <div className="space-y-5">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">Warehouse Inventory</h2>
+                <p className="text-sm text-gray-500">Stock levels and batch details for your assigned warehouse(s).</p>
+              </div>
+
+              {warehouseCatalog.length === 0 ? (
+                <div className="bg-white rounded-xl border border-gray-200 p-10 text-center text-sm text-gray-400">
+                  No warehouse inventory data available. Contact your supplier if warehouses are not visible.
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {warehouseCatalog.map((wh) => {
+                    const usedPct = wh.capacity_bags > 0 ? Math.min(100, Math.round((wh.current_bags / wh.capacity_bags) * 100)) : 0;
+                    const alertLevel = usedPct >= 90 ? 'red' : usedPct >= 70 ? 'amber' : 'green';
+                    return (
+                      <div key={wh.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                        {/* Warehouse header */}
+                        <div className="flex items-start justify-between gap-4 p-5 border-b border-gray-100">
+                          <div className="flex items-center gap-3">
+                            <div className="bg-amber-100 p-2.5 rounded-lg">
+                              <Warehouse className="h-5 w-5 text-amber-700" />
+                            </div>
+                            <div>
+                              <h3 className="font-bold text-gray-900">{wh.name}</h3>
+                              {wh.section && <p className="text-sm text-gray-500">{wh.section}</p>}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm font-semibold text-gray-900">{wh.current_bags.toLocaleString()} / {wh.capacity_bags.toLocaleString()} bags</p>
+                            <p className="text-xs text-gray-500">{wh.available_bags} available to dispatch</p>
+                          </div>
+                        </div>
+
+                        {/* Capacity bar */}
+                        <div className="px-5 py-3 bg-gray-50 border-b border-gray-100">
+                          <div className="flex items-center gap-3">
+                            <div className="flex-1 bg-gray-200 rounded-full h-2">
+                              <div
+                                className={`h-2 rounded-full transition-all ${alertLevel === 'red' ? 'bg-red-500' : alertLevel === 'amber' ? 'bg-amber-500' : 'bg-green-500'}`}
+                                style={{ width: `${usedPct}%` }}
+                              />
+                            </div>
+                            <span className={`text-xs font-semibold ${alertLevel === 'red' ? 'text-red-600' : alertLevel === 'amber' ? 'text-amber-600' : 'text-green-600'}`}>
+                              {usedPct}% full
+                            </span>
+                          </div>
+                          {alertLevel !== 'green' && (
+                            <div className={`flex items-center gap-1.5 mt-1.5 text-xs ${alertLevel === 'red' ? 'text-red-600' : 'text-amber-600'}`}>
+                              <AlertCircle className="h-3.5 w-3.5" />
+                              {alertLevel === 'red' ? 'Warehouse is near full capacity.' : 'Warehouse is getting full.'}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Batch list */}
+                        {wh.items.length === 0 ? (
+                          <p className="px-5 py-4 text-sm text-gray-400">No batches stored in this warehouse.</p>
+                        ) : (
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="border-b border-gray-100">
+                                  {['Batch code', 'Product', 'Total bags', 'Available', 'Certification', 'Expiry'].map((h) => (
+                                    <th key={h} className="text-left py-2.5 px-4 text-xs font-semibold text-gray-600">{h}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {wh.items.map((item) => (
+                                  <tr key={item.batch_id} className="border-b border-gray-50 hover:bg-gray-50">
+                                    <td className="py-2.5 px-4 font-mono text-xs font-medium text-gray-900">{item.batch_code}</td>
+                                    <td className="py-2.5 px-4 text-gray-700">{item.fertilizer_type}</td>
+                                    <td className="py-2.5 px-4 text-gray-700">{item.total_bags}</td>
+                                    <td className="py-2.5 px-4">
+                                      <span className={`font-semibold ${item.available_bags === 0 ? 'text-red-500' : 'text-green-600'}`}>
+                                        {item.available_bags}
+                                      </span>
+                                    </td>
+                                    <td className="py-2.5 px-4">
+                                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${item.certification_status === 'Certified' ? 'bg-green-100 text-green-700' : item.certification_status === 'Rejected' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                                        {item.certification_status}
+                                      </span>
+                                    </td>
+                                    <td className="py-2.5 px-4 text-gray-600 text-xs">{item.expiry_date || '—'}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+          {activeTab === 'analytics' && (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6">
+              <AnalyticsExportBar
+                title="Warehouse Analytics"
+                subtitle="Transfer volume, status breakdown, and dispatch performance."
+                onExcel={(from, to) => {
+                  const filtered = filterByDateRange(transfers, from, to);
+                  exportAnalyticsCsv({
+                    role: 'Warehouse Manager',
+                    orgName: userProfile?.organization || userProfile?.name || '',
+                    filename: 'warehouse_analytics',
+                    summaryRows: [
+                      { label: 'Total Dispatches', value: filtered.length },
+                      { label: 'In Transit', value: filtered.filter((t) => t.rawStatus === 'DISPATCHED').length },
+                      { label: 'Received / Verified', value: filtered.filter((t) => t.rawStatus === 'RECEIVED' || t.rawStatus === 'VERIFIED').length },
+                      { label: 'Rejected', value: filtered.filter((t) => t.rawStatus === 'REJECTED').length },
+                      { label: 'Pending Approval', value: pendingTransfers.length },
+                    ],
+                    tableHeaders: ['Date', 'Supplier', 'Product', 'Bags', 'Destination', 'Status'],
+                    tableData: filtered.map((t) => [t.date, t.supplier || '—', t.product || '—', t.bags ?? '—', t.destination || '—', t.rawStatus || '—']),
+                  });
+                }}
+                onPdf={(from, to) => {
+                  const filtered = filterByDateRange(transfers, from, to);
+                  exportAnalyticsPdf({
+                    role: 'Warehouse Manager',
+                    orgName: userProfile?.organization || userProfile?.name || '',
+                    title: 'Warehouse Analytics Report',
+                    subtitle: from || to ? `Period: ${from || '…'} to ${to || 'today'}` : 'Transfer volume, status breakdown & dispatch performance',
+                    summaryRows: [
+                      { label: 'Total Dispatches', value: filtered.length },
+                      { label: 'In Transit', value: filtered.filter((t) => t.rawStatus === 'DISPATCHED').length },
+                      { label: 'Received / Verified', value: filtered.filter((t) => t.rawStatus === 'RECEIVED' || t.rawStatus === 'VERIFIED').length },
+                      { label: 'Rejected', value: filtered.filter((t) => t.rawStatus === 'REJECTED').length },
+                      { label: 'Pending Approval', value: pendingTransfers.length },
+                    ],
+                    tableHeaders: ['Date', 'Supplier', 'Product', 'Bags', 'Destination', 'Status'],
+                    tableData: filtered.map((t) => [t.date, t.supplier || '—', t.product || '—', t.bags ?? '—', t.destination || '—', t.rawStatus || '—']),
+                  });
+                }}
+              />
+
+              {/* Summary cards */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {[
+                  { label: 'Total Dispatches', value: transfers.length, color: 'text-gray-900', labelColor: 'text-gray-500' },
+                  { label: 'In Transit', value: transfers.filter((t) => t.rawStatus === 'DISPATCHED').length, color: 'text-blue-600', labelColor: 'text-blue-500' },
+                  { label: 'Received / Verified', value: transfers.filter((t) => t.rawStatus === 'RECEIVED' || t.rawStatus === 'VERIFIED').length, color: 'text-green-600', labelColor: 'text-green-600' },
+                  { label: 'Rejected', value: transfers.filter((t) => t.rawStatus === 'REJECTED').length, color: 'text-red-500', labelColor: 'text-red-500' },
+                ].map((s) => (
+                  <div key={s.label} className="border border-gray-200 rounded-lg p-4">
+                    <p className={`text-sm font-medium ${s.labelColor}`}>{s.label}</p>
+                    <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Charts */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                {/* Dispatch trend */}
+                <div className="border border-gray-200 rounded-xl p-4">
+                  <p className="text-sm font-semibold text-gray-700 mb-3">Dispatch Volume (last 30 days)</p>
+                  {dispatchTrend.length === 0 ? (
+                    <p className="text-sm text-gray-400 py-8 text-center">No dispatch data yet.</p>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={220}>
+                      <BarChart data={dispatchTrend} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                        <XAxis dataKey="date" tick={{ fontSize: 10 }} tickFormatter={(d) => d.slice(5)} />
+                        <YAxis allowDecimals={false} tick={{ fontSize: 10 }} />
+                        <Tooltip formatter={(v, n) => [v, n]} labelFormatter={(l) => `Date: ${l}`} />
+                        <Legend
+                          iconSize={10}
+                          formatter={(value) => {
+                            const c = value === 'Rejected' ? '#dc2626' : value === 'Received' ? '#16a34a' : '#15803d';
+                            return <span style={{ color: c, fontSize: 11 }}>{value}</span>;
+                          }}
+                        />
+                        <Bar dataKey="total" fill="#16a34a" name="Total" radius={[3, 3, 0, 0]} />
+                        <Bar dataKey="received" fill="#4ade80" name="Received" radius={[3, 3, 0, 0]} />
+                        <Bar dataKey="rejected" fill="#dc2626" name="Rejected" radius={[3, 3, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+
+                {/* Status breakdown */}
+                <div className="border border-gray-200 rounded-xl p-4">
+                  <p className="text-sm font-semibold text-gray-700 mb-3">Status Breakdown</p>
+                  {statusBreakdown.length === 0 ? (
+                    <p className="text-sm text-gray-400 py-8 text-center">No data yet.</p>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={220}>
+                      <PieChart>
+                        <Pie
+                          data={statusBreakdown}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={55}
+                          outerRadius={85}
+                          paddingAngle={3}
+                          dataKey="value"
+                          label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                          labelLine={false}
+                        >
+                          {statusBreakdown.map((entry) => (
+                            <Cell key={entry.name} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip formatter={(v, n) => [v, n]} />
+                        <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+              </div>
+
+              {/* Recent dispatch table */}
+              <div>
+                <p className="text-sm font-semibold text-gray-700 mb-3">
+                  Recent Dispatches <span className="text-gray-400 font-normal">(last 20)</span>
+                </p>
+                {historyTransfers.length === 0 ? (
+                  <p className="text-sm text-gray-400">No dispatch history yet.</p>
+                ) : (
+                  <div className="overflow-x-auto rounded-lg border border-gray-200">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-green-700 text-white text-left">
+                          {['Date', 'Supplier', 'Product', 'Bags', 'Destination', 'Status'].map((h) => (
+                            <th key={h} className="px-4 py-2.5 text-xs font-semibold">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {historyTransfers.slice(0, 20).map((t) => (
+                          <tr key={t.id} className="border-b border-gray-100 hover:bg-gray-50">
+                            <td className="px-4 py-2.5 text-gray-500 text-xs">{t.date || '—'}</td>
+                            <td className="px-4 py-2.5 text-gray-800">{t.supplier || '—'}</td>
+                            <td className="px-4 py-2.5 text-gray-700">{t.product || '—'}</td>
+                            <td className="px-4 py-2.5 font-medium text-gray-900">{t.bags ?? '—'}</td>
+                            <td className="px-4 py-2.5 text-gray-700">{t.destination || '—'}</td>
+                            <td className={`px-4 py-2.5 text-xs font-medium ${
+                              t.rawStatus === 'VERIFIED' ? 'text-emerald-600'
+                              : t.rawStatus === 'RECEIVED' ? 'text-teal-600'
+                              : t.rawStatus === 'DISPATCHED' ? 'text-blue-600'
+                              : t.rawStatus === 'REJECTED' ? 'text-red-500'
+                              : t.rawStatus === 'PENDING' ? 'text-amber-600'
+                              : 'text-gray-500'
+                            }`}>{t.status || t.rawStatus || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </main>

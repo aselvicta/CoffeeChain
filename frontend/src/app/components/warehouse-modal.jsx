@@ -1,16 +1,25 @@
 import { useMemo, useState } from 'react';
-import { Download, MapPin, Package, Pencil, Phone, Plus, User, Warehouse, X } from 'lucide-react';
+import { Download, MapPin, Package, Pencil, Phone, Plus, Search, User, Warehouse, X } from 'lucide-react';
 import { updateWarehouse } from '../api/client';
 import { getUserMessage } from '../utils/user-messages';
 import { PanelOutlineButton, PanelPrimaryButton } from './ui/dashboard-ui';
 import { StockInModal } from './stock-in-modal';
+import { REGION_LIST, TANZANIA_REGIONS } from '../data/tanzania-locations';
+
+const PHONE_PREFIX = '+255 ';
+
+function ensurePrefix(val) {
+  if (!val) return PHONE_PREFIX;
+  return val.startsWith('+255') ? val : PHONE_PREFIX + val.replace(/^0/, '');
+}
 
 function buildDetailsForm(warehouse) {
   return {
     address: warehouse?.address || '',
     region: warehouse?.region || '',
+    district: warehouse?.district || '',
     contact_name: warehouse?.contact_name || warehouse?.contactName || '',
-    contact_phone: warehouse?.contact_phone || warehouse?.contactPhone || '',
+    contact_phone: ensurePrefix(warehouse?.contact_phone || warehouse?.contactPhone || ''),
     notes: warehouse?.notes || '',
   };
 }
@@ -76,6 +85,122 @@ function formatShortDate(value) {
   return parsed.toLocaleDateString();
 }
 
+const BATCH_STATUSES = ['All', 'In Storage', 'Partially Dispatched', 'Fully Dispatched', 'Expired'];
+
+function BatchesPopup({ batches, warehouseName, onClose }) {
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('All');
+
+  const totalBags = batches.reduce((sum, b) => sum + Number(b.totalBags ?? b.total_bags ?? b.quantity_bags ?? b.availableBags ?? b.available ?? 0), 0);
+  const availableBags = batches.reduce((sum, b) => sum + Number(b.availableBags ?? b.available ?? b.available_bags ?? 0), 0);
+
+  const visible = batches.filter((b) => {
+    const q = search.trim().toLowerCase();
+    const matchesSearch = !q
+      || (b.batchCode || b.id || '').toLowerCase().includes(q)
+      || (b.fertilizerType || b.name || '').toLowerCase().includes(q)
+      || (b.manufacturer || '').toLowerCase().includes(q);
+    const matchesStatus = statusFilter === 'All' || b.status === statusFilter;
+    return matchesSearch && matchesStatus;
+  });
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-6" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-7 py-5 border-b border-gray-100">
+          <div>
+            <p className="text-xl font-bold text-gray-900">Batches in storage</p>
+            <p className="text-sm text-gray-500 mt-1">
+              {warehouseName} &mdash; {batches.length} batch{batches.length === 1 ? '' : 'es'} ·{' '}
+              <span className="font-semibold text-green-700">{availableBags} available</span>
+              {totalBags !== availableBags && <span className="text-gray-400"> / {totalBags} received</span>}
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 rounded-xl hover:bg-gray-100">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Filters */}
+        <div className="flex items-center gap-3 px-7 py-3 border-b border-gray-100 bg-gray-50">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by batch code, type or manufacturer…"
+              className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+            />
+          </div>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500"
+          >
+            {BATCH_STATUSES.map((s) => <option key={s} value={s}>{s === 'All' ? 'All statuses' : s}</option>)}
+          </select>
+        </div>
+
+        {/* Results count */}
+        {(search || statusFilter !== 'All') && (
+          <div className="px-7 pt-3 text-xs text-gray-500">
+            Showing {visible.length} of {batches.length} batch{batches.length === 1 ? '' : 'es'}
+            {(search || statusFilter !== 'All') && (
+              <button type="button" onClick={() => { setSearch(''); setStatusFilter('All'); }} className="ml-2 text-green-700 hover:underline">
+                Clear filters
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Batch cards */}
+        <div className="overflow-y-auto flex-1 px-7 py-4 space-y-3">
+          {visible.length === 0 ? (
+            <p className="py-12 text-center text-gray-400">
+              {batches.length === 0 ? 'No batches recorded yet. Use Add Stock to register incoming fertilizer.' : 'No batches match your filters.'}
+            </p>
+          ) : (
+            visible.map((batch) => {
+              const bagsAvailable = batch.availableBags ?? batch.available ?? 0;
+              const isLowStock = bagsAvailable <= (batch.threshold || 0);
+              return (
+                <div key={batch.id} className="flex items-center justify-between gap-4 rounded-xl border border-gray-200 bg-gray-50 px-5 py-4 hover:bg-white transition-colors">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-mono text-sm font-semibold text-gray-900 truncate">{batch.batchCode || batch.id}</p>
+                    <p className="text-sm text-gray-600 mt-0.5">{batch.fertilizerType || batch.name}</p>
+                    {batch.manufacturer && batch.manufacturer !== '—' && (
+                      <p className="text-xs text-gray-400 mt-0.5">{batch.manufacturer}</p>
+                    )}
+                  </div>
+                  <div className="text-center shrink-0 w-20">
+                    <p className="text-xl font-bold text-gray-900">{bagsAvailable}</p>
+                    <p className="text-xs text-gray-400">bags</p>
+                    {isLowStock && <p className="text-xs font-semibold text-red-500 mt-0.5">Low stock</p>}
+                  </div>
+                  <div className="text-center shrink-0 w-24">
+                    <p className="text-sm font-medium text-gray-700">{batch.expiryDate || '—'}</p>
+                    <p className="text-xs text-gray-400">expiry</p>
+                    {batch.expiryRisk && <p className="text-xs font-semibold text-amber-600 mt-0.5">Expiring soon</p>}
+                  </div>
+                  <div className="shrink-0 text-center">
+                    <span className={`inline-block rounded-full px-3 py-1 text-xs font-semibold ${getStatusTone(batch.status)}`}>
+                      {batch.status}
+                    </span>
+                    <p className="text-xs text-gray-400 mt-1">{formatShortDate(batch.dateReceived || batch.date_received)}</p>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function WarehouseModal({
   isOpen,
   onClose,
@@ -87,6 +212,7 @@ export function WarehouseModal({
 }) {
   const [isStockInOpen, setIsStockInOpen] = useState(false);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  const [showBatches, setShowBatches] = useState(false);
   const [detailsForm, setDetailsForm] = useState(buildDetailsForm(null));
   const [detailsError, setDetailsError] = useState('');
   const [isSavingDetails, setIsSavingDetails] = useState(false);
@@ -117,6 +243,10 @@ export function WarehouseModal({
   }
 
   const metrics = getWarehouseCapacityMetrics(warehouse);
+
+  // Compute bag totals from actual batch data so stats match the cards
+  const batchAvailableBags = batches.reduce((sum, b) => sum + Number(b.availableBags ?? b.available ?? b.available_bags ?? 0), 0);
+  const batchTotalBags = batches.reduce((sum, b) => sum + Number(b.totalBags ?? b.total_bags ?? b.quantity_bags ?? b.availableBags ?? b.available ?? 0), 0);
 
   const exportInventory = () => {
     const rows = [
@@ -160,12 +290,18 @@ export function WarehouseModal({
 
   const handleSaveDetails = async (event) => {
     event?.preventDefault?.();
+    const { address, region, district, contact_name, contact_phone } = detailsForm;
+    if (!address.trim() || !region || !district || !contact_name.trim() || contact_phone.trim() === PHONE_PREFIX.trim()) {
+      setDetailsError('Please fill in all required fields.');
+      return;
+    }
     setIsSavingDetails(true);
     setDetailsError('');
     try {
       await updateWarehouse(warehouse.id, {
         address: detailsForm.address.trim(),
-        region: detailsForm.region.trim(),
+        region: detailsForm.region,
+        district: detailsForm.district,
         contact_name: detailsForm.contact_name.trim(),
         contact_phone: detailsForm.contact_phone.trim(),
         notes: detailsForm.notes.trim(),
@@ -219,16 +355,16 @@ export function WarehouseModal({
 
           <div className="grid shrink-0 grid-cols-2 gap-2 border-b border-gray-100 bg-gray-50 px-5 py-3 sm:grid-cols-4">
             <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
-              <p className="text-[11px] font-medium uppercase text-gray-500">In storage</p>
-              <p className="text-sm font-semibold text-gray-900">{metrics.current} bags</p>
+              <p className="text-[11px] font-medium uppercase text-gray-500">Available bags</p>
+              <p className="text-sm font-semibold text-gray-900">{batchAvailableBags.toLocaleString()}</p>
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+              <p className="text-[11px] font-medium uppercase text-gray-500">Total received</p>
+              <p className="text-sm font-semibold text-gray-900">{batchTotalBags.toLocaleString()}</p>
             </div>
             <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
               <p className="text-[11px] font-medium uppercase text-gray-500">Capacity</p>
-              <p className="text-sm font-semibold text-gray-900">{metrics.capacity} bags</p>
-            </div>
-            <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
-              <p className="text-[11px] font-medium uppercase text-gray-500">Free space</p>
-              <p className="text-sm font-semibold text-gray-900">{metrics.availableSpace} bags</p>
+              <p className="text-sm font-semibold text-gray-900">{metrics.capacity.toLocaleString()} bags</p>
             </div>
             <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
               <p className="text-[11px] font-medium uppercase text-gray-500">Batches</p>
@@ -236,178 +372,80 @@ export function WarehouseModal({
             </div>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-            <div className="grid gap-4 lg:grid-cols-[1fr_1.1fr]">
-              <div className="space-y-4">
-                <div className="rounded-lg border border-gray-200 bg-white p-4">
-                  <div className="mb-3 flex items-center justify-between gap-2">
-                    <p className="text-sm font-semibold text-gray-900">Location & contact</p>
-                    <PanelOutlineButton icon={Pencil} onClick={openDetailsForm}>
-                      Edit
-                    </PanelOutlineButton>
-                  </div>
-                  <div className="space-y-3 text-sm">
-                    <div className="flex items-start gap-2.5">
-                      <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
-                      <div>
-                        <p className="font-medium text-gray-900">
-                          {warehouse.address || 'No address recorded'}
-                        </p>
-                        <p className="text-gray-600">{warehouse.region || 'Region not set'}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-start gap-2.5">
-                      <User className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
-                      <div>
-                        <p className="font-medium text-gray-900">
-                          {warehouse.contact_name || warehouse.contactName || 'Contact not set'}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-start gap-2.5">
-                      <Phone className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
-                      <div>
-                        <p className="text-gray-700">
-                          {warehouse.contact_phone || warehouse.contactPhone || 'No phone recorded'}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  {warehouse.notes && (
-                    <p className="mt-3 rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-600">
-                      {warehouse.notes}
-                    </p>
-                  )}
-                </div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 space-y-4">
 
-                <div className="rounded-lg border border-gray-200 bg-white p-4">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-gray-900">Capacity overview</p>
-                      <p className="text-xs text-gray-600">
-                        {metrics.current} of {metrics.capacity} bags used
-                      </p>
-                    </div>
-                    <span
-                      className={`rounded-full px-2.5 py-1 text-xs font-medium ${metrics.healthTone}`}
-                    >
-                      {metrics.healthLabel}
-                    </span>
-                  </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-gray-100">
-                    <div
-                      className={`h-full rounded-full ${metrics.barTone}`}
-                      style={{ width: `${metrics.fillPercent}%` }}
-                    />
-                  </div>
-                  <div className="mt-2 flex justify-between text-xs text-gray-600">
-                    <span>{metrics.fillPercent}% filled</span>
-                    <span>{metrics.availableSpace} bags free</span>
+            {/* Location & contact */}
+            <div className="rounded-lg border border-gray-200 bg-white p-4">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-gray-900">Location & contact</p>
+                <PanelOutlineButton icon={Pencil} onClick={openDetailsForm}>Edit</PanelOutlineButton>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+                <div className="flex items-start gap-2.5">
+                  <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                  <div>
+                    <p className="text-xs text-gray-400 mb-0.5">Address</p>
+                    <p className="font-medium text-gray-900">{warehouse.address || '—'}</p>
+                    <p className="text-gray-500 text-xs">{[warehouse.district, warehouse.region].filter(Boolean).join(', ') || 'Region not set'}</p>
                   </div>
                 </div>
-
-                <div className="flex flex-wrap gap-2">
-                  <PanelPrimaryButton icon={Plus} onClick={() => setIsStockInOpen(true)}>
-                    Add Stock
-                  </PanelPrimaryButton>
-                  <PanelOutlineButton icon={Download} onClick={exportInventory}>
-                    Export list
-                  </PanelOutlineButton>
+                <div className="flex items-start gap-2.5">
+                  <User className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                  <div>
+                    <p className="text-xs text-gray-400 mb-0.5">Contact</p>
+                    <p className="font-medium text-gray-900">{warehouse.contact_name || warehouse.contactName || '—'}</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-2.5">
+                  <Phone className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                  <div>
+                    <p className="text-xs text-gray-400 mb-0.5">Phone</p>
+                    <p className="text-gray-700">{warehouse.contact_phone || warehouse.contactPhone || '—'}</p>
+                  </div>
                 </div>
               </div>
+              {warehouse.notes && (
+                <p className="mt-3 rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-600">{warehouse.notes}</p>
+              )}
+            </div>
 
-              <div className="rounded-lg border border-gray-200 bg-white p-4">
-                <div className="mb-3 flex items-center justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-semibold text-gray-900">Batches in storage</p>
-                    <p className="text-xs text-gray-600">
-                      {batches.length} batch{batches.length === 1 ? '' : 'es'} · {metrics.current}{' '}
-                      bags total
-                    </p>
-                  </div>
-                  <span className="inline-flex items-center gap-1 rounded-full border border-green-200 bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700">
-                    <Package className="h-3.5 w-3.5" />
-                    {metrics.current}
-                  </span>
+            {/* Capacity overview */}
+            <div className="rounded-lg border border-gray-200 bg-white p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">Capacity overview</p>
+                  <p className="text-xs text-gray-600">{batchAvailableBags.toLocaleString()} available of {metrics.capacity.toLocaleString()} capacity</p>
                 </div>
-
-                <div className="overflow-x-auto rounded-lg border border-gray-200">
-                  <table className="w-full min-w-[480px] divide-y divide-gray-200 text-left text-sm">
-                    <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
-                      <tr>
-                        <th className="px-3 py-2 font-semibold">Batch</th>
-                        <th className="px-3 py-2 font-semibold">Type</th>
-                        <th className="px-3 py-2 font-semibold">Bags</th>
-                        <th className="px-3 py-2 font-semibold">Expiry</th>
-                        <th className="px-3 py-2 font-semibold">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100 bg-white">
-                      {batches.length === 0 ? (
-                        <tr>
-                          <td colSpan="5" className="px-3 py-8 text-center text-sm text-gray-500">
-                            No batches recorded yet. Use Add Stock to register incoming fertilizer.
-                          </td>
-                        </tr>
-                      ) : (
-                        batches.map((batch) => {
-                          const bagsAvailable = batch.availableBags ?? batch.available ?? 0;
-                          const isLowStock = bagsAvailable <= (batch.threshold || 0);
-                          return (
-                          <tr key={batch.id} className="hover:bg-gray-50">
-                            <td
-                              className="max-w-[7rem] truncate px-3 py-2.5 font-medium text-gray-900"
-                              title={batch.batchCode || batch.id}
-                            >
-                              {batch.batchCode || batch.id}
-                            </td>
-                            <td className="max-w-[6rem] px-3 py-2.5 text-gray-700">
-                              <span className="block truncate" title={batch.fertilizerType || batch.name}>
-                                {batch.fertilizerType || batch.name}
-                              </span>
-                              {batch.manufacturer && batch.manufacturer !== '—' && (
-                                <span className="block truncate text-[11px] text-gray-500">
-                                  {batch.manufacturer}
-                                </span>
-                              )}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-gray-700">
-                              {bagsAvailable}
-                              {isLowStock && (
-                                <span className="mt-0.5 block text-[11px] font-medium text-red-600">
-                                  Low stock
-                                </span>
-                              )}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-xs text-gray-600">
-                              {batch.expiryDate || '—'}
-                              {batch.expiryRisk && (
-                                <span className="mt-0.5 block font-medium text-amber-700">
-                                  Expiring soon
-                                </span>
-                              )}
-                            </td>
-                            <td className="px-3 py-2.5">
-                              <div className="inline-flex flex-col items-start">
-                                <span
-                                  className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ${getStatusTone(batch.status)}`}
-                                >
-                                  {batch.status}
-                                </span>
-                                <span className="mt-0.5 text-[11px] text-gray-500">
-                                  {formatShortDate(batch.dateReceived || batch.date_received)}
-                                </span>
-                              </div>
-                            </td>
-                          </tr>
-                          );
-                        })
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${metrics.healthTone}`}>
+                  {metrics.healthLabel}
+                </span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-gray-100">
+                {(() => {
+                  const pct = metrics.capacity > 0 ? Math.min(100, Math.round((batchAvailableBags / metrics.capacity) * 100)) : 0;
+                  const tone = pct >= 85 ? 'bg-rose-500' : pct >= 60 ? 'bg-amber-500' : 'bg-emerald-500';
+                  return <div className={`h-full rounded-full ${tone}`} style={{ width: `${pct}%` }} />;
+                })()}
+              </div>
+              <div className="mt-2 flex justify-between text-xs text-gray-600">
+                <span>{metrics.capacity > 0 ? Math.min(100, Math.round((batchAvailableBags / metrics.capacity) * 100)) : 0}% of capacity used</span>
+                <span>{Math.max(0, metrics.capacity - batchAvailableBags).toLocaleString()} bags free</span>
               </div>
             </div>
+
+            {/* Actions */}
+            <div className="flex flex-wrap gap-2">
+              <PanelPrimaryButton icon={Plus} onClick={() => setIsStockInOpen(true)}>
+                Add Stock
+              </PanelPrimaryButton>
+              <PanelOutlineButton icon={Package} onClick={() => setShowBatches((v) => !v)}>
+                {showBatches ? 'Hide Batches' : `View Batches (${batches.length})`}
+              </PanelOutlineButton>
+              <PanelOutlineButton icon={Download} onClick={exportInventory}>
+                Export list
+              </PanelOutlineButton>
+            </div>
+
           </div>
         </div>
       </div>
@@ -420,6 +458,15 @@ export function WarehouseModal({
         onClose={() => setIsStockInOpen(false)}
         onSuccess={handleStockSuccess}
       />
+
+      {/* Batches popup */}
+      {showBatches && (
+        <BatchesPopup
+          batches={batches}
+          warehouseName={warehouse.name}
+          onClose={() => setShowBatches(false)}
+        />
+      )}
 
       {isDetailsOpen && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4 py-6">
@@ -443,7 +490,7 @@ export function WarehouseModal({
             <form onSubmit={handleSaveDetails} className="space-y-3">
               <div>
                 <label htmlFor="warehouse-address" className="mb-1 block text-sm font-medium text-gray-700">
-                  Address
+                  Address <span className="text-red-500">*</span>
                 </label>
                 <input
                   id="warehouse-address"
@@ -451,51 +498,80 @@ export function WarehouseModal({
                   value={detailsForm.address}
                   onChange={(e) => setDetailsForm({ ...detailsForm, address: e.target.value })}
                   disabled={isSavingDetails}
-                  placeholder="Street, district, or landmark"
+                  placeholder="Street or landmark"
                   className={inputClass}
+                  required
                 />
               </div>
-              <div>
-                <label htmlFor="warehouse-region" className="mb-1 block text-sm font-medium text-gray-700">
-                  Region
-                </label>
-                <input
-                  id="warehouse-region"
-                  type="text"
-                  value={detailsForm.region}
-                  onChange={(e) => setDetailsForm({ ...detailsForm, region: e.target.value })}
-                  disabled={isSavingDetails}
-                  placeholder="e.g. Mbeya"
-                  className={inputClass}
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="warehouse-region" className="mb-1 block text-sm font-medium text-gray-700">
+                    Region <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    id="warehouse-region"
+                    value={detailsForm.region}
+                    onChange={(e) => setDetailsForm({ ...detailsForm, region: e.target.value, district: '' })}
+                    disabled={isSavingDetails}
+                    className={inputClass}
+                    required
+                  >
+                    <option value="">Select region…</option>
+                    {REGION_LIST.map((r) => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="warehouse-district" className="mb-1 block text-sm font-medium text-gray-700">
+                    District <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    id="warehouse-district"
+                    value={detailsForm.district}
+                    onChange={(e) => setDetailsForm({ ...detailsForm, district: e.target.value })}
+                    disabled={isSavingDetails || !detailsForm.region}
+                    className={inputClass}
+                    required
+                  >
+                    <option value="">{detailsForm.region ? 'Select district…' : 'Select region first'}</option>
+                    {(TANZANIA_REGIONS[detailsForm.region] || []).map((d) => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                </div>
               </div>
-              <div>
-                <label htmlFor="warehouse-contact-name" className="mb-1 block text-sm font-medium text-gray-700">
-                  Contact name
-                </label>
-                <input
-                  id="warehouse-contact-name"
-                  type="text"
-                  value={detailsForm.contact_name}
-                  onChange={(e) => setDetailsForm({ ...detailsForm, contact_name: e.target.value })}
-                  disabled={isSavingDetails}
-                  placeholder="Warehouse manager"
-                  className={inputClass}
-                />
-              </div>
-              <div>
-                <label htmlFor="warehouse-contact-phone" className="mb-1 block text-sm font-medium text-gray-700">
-                  Contact phone
-                </label>
-                <input
-                  id="warehouse-contact-phone"
-                  type="tel"
-                  value={detailsForm.contact_phone}
-                  onChange={(e) => setDetailsForm({ ...detailsForm, contact_phone: e.target.value })}
-                  disabled={isSavingDetails}
-                  placeholder="e.g. 0712345678"
-                  className={inputClass}
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="warehouse-contact-name" className="mb-1 block text-sm font-medium text-gray-700">
+                    Contact name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    id="warehouse-contact-name"
+                    type="text"
+                    value={detailsForm.contact_name}
+                    onChange={(e) => setDetailsForm({ ...detailsForm, contact_name: e.target.value })}
+                    disabled={isSavingDetails}
+                    placeholder="Warehouse manager"
+                    className={inputClass}
+                    required
+                  />
+                </div>
+                <div>
+                  <label htmlFor="warehouse-contact-phone" className="mb-1 block text-sm font-medium text-gray-700">
+                    Contact phone <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    id="warehouse-contact-phone"
+                    type="tel"
+                    value={detailsForm.contact_phone}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (!val.startsWith('+255')) return;
+                      setDetailsForm({ ...detailsForm, contact_phone: val });
+                    }}
+                    onFocus={(e) => { if (!detailsForm.contact_phone) setDetailsForm({ ...detailsForm, contact_phone: PHONE_PREFIX }); e.target.setSelectionRange(e.target.value.length, e.target.value.length); }}
+                    disabled={isSavingDetails}
+                    placeholder="+255 7XX XXX XXX"
+                    className={inputClass}
+                  />
+                </div>
               </div>
               <div>
                 <label htmlFor="warehouse-notes" className="mb-1 block text-sm font-medium text-gray-700">

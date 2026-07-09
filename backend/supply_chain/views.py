@@ -24,6 +24,8 @@ from .models import (
     FertilizerBatch,
     Issue,
     Notification,
+    PendingRegistration,
+    UserProfile,
     Warehouse,
     OTPVerification,
     Supplier,
@@ -54,6 +56,8 @@ from .serializers import (
     FertilizerBatchSerializer,
     IssueSerializer,
     NotificationSerializer,
+    PendingRegistrationSerializer,
+    PublicRegisterSerializer,
     WarehouseSerializer,
     OTPVerificationSerializer,
     SupplierSerializer,
@@ -72,6 +76,7 @@ from .services.ministry_of_agriculture import fetch_farmer
 from .services.notifications import (
     notify_for_farmer_registered,
     notify_for_integrity_mismatch,
+    notify_for_integrity_restored,
     notify_for_otp_sent,
     notify_for_otp_verified,
     notify_for_transfer_created,
@@ -356,6 +361,25 @@ class AdminUserViewSet(viewsets.ViewSet):
     def update(self, request, pk=None):
         return self._update_user(request, pk)
 
+    def destroy(self, request, pk=None):
+        user = get_object_or_404(User, pk=pk)
+        if user == request.user:
+            return Response(
+                {"detail": "You cannot delete your own account."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        with transaction.atomic():
+            AuditLog.objects.create(
+                action="user_deleted",
+                user=request.user,
+                details={"deleted_username": user.username, "deleted_user_id": user.id},
+            )
+            # Remove any PendingRegistration tied to this username so the
+            # username can be freely re-used for a new registration.
+            PendingRegistration.objects.filter(username=user.username).delete()
+            user.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     def _update_user(self, request, pk):
         user = get_object_or_404(User, pk=pk)
         serializer = AdminUserUpdateSerializer(data=request.data, partial=True)
@@ -369,6 +393,14 @@ class AdminUserViewSet(viewsets.ViewSet):
                 user.last_name = data["last_name"]
             if "email" in data:
                 user.email = data["email"]
+            if "is_active" in data:
+                user.is_active = data["is_active"]
+                action = "user_activated" if data["is_active"] else "user_deactivated"
+                AuditLog.objects.create(
+                    action=action,
+                    user=request.user,
+                    details={"target_user": user.username},
+                )
             if data.get("password"):
                 user.set_password(data["password"])
             user.save()
@@ -395,7 +427,21 @@ class AdminUserViewSet(viewsets.ViewSet):
                         branch.region = data["region"]
                     if "district" in data:
                         branch.district = data["district"]
+                    if "contact_phone" in data:
+                        branch.contact_phone = data["contact_phone"]
                     branch.save()
+            elif role == "warehouse_manager":
+                warehouse_id = data.get("warehouse_id")
+                if "warehouse_id" in data:
+                    manager = WarehouseManager.objects.filter(user=user).first()
+                    if manager:
+                        # Clear any previous assignment
+                        Warehouse.objects.filter(assigned_manager=manager).update(assigned_manager=None)
+                        if warehouse_id:
+                            wh = Warehouse.objects.filter(pk=warehouse_id).first()
+                            if wh:
+                                wh.assigned_manager = manager
+                                wh.save(update_fields=["assigned_manager"])
 
         return Response(build_user_payload(user))
 
@@ -403,24 +449,23 @@ class AdminUserViewSet(viewsets.ViewSet):
 class MeView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def get(self, request):
-        role = resolve_role(request.user)
-        supplier = None
-        branch = None
-        warehouse_manager = None
-        if role == "supplier":
-            supplier = Supplier.objects.filter(user=request.user).first()
-        if role == "warehouse_manager":
-            warehouse_manager = (
-                WarehouseManager.objects.filter(user=request.user)
-                .select_related("supplier")
-                .first()
-            )
-        if role in {"retailer", "cooperative", "regulator"}:
-            branch = Branch.objects.filter(user=request.user).first()
-        payload = {
-            "user": UserSerializer(request.user).data,
+    def _build_me_payload(self, user):
+        role = resolve_role(user)
+        supplier = Supplier.objects.filter(user=user).first()
+        branch = Branch.objects.filter(user=user).first()
+        warehouse_manager = (
+            WarehouseManager.objects.filter(user=user)
+            .select_related("supplier")
+            .first()
+        )
+        up = getattr(user, "profile", None)
+        contact_phone = up.contact_phone if up else ""
+        organization = up.organization if up else ""
+        return {
+            "user": UserSerializer(user).data,
             "role": role,
+            "contact_phone": contact_phone,
+            "organization": organization,
             "supplier": SupplierSerializer(supplier).data if supplier else None,
             "branch": BranchSerializer(branch).data if branch else None,
             "warehouse_manager": (
@@ -429,7 +474,278 @@ class MeView(APIView):
                 else None
             ),
         }
-        return Response(payload)
+
+    def get(self, request):
+        return Response(self._build_me_payload(request.user))
+
+    def patch(self, request):
+        """Allow the current user to update their own profile fields."""
+        user = request.user
+        data = request.data
+
+        if "username" in data:
+            new_username = data["username"].strip()
+            if not new_username or len(new_username) < 3:
+                return Response(
+                    {"detail": "Username must be at least 3 characters."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if User.objects.exclude(pk=user.pk).filter(username=new_username).exists():
+                return Response(
+                    {"detail": "That username is already taken."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            user.username = new_username
+        if "first_name" in data:
+            user.first_name = data["first_name"]
+        if "last_name" in data:
+            user.last_name = data["last_name"]
+        if "email" in data:
+            user.email = data["email"]
+        if data.get("new_password"):
+            current_password = data.get("current_password", "")
+            if not user.check_password(current_password):
+                return Response(
+                    {"detail": "Current password is incorrect."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            user.set_password(data["new_password"])
+        user.save()
+
+        if "contact_phone" in data or "organization" in data:
+            up, _ = UserProfile.objects.get_or_create(user=user)
+            if "contact_phone" in data:
+                up.contact_phone = data["contact_phone"]
+            if "organization" in data:
+                up.organization = data["organization"]
+            up.save()
+
+        return Response(self._build_me_payload(user))
+
+
+class PublicRegisterView(APIView):
+    """Open endpoint — anyone can submit a registration request."""
+    permission_classes = []
+
+    def post(self, request):
+        import logging
+        from django.contrib.auth.hashers import make_password
+        from .services.briq import send_sms, normalize_phone_digits
+
+        logger = logging.getLogger(__name__)
+        serializer = PublicRegisterSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        if User.objects.filter(username=data["username"]).exists():
+            return Response(
+                {"detail": "Username already taken. Please choose another."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if PendingRegistration.objects.filter(
+            username=data["username"], status=PendingRegistration.PENDING
+        ).exists():
+            return Response(
+                {"detail": "A registration request with this username is already pending review."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Remove any old approved/rejected record with the same username so the
+        # DB-level UNIQUE constraint doesn't block the new insert.
+        PendingRegistration.objects.filter(
+            username=data["username"]
+        ).exclude(status=PendingRegistration.PENDING).delete()
+
+        first_name = data.get("first_name", "")
+        org_name = data["organisation_name"]
+        phone = data.get("contact_phone", "")
+        role_display = {
+            "supplier": "Supplier",
+            "retailer": "Retailer",
+            "cooperative": "Cooperative (AMCOS)",
+        }.get(data["role"], data["role"].capitalize())
+
+        PendingRegistration.objects.create(
+            username=data["username"],
+            email=data.get("email", ""),
+            first_name=first_name,
+            last_name=data.get("last_name", ""),
+            password_hash=make_password(data["password"]),
+            role=data["role"],
+            organisation_name=org_name,
+            contact_phone=phone,
+            region=data.get("region", ""),
+            district=data.get("district", ""),
+        )
+
+        # Notify all admins of the new registration request
+        try:
+            from .services.notifications import notify_admins
+            role_label = role_display
+            notify_admins(
+                notification_type="system",
+                title="New Registration Request",
+                message=(
+                    f"{first_name or org_name} has submitted a registration request "
+                    f"as a {role_label}. Review it in the Registrations tab."
+                ),
+                details=f"Username: {data['username']} | Organisation: {org_name} | Phone: {phone}",
+                priority="high",
+            )
+        except Exception:
+            logger.exception("Failed to send admin notification for new registration")
+
+        # Send SMS confirmation — non-fatal if it fails
+        if phone:
+            name = first_name or org_name
+            sms_message = (
+                f"Habari {name}, ombi lako la kujisajili CoffeeChain kama {role_display} "
+                f"limepokelewa. Msimamizi atakuwasiliana nawe hivi karibuni. Asante!"
+            )
+            try:
+                result = send_sms(phone, sms_message)
+                if not result.get("delivered"):
+                    logger.warning(
+                        "Registration SMS not delivered to %s: %s",
+                        phone, result.get("error"),
+                    )
+            except Exception:
+                logger.exception("Failed to send registration SMS to %s", phone)
+
+        return Response(
+            {"detail": "Registration submitted successfully. An administrator will review and activate your account."},
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class PendingRegistrationViewSet(viewsets.ViewSet):
+    permission_classes = [IsAuthenticated, IsAdmin]
+
+    def list(self, request):
+        status_filter = request.query_params.get("status", PendingRegistration.PENDING)
+        qs = PendingRegistration.objects.order_by("-created_at")
+        if status_filter and status_filter != "all":
+            qs = qs.filter(status=status_filter)
+        return Response(PendingRegistrationSerializer(qs, many=True).data)
+
+    def retrieve(self, request, pk=None):
+        reg = get_object_or_404(PendingRegistration, pk=pk)
+        return Response(PendingRegistrationSerializer(reg).data)
+
+    @action(detail=True, methods=["post"])
+    def approve(self, request, pk=None):
+        reg = get_object_or_404(PendingRegistration, pk=pk)
+        if reg.status != PendingRegistration.PENDING:
+            return Response(
+                {"detail": "This registration has already been processed."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if User.objects.filter(username=reg.username).exists():
+            return Response(
+                {"detail": "A user with this username already exists."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            user = User(
+                username=reg.username,
+                email=reg.email,
+                first_name=reg.first_name,
+                last_name=reg.last_name,
+                is_active=True,
+            )
+            user.password = reg.password_hash
+            user.save()
+
+            group_name = group_name_for_role(reg.role)
+            if group_name:
+                group, _ = Group.objects.get_or_create(name=group_name)
+                user.groups.add(group)
+
+            if reg.role == "supplier":
+                Supplier.objects.create(
+                    name=reg.organisation_name or user.username,
+                    user=user,
+                    region=reg.region,
+                    contact_phone=reg.contact_phone,
+                )
+            elif reg.role in {"retailer", "cooperative"}:
+                branch_type = Branch.RETAILER if reg.role == "retailer" else Branch.COOPERATIVE
+                Branch.objects.create(
+                    name=reg.organisation_name or user.username,
+                    branch_type=branch_type,
+                    district=reg.district,
+                    region=reg.region,
+                    contact_phone=reg.contact_phone,
+                    user=user,
+                )
+
+            reg.status = PendingRegistration.APPROVED
+            reg.reviewed_by = request.user
+            reg.reviewed_at = timezone.now()
+            reg.created_user = user
+            reg.save()
+
+            AuditLog.objects.create(
+                action="registration_approved",
+                user=request.user,
+                details={"username": reg.username, "role": reg.role},
+            )
+
+        return Response(
+            {"detail": f"Account for {reg.username} has been approved and activated.", "user_id": user.id},
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["post"])
+    def reject(self, request, pk=None):
+        import logging
+        from .services.briq import send_sms
+
+        logger = logging.getLogger(__name__)
+
+        reg = get_object_or_404(PendingRegistration, pk=pk)
+        if reg.status != PendingRegistration.PENDING:
+            return Response(
+                {"detail": "This registration has already been processed."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        reason = (request.data.get("reason") or "").strip()
+        reg.status = PendingRegistration.REJECTED
+        reg.reviewed_by = request.user
+        reg.reviewed_at = timezone.now()
+        reg.rejection_reason = reason
+        reg.save()
+        AuditLog.objects.create(
+            action="registration_rejected",
+            user=request.user,
+            details={"username": reg.username, "role": reg.role, "reason": reason},
+        )
+
+        # Send SMS to the applicant with the rejection reason
+        if reg.contact_phone:
+            name = reg.first_name or reg.organisation_name or reg.username
+            if reason:
+                sms_body = (
+                    f"Habari {name}, ombi lako la kujisajili CoffeeChain limekataliwa. "
+                    f"Sababu: {reason}. Wasiliana na msimamizi kwa maelezo zaidi."
+                )
+            else:
+                sms_body = (
+                    f"Habari {name}, ombi lako la kujisajili CoffeeChain limekataliwa. "
+                    f"Wasiliana na msimamizi kwa maelezo zaidi."
+                )
+            try:
+                result = send_sms(reg.contact_phone, sms_body[:160])
+                if not result.get("delivered"):
+                    logger.warning(
+                        "Rejection SMS not delivered to %s: %s",
+                        reg.contact_phone, result.get("error"),
+                    )
+            except Exception:
+                logger.exception("Failed to send rejection SMS to %s", reg.contact_phone)
+
+        return Response({"detail": f"Registration for {reg.username} has been rejected."})
 
 
 class SupplierViewSet(viewsets.ModelViewSet):
@@ -1665,6 +1981,134 @@ class AuditReportView(APIView):
         )
 
 
+class ReportsView(APIView):
+    permission_classes = [IsAuthenticated, RegulatorOrAdmin]
+
+    def get(self, request):
+        from django.db.models import Count, Sum
+        params = request.query_params
+        report_type = params.get("type", "transfers")
+        date_from = params.get("from", "")
+        date_to = params.get("to", "")
+        region_filter = (params.get("region") or "").strip()
+        role_filter = (params.get("role") or "").strip()
+        export_csv = params.get("export") == "csv"
+
+        transfers_qs = Transfer.objects.select_related(
+            "batch", "from_supplier", "from_branch", "to_branch", "farmer"
+        )
+        if date_from:
+            try:
+                from datetime import datetime
+                dt = datetime.strptime(date_from, "%Y-%m-%d")
+                transfers_qs = transfers_qs.filter(created_at__date__gte=dt.date())
+            except ValueError:
+                pass
+        if date_to:
+            try:
+                from datetime import datetime
+                dt = datetime.strptime(date_to, "%Y-%m-%d")
+                transfers_qs = transfers_qs.filter(created_at__date__lte=dt.date())
+            except ValueError:
+                pass
+        if region_filter:
+            transfers_qs = transfers_qs.filter(
+                Q(from_supplier__region__icontains=region_filter) |
+                Q(from_branch__region__icontains=region_filter) |
+                Q(to_branch__region__icontains=region_filter)
+            )
+
+        # Role / entity filtering
+        if role_filter == "supplier":
+            transfers_qs = transfers_qs.filter(transfer_type=Transfer.SUPPLIER_TO_BRANCH)
+        elif role_filter in {"retailer", "cooperative"}:
+            branch_type = Branch.RETAILER if role_filter == "retailer" else Branch.COOPERATIVE
+            transfers_qs = transfers_qs.filter(
+                transfer_type=Transfer.BRANCH_TO_FARMER,
+                from_branch__branch_type=branch_type,
+            )
+        elif role_filter == "warehouse_manager":
+            transfers_qs = transfers_qs.filter(transfer_type=Transfer.SUPPLIER_TO_BRANCH)
+
+        rows = []
+        if report_type == "transfers" or report_type == "dispatches":
+            for t in transfers_qs.order_by("-created_at")[:500]:
+                rows.append({
+                    "transfer_id": t.id,
+                    "date": t.created_at.date().isoformat(),
+                    "type": t.transfer_type,
+                    "status": t.status,
+                    "batch_code": t.batch.batch_code if t.batch else "",
+                    "fertilizer_type": t.batch.fertilizer_type if t.batch else "",
+                    "quantity_bags": t.quantity_bags,
+                    "from": (
+                        t.from_supplier.name if t.from_supplier else
+                        (t.from_branch.name if t.from_branch else "")
+                    ),
+                    "to": t.to_branch.name if t.to_branch else (t.farmer.name if t.farmer else ""),
+                    "region": (
+                        t.from_supplier.region if t.from_supplier else
+                        (t.from_branch.region if t.from_branch else "")
+                    ),
+                })
+        elif report_type == "stock":
+            warehouses = Warehouse.objects.prefetch_related("batches")
+            for wh in warehouses:
+                rows.append({
+                    "warehouse": wh.name,
+                    "section": wh.section,
+                    "region": wh.region,
+                    "capacity_bags": wh.capacity_bags,
+                    "current_bags": wh.current_bags,
+                    "utilisation_pct": round(wh.current_bags / wh.capacity_bags * 100, 1) if wh.capacity_bags else 0,
+                })
+        elif report_type == "users":
+            users_qs = User.objects.prefetch_related("groups")
+            if role_filter:
+                group_name = group_name_for_role(role_filter)
+                if group_name:
+                    users_qs = users_qs.filter(groups__name=group_name)
+            for u in users_qs.order_by("username"):
+                role = resolve_role(u)
+                supplier = Supplier.objects.filter(user=u).first()
+                branch = Branch.objects.filter(user=u).first()
+                rows.append({
+                    "user_id": u.id,
+                    "username": u.username,
+                    "name": f"{u.first_name} {u.last_name}".strip(),
+                    "email": u.email,
+                    "role": role,
+                    "is_active": u.is_active,
+                    "entity_name": (supplier.name if supplier else branch.name if branch else ""),
+                    "region": (supplier.region if supplier else branch.region if branch else ""),
+                    "contact_phone": (supplier.contact_phone if supplier else branch.contact_phone if branch else ""),
+                    "joined": u.date_joined.date().isoformat(),
+                })
+
+        summary = {
+            "total_rows": len(rows),
+            "type": report_type,
+            "date_from": date_from,
+            "date_to": date_to,
+            "role_filter": role_filter,
+            "region_filter": region_filter,
+        }
+
+        if export_csv:
+            import csv, io
+            output = io.StringIO()
+            if rows:
+                writer = csv.DictWriter(output, fieldnames=list(rows[0].keys()))
+                writer.writeheader()
+                writer.writerows(rows)
+            from django.http import HttpResponse
+            response = HttpResponse(output.getvalue(), content_type="text/csv")
+            response["Content-Disposition"] = f'attachment; filename="coffeechain-report-{report_type}.csv"'
+            return response
+
+        return Response({"summary": summary, "rows": rows})
+
+
 class IntegrityCheckView(APIView):
     permission_classes = [IsAuthenticated, RegulatorOrAdmin]
 
@@ -1733,8 +2177,12 @@ class IntegrityTransferView(APIView):
         result = verify_transfer_integrity(transfer, check_chain=False)
         payload = result.to_dict()
         payload["notified"] = False
-        if notify and result.status == "mismatch":
-            payload["notified"] = notify_for_integrity_mismatch(result)
+        payload["restored"] = False
+        if notify:
+            if result.status == "mismatch":
+                payload["notified"] = notify_for_integrity_mismatch(result)
+            elif result.status == "ok":
+                payload["restored"] = notify_for_integrity_restored(result)
         return Response(payload)
 
 
@@ -1762,10 +2210,15 @@ class IntegrityScanView(APIView):
 
         mismatches = [item for item in results if item.status == "mismatch"]
         alerts_sent = 0
+        restored_sent = 0
         if notify:
             for item in mismatches:
                 if notify_for_integrity_mismatch(item):
                     alerts_sent += 1
+            for item in results:
+                if item.status == "ok":
+                    if notify_for_integrity_restored(item):
+                        restored_sent += 1
 
         return Response(
             {
@@ -1774,6 +2227,7 @@ class IntegrityScanView(APIView):
                     "ok": sum(1 for item in results if item.status == "ok"),
                     "mismatch": len(mismatches),
                     "alerts_sent": alerts_sent,
+                    "restored_sent": restored_sent,
                 },
                 "results": [item.to_dict() for item in results],
             }

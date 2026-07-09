@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.utils import timezone
 
 from supply_chain.models import Branch, Notification, Supplier, Transfer
+
+logger = logging.getLogger(__name__)
 
 
 User = get_user_model()
@@ -418,53 +422,94 @@ def notify_for_farmer_registered(farmer, branch: Branch, actor=None):
     )
 
 
+def _format_change_line(change: dict) -> str:
+    """Build a human-readable 'changed from X to Y' line from a change dict."""
+    field = (change.get("field") or "field").replace("_", " ").title()
+    # Support both integrity-compare keys (database/receipt) and signal keys (old/new)
+    old_val = change.get("receipt") if "receipt" in change else change.get("old")
+    new_val = change.get("database") if "database" in change else change.get("new")
+    if old_val is None and new_val is None:
+        return f"{field} mismatch detected"
+    if field.lower() == "data hash":
+        return f"Hash changed from {str(old_val)[:12]}… to {str(new_val)[:12]}…"
+    return f"{field} changed from {old_val!s} to {new_val!s}"
+
+
+def _format_restore_line(change: dict) -> str:
+    """Build a human-readable restore line when data is corrected back to receipt."""
+    field = (change.get("field") or "field").replace("_", " ").title()
+    old_val = change.get("old")
+    new_val = change.get("new")
+    if old_val is not None and new_val is not None:
+        return f"{field} restored from {old_val!s} to {new_val!s} (matches receipt)"
+    return f"{field} restored to original receipt value"
+
+
+def _had_prior_integrity_alert(transfer_id: int) -> bool:
+    """True if this transfer previously triggered a tampering alert."""
+    return Notification.objects.filter(
+        transfer_id=transfer_id,
+        metadata__integrity_alert=True,
+    ).exists()
+
+
 def notify_for_integrity_mismatch(result) -> bool:
     """Alert admins when a verified transfer fails integrity checks.
 
     Returns True if a new notification was created.
     """
-    transfer_id = getattr(result, "transfer_id", None) or result.get("transfer_id")
+    # result is always an IntegrityResult dataclass; use getattr only
+    transfer_id = getattr(result, "transfer_id", None)
     if not transfer_id:
         return False
 
     recent_cutoff = timezone.now() - timezone.timedelta(hours=24)
-    already_notified = Notification.objects.filter(
-        notification_type=Notification.TYPE_SYSTEM,
-        transfer_id=transfer_id,
-        metadata__integrity_alert=True,
-        created_at__gte=recent_cutoff,
-    ).exists()
-    if already_notified:
-        return False
+    recent_alert = (
+        Notification.objects.filter(
+            notification_type=Notification.TYPE_SYSTEM,
+            transfer_id=transfer_id,
+            metadata__integrity_alert=True,
+            created_at__gte=recent_cutoff,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    if recent_alert:
+        restored_after_alert = Notification.objects.filter(
+            transfer_id=transfer_id,
+            metadata__integrity_restored=True,
+            created_at__gt=recent_alert.created_at,
+        ).exists()
+        if not restored_after_alert:
+            return False
 
-    batch_code = getattr(result, "batch_code", None) or result.get("batch_code") or "Unknown batch"
-    branch_name = getattr(result, "branch_name", None) or result.get("branch_name") or ""
-    changes = getattr(result, "changes", None) or result.get("changes") or []
-    issues = getattr(result, "issues", None) or result.get("issues") or []
-    explorer_url = getattr(result, "explorer_url", None) or result.get("explorer_url")
+    batch_code = getattr(result, "batch_code", None) or "Unknown batch"
+    branch_name = getattr(result, "branch_name", None) or ""
+    changes = getattr(result, "changes", None) or []
+    issues = getattr(result, "issues", None) or []
+    explorer_url = getattr(result, "explorer_url", None)
     transfer = Transfer.objects.filter(pk=transfer_id).first()
 
-    change_lines = []
-    for change in changes:
-        field = change.get("field", "field")
-        db_val = change.get("database")
-        receipt_val = change.get("receipt")
-        if field == "data hash":
-            change_lines.append(
-                f"Hash changed: DB {str(db_val)[:16]}… vs receipt {str(receipt_val)[:16]}…"
-            )
-        else:
-            change_lines.append(f"{field.title()}: DB={db_val!s} → Receipt={receipt_val!s}")
+    change_lines = [_format_change_line(change) for change in changes]
 
     issue_summary = change_lines[0] if change_lines else (issues[0] if issues else "Data mismatch detected.")
 
+    # Build a concise change summary for the notification message itself
+    field_changes_short = "; ".join(change_lines[:2]) if change_lines else ""
+    notification_message = (
+        f"Transfer #{transfer_id}"
+        + (f" ({batch_code})" if batch_code else "")
+        + (f" at {branch_name}" if branch_name else "")
+        + (f": {field_changes_short}." if field_changes_short else " — data mismatch detected.")
+    )
+
     details_lines = [
-        issue_summary,
         f"Transfer #{transfer_id} · {batch_code}",
     ]
     if branch_name:
         details_lines.append(f"Branch: {branch_name}")
-    last_mod = getattr(result, "last_api_modification", None) or result.get("last_api_modification")
+    details_lines.extend(change_lines)
+    last_mod = getattr(result, "last_api_modification", None)
     if last_mod and last_mod.get("username"):
         details_lines.append(
             f"Last modified via API by: {last_mod['username']} "
@@ -478,18 +523,13 @@ def notify_for_integrity_mismatch(result) -> bool:
         details_lines.append(
             "Last modified via API by: unknown (possible direct database edit)"
         )
-    if len(change_lines) > 1:
-        details_lines.extend(change_lines[1:])
     if explorer_url:
         details_lines.append(f"Polygon: {explorer_url}")
 
     notify_admins(
         notification_type=Notification.TYPE_SYSTEM,
         title=f"Critical: data tampering — Transfer #{transfer_id}",
-        message=(
-            f"Database no longer matches the stored receipt for {batch_code}"
-            + (f" at {branch_name}." if branch_name else ".")
-        ),
+        message=notification_message,
         details="\n".join(details_lines),
         priority=Notification.PRIORITY_HIGH,
         transfer=transfer,
@@ -502,11 +542,16 @@ def notify_for_integrity_mismatch(result) -> bool:
             "last_api_modification": last_mod,
         },
     )
+    regulator_message = (
+        f"Transfer #{transfer_id}"
+        + (f" at {branch_name}" if branch_name else "")
+        + (f": {field_changes_short}." if field_changes_short else " — possible tampering detected.")
+    )
     notify_regulators(
         notification_type=Notification.TYPE_SYSTEM,
         title=f"Integrity alert — Transfer #{transfer_id}",
-        message=f"Possible tampering at {branch_name or batch_code}.",
-        details="\n".join(details_lines[:4]),
+        message=regulator_message,
+        details="\n".join(details_lines[:6]),
         priority=Notification.PRIORITY_HIGH,
         transfer=transfer,
         metadata={
@@ -516,4 +561,195 @@ def notify_for_integrity_mismatch(result) -> bool:
             "changes": changes,
         },
     )
+
+    # SMS alert to all admin phone numbers
+    _send_integrity_sms(
+        transfer_id=transfer_id,
+        batch_code=batch_code,
+        branch_name=branch_name,
+        change_lines=change_lines,
+        issue_summary=issue_summary,
+    )
     return True
+
+
+def notify_for_integrity_restored(result, restored_fields=None) -> bool:
+    """Send positive feedback when data is corrected back to match the receipt.
+
+    Only fires if a prior tampering alert existed for this transfer.
+    Returns True if a new notification was created.
+    """
+    transfer_id = getattr(result, "transfer_id", None)
+    if not transfer_id:
+        return False
+
+    if not _had_prior_integrity_alert(transfer_id):
+        return False
+
+    recent_cutoff = timezone.now() - timezone.timedelta(hours=24)
+    recent_restore = (
+        Notification.objects.filter(
+            transfer_id=transfer_id,
+            metadata__integrity_restored=True,
+            created_at__gte=recent_cutoff,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    if recent_restore:
+        alert_after_restore = Notification.objects.filter(
+            transfer_id=transfer_id,
+            metadata__integrity_alert=True,
+            created_at__gt=recent_restore.created_at,
+        ).exists()
+        if not alert_after_restore:
+            return False
+
+    batch_code = getattr(result, "batch_code", None) or "Unknown batch"
+    branch_name = getattr(result, "branch_name", None) or ""
+    transfer = Transfer.objects.filter(pk=transfer_id).first()
+
+    if restored_fields:
+        restore_lines = [_format_restore_line(cf) for cf in restored_fields]
+        summary = "; ".join(restore_lines)
+    else:
+        summary = "All fields now match the original receipt."
+
+    notification_message = (
+        f"Transfer #{transfer_id}"
+        + (f" ({batch_code})" if batch_code else "")
+        + (f" at {branch_name}" if branch_name else "")
+        + f": {summary}"
+    )
+
+    details_lines = [
+        f"Transfer #{transfer_id} · {batch_code}",
+        "Status: Data integrity restored — database matches Storacha receipt.",
+    ]
+    if branch_name:
+        details_lines.append(f"Branch: {branch_name}")
+    if restored_fields:
+        details_lines.extend(restore_lines)
+    else:
+        field_comparison = getattr(result, "field_comparison", None) or {}
+        for key, row in field_comparison.items():
+            if row.get("match"):
+                details_lines.append(
+                    f"{key.replace('_', ' ').title()}: {row.get('database')!s} ✓"
+                )
+
+    notify_admins(
+        notification_type=Notification.TYPE_SYSTEM,
+        title=f"Resolved: Transfer #{transfer_id} data restored",
+        message=notification_message,
+        details="\n".join(details_lines),
+        priority=Notification.PRIORITY_MEDIUM,
+        transfer=transfer,
+        metadata={
+            "integrity_restored": True,
+            "tab": "integrity",
+            "transfer_id": transfer_id,
+            "restored_fields": restored_fields or [],
+        },
+    )
+    notify_regulators(
+        notification_type=Notification.TYPE_SYSTEM,
+        title=f"Resolved: Transfer #{transfer_id} integrity restored",
+        message=notification_message,
+        details="\n".join(details_lines[:5]),
+        priority=Notification.PRIORITY_MEDIUM,
+        transfer=transfer,
+        metadata={
+            "integrity_restored": True,
+            "tab": "integrity",
+            "transfer_id": transfer_id,
+        },
+    )
+
+    _send_integrity_restored_sms(
+        transfer_id=transfer_id,
+        batch_code=batch_code,
+        summary=summary,
+    )
+    return True
+
+
+def _send_integrity_sms(
+    *,
+    transfer_id: int,
+    batch_code: str,
+    branch_name: str,
+    change_lines: list[str],
+    issue_summary: str,
+) -> None:
+    """Send an SMS alert to every admin who has a phone number configured."""
+    try:
+        from supply_chain.models import UserProfile
+        from .briq import send_sms, normalize_phone_digits
+
+        admin_users = User.objects.filter(is_staff=True)
+        all_changes = "; ".join(change_lines) if change_lines else issue_summary
+        sms_body = (
+            f"CoffeeChain ALERT: Transfer #{transfer_id}"
+            + (f" ({batch_code})" if batch_code else "")
+            + f". {all_changes}. Login to review."
+        )
+        # Truncate to 160 chars
+        sms_body = sms_body[:160]
+
+        for admin in admin_users:
+            phone = ""
+            try:
+                up = admin.profile
+                phone = (up.contact_phone or "").strip()
+            except Exception:
+                pass
+            if not phone or phone.strip("+").strip().replace(" ", "") in ("255", ""):
+                continue
+            result = send_sms(phone, sms_body)
+            logger.info(
+                "[Integrity] SMS alert to admin %s (%s): delivered=%s",
+                admin.username,
+                normalize_phone_digits(phone),
+                result.get("delivered"),
+            )
+    except Exception:
+        logger.exception("[Integrity] Failed to send integrity SMS to admins")
+
+
+def _send_integrity_restored_sms(
+    *,
+    transfer_id: int,
+    batch_code: str,
+    summary: str,
+) -> None:
+    """Send a positive SMS when transfer data is restored to match the receipt."""
+    try:
+        from .briq import send_sms, normalize_phone_digits
+
+        admin_users = User.objects.filter(is_staff=True)
+        sms_body = (
+            f"CoffeeChain: Transfer #{transfer_id}"
+            + (f" ({batch_code})" if batch_code else "")
+            + f" restored. {summary}. Data matches receipt."
+        )
+        sms_body = sms_body[:160]
+
+        for admin in admin_users:
+            phone = ""
+            try:
+                up = admin.profile
+                phone = (up.contact_phone or "").strip()
+            except Exception:
+                pass
+            if not phone or phone.strip("+").strip().replace(" ", "") in ("255", ""):
+                continue
+            result = send_sms(phone, sms_body)
+            logger.info(
+                "[Integrity] Restore SMS to admin %s (%s): delivered=%s",
+                admin.username,
+                normalize_phone_digits(phone),
+                result.get("delivered"),
+            )
+    except Exception:
+        logger.exception("[Integrity] Failed to send restore SMS to admins")

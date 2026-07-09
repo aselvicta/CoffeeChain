@@ -14,7 +14,7 @@ import { Toaster } from 'sonner';
 const DASHBOARD_CONFIG = {
   admin: {
     defaultTab: 'overview',
-    validTabs: ['overview', 'suppliers', 'retailers', 'cooperatives', 'users', 'integrity'],
+    validTabs: ['overview', 'users', 'registrations', 'reports', 'integrity', 'profile'],
   },
   supplier: {
     defaultTab: 'overview',
@@ -30,7 +30,7 @@ const DASHBOARD_CONFIG = {
   },
   warehouse_manager: {
     defaultTab: 'overview',
-    validTabs: ['overview', 'pending', 'history'],
+    validTabs: ['overview', 'pending', 'inventory', 'history', 'analytics'],
   },
 };
 
@@ -45,7 +45,7 @@ export function MainApp() {
   const navigate = useNavigate();
 
   const buildProfile = (profile) => {
-    const { user, role, supplier, branch, warehouse_manager } = profile;
+    const { user, role, supplier, branch, warehouse_manager, contact_phone, organization } = profile;
     const displayName = user.first_name || user.username;
     if (role === 'supplier' && supplier) {
       return {
@@ -94,18 +94,28 @@ export function MainApp() {
     if (role === 'regulator') {
       return {
         role: 'admin',
+        userId: user.id,
         username: user.username,
+        firstName: user.first_name,
+        lastName: user.last_name,
+        email: user.email,
+        contactPhone: contact_phone || '',
         name: displayName,
         level: 'Regulatory Authority',
-        organization: 'Tanzania Coffee Board (TCB)',
+        organization: organization || 'CoffeeChain Enterprises',
       };
     }
     return {
       role: 'admin',
+      userId: user.id,
       username: user.username,
+      firstName: user.first_name,
+      lastName: user.last_name,
+      email: user.email,
+      contactPhone: contact_phone || '',
       name: displayName,
       level: 'National Administrator',
-      organization: 'Tanzania Coffee Board (TCB)',
+      organization: organization || 'CoffeeChain Enterprises',
     };
   };
 

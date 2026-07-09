@@ -10,6 +10,9 @@ class Supplier(models.Model):
     )
     region = models.CharField(max_length=120, blank=True)
     contact_phone = models.CharField(max_length=30, blank=True)
+    store_image = models.ImageField(upload_to="supplier_images/", blank=True, null=True)
+    location_lat = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    location_lng = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -45,6 +48,10 @@ class Branch(models.Model):
     branch_type = models.CharField(max_length=20, choices=BRANCH_TYPES)
     district = models.CharField(max_length=120, blank=True)
     region = models.CharField(max_length=120, blank=True)
+    contact_phone = models.CharField(max_length=30, blank=True)
+    shop_image = models.ImageField(upload_to="branch_images/", blank=True, null=True)
+    location_lat = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    location_lng = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True
     )
@@ -52,6 +59,57 @@ class Branch(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.branch_type})"
+
+
+class PendingRegistration(models.Model):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    STATUS_CHOICES = [
+        (PENDING, "Pending"),
+        (APPROVED, "Approved"),
+        (REJECTED, "Rejected"),
+    ]
+
+    ROLE_CHOICES = [
+        ("supplier", "Supplier"),
+        ("retailer", "Retailer"),
+        ("cooperative", "Cooperative"),
+    ]
+
+    username = models.CharField(max_length=150, unique=True)
+    email = models.EmailField(blank=True)
+    first_name = models.CharField(max_length=150, blank=True)
+    last_name = models.CharField(max_length=150, blank=True)
+    password_hash = models.CharField(max_length=200)
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES)
+    # Role-specific details
+    organisation_name = models.CharField(max_length=200, blank=True)
+    contact_phone = models.CharField(max_length=30, blank=True)
+    region = models.CharField(max_length=120, blank=True)
+    district = models.CharField(max_length=120, blank=True)
+    # Status tracking
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=PENDING)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_registrations",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True)
+    created_user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="pending_registration",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.username} ({self.role}) — {self.status}"
 
 
 class Farmer(models.Model):
@@ -130,10 +188,17 @@ class Warehouse(models.Model):
     notes = models.TextField(blank=True, default="")
     capacity_bags = models.PositiveIntegerField(default=0)
     current_bags = models.PositiveIntegerField(default=0)
+    assigned_manager = models.OneToOneField(
+        "WarehouseManager",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assigned_warehouse",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.name} ({self.section})" 
+        return f"{self.name} ({self.section})"
 
 
 class Transfer(models.Model):
@@ -390,3 +455,17 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"{self.title} → {self.user_id}"
+
+
+class UserProfile(models.Model):
+    """Lightweight extension for fields not on Django's built-in User model."""
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="profile",
+    )
+    contact_phone = models.CharField(max_length=50, blank=True, default="")
+    organization = models.CharField(max_length=200, blank=True, default="")
+
+    def __str__(self):
+        return f"Profile({self.user.username})"

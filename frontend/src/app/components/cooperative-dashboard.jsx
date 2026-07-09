@@ -29,6 +29,8 @@ import { buildDashboardPath, resolveDashboardTab } from '../utils/dashboard-rout
 import { buildMonthlyTrend } from '../utils/chart-trends';
 import { getUserMessage } from '../utils/user-messages';
 import { takeRecent, RECENT_LIST_LIMIT, HISTORY_PAGE_SIZE } from '../utils/list-limits';
+import { exportAnalyticsPdf, exportAnalyticsCsv } from '../utils/analytics-export';
+import { AnalyticsExportBar, filterByDateRange } from './ui/analytics-export-bar';
 import { usePaginatedList } from '../hooks/use-paginated-list';
 import { PaginationBar, RecentListNote } from './ui/pagination-bar';
 import {
@@ -759,8 +761,44 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
 
           {activeTab === 'analytics' && (
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-4">
-              <h2 className="text-xl font-bold text-gray-900">AMCOS Analytics</h2>
-              <p className="text-gray-600">Analyze fertilizer receipts, distributions, and verification progress.</p>
+              <AnalyticsExportBar
+                title="AMCOS Analytics"
+                subtitle="Fertilizer receipts, distributions, and verification progress."
+                onExcel={(from, to) => {
+                  const filtered = filterByDateRange(distributions, from, to);
+                  exportAnalyticsCsv({
+                    role: 'Cooperative (AMCOS)',
+                    orgName: userProfile?.organization || userProfile?.name || '',
+                    filename: 'amcos_analytics',
+                    summaryRows: [
+                      { label: 'Batches Received', value: receivedBatches.length },
+                      { label: 'Distributions Made', value: filtered.length },
+                      { label: 'Verified Records', value: verificationList.filter((i) => i.status === 'verified').length },
+                      { label: 'Registered Farmers', value: farmers?.length || 0 },
+                    ],
+                    tableHeaders: ['Date', 'Farmer', 'Phone', 'Product', 'Bags', 'OTP Status'],
+                    tableData: filtered.map((d) => [d.date, d.farmer || '—', d.farmerPhone || '—', d.product || '—', d.bags ?? '—', d.status || '—']),
+                  });
+                }}
+                onPdf={(from, to) => {
+                  const filtered = filterByDateRange(distributions, from, to);
+                  exportAnalyticsPdf({
+                    role: 'Cooperative (AMCOS)',
+                    orgName: userProfile?.organization || userProfile?.name || '',
+                    title: 'AMCOS Analytics Report',
+                    subtitle: from || to ? `Period: ${from || '…'} to ${to || 'today'}` : 'Fertilizer receipts, farmer distributions & verification',
+                    summaryRows: [
+                      { label: 'Batches Received', value: receivedBatches.length },
+                      { label: 'Distributions Made', value: filtered.length },
+                      { label: 'Verified Records', value: verificationList.filter((i) => i.status === 'verified').length },
+                      { label: 'Pending Verification', value: verificationList.filter((i) => i.status !== 'verified').length },
+                      { label: 'Registered Farmers', value: farmers?.length || 0 },
+                    ],
+                    tableHeaders: ['Date', 'Farmer', 'Phone', 'Product', 'Bags', 'OTP Status'],
+                    tableData: filtered.map((d) => [d.date, d.farmer || '—', d.farmerPhone || '—', d.product || '—', d.bags ?? '—', d.status || '—']),
+                  });
+                }}
+              />
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="border border-gray-200 rounded-lg p-4">
                   <p className="text-sm text-gray-600">Receipts</p>

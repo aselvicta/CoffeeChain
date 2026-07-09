@@ -34,6 +34,8 @@ import { buildDashboardPath, resolveDashboardTab } from '../utils/dashboard-rout
 import { buildWeeklyTrend } from '../utils/chart-trends';
 import { getUserMessage } from '../utils/user-messages';
 import { takeRecent, sortByDateDesc, RECENT_LIST_LIMIT, HISTORY_PAGE_SIZE } from '../utils/list-limits';
+import { exportAnalyticsPdf, exportAnalyticsCsv } from '../utils/analytics-export';
+import { AnalyticsExportBar, filterByDateRange } from './ui/analytics-export-bar';
 import { usePaginatedList } from '../hooks/use-paginated-list';
 import { PaginationBar, RecentListNote } from './ui/pagination-bar';
 
@@ -878,7 +880,44 @@ export function RetailerDashboard({ userProfile, onLogout }) {
 
           {activeTab === 'analytics' && (
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-4">
-              <h2 className="text-xl font-bold text-gray-900">Retailer Analytics</h2>
+              <AnalyticsExportBar
+                title="Retailer Analytics"
+                subtitle="Batch receipts, distribution activity, and verification stats."
+                onExcel={(from, to) => {
+                  const filtered = filterByDateRange(distributions, from, to);
+                  exportAnalyticsCsv({
+                    role: 'Retailer',
+                    orgName: userProfile?.organization || userProfile?.name || '',
+                    filename: 'retailer_analytics',
+                    summaryRows: [
+                      { label: 'Batches Received', value: receivedBatches.length },
+                      { label: 'Distributions', value: filtered.length },
+                      { label: 'OTP Verified', value: filtered.filter((d) => d.otp?.toLowerCase() === 'verified').length },
+                      { label: 'Customers Served', value: verificationList.length },
+                    ],
+                    tableHeaders: ['Date', 'Farmer / Customer', 'Product', 'Bags', 'Destination', 'OTP Status'],
+                    tableData: filtered.map((d) => [d.date, d.farmer || '—', d.product || '—', d.bags ?? '—', d.destination || '—', d.otp || '—']),
+                  });
+                }}
+                onPdf={(from, to) => {
+                  const filtered = filterByDateRange(distributions, from, to);
+                  exportAnalyticsPdf({
+                    role: 'Retailer',
+                    orgName: userProfile?.organization || userProfile?.name || '',
+                    title: 'Retailer Analytics Report',
+                    subtitle: from || to ? `Period: ${from || '…'} to ${to || 'today'}` : 'Distribution activity, OTP verification & batch receipts',
+                    summaryRows: [
+                      { label: 'Batches Received', value: receivedBatches.length },
+                      { label: 'Distributions Made', value: filtered.length },
+                      { label: 'OTP Verified', value: filtered.filter((d) => d.otp?.toLowerCase() === 'verified').length },
+                      { label: 'Pending Verification', value: filtered.filter((d) => d.otp?.toLowerCase() !== 'verified').length },
+                      { label: 'Customers Served', value: verificationList.length },
+                    ],
+                    tableHeaders: ['Date', 'Farmer / Customer', 'Product', 'Bags', 'Destination', 'OTP Status'],
+                    tableData: filtered.map((d) => [d.date, d.farmer || '—', d.product || '—', d.bags ?? '—', d.destination || '—', d.otp || '—']),
+                  });
+                }}
+              />
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="border border-gray-200 rounded-lg p-4">
                   <p className="text-sm text-gray-600">Batches Received</p>

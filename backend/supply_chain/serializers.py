@@ -11,6 +11,7 @@ from .models import (
     Issue,
     Notification,
     OTPVerification,
+    PendingRegistration,
     Supplier,
     Transfer,
     Warehouse,
@@ -21,7 +22,7 @@ from .models import (
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ["id", "username", "first_name", "last_name", "email"]
+        fields = ["id", "username", "first_name", "last_name", "email", "is_active"]
 
 
 class AdminUserCreateSerializer(serializers.Serializer):
@@ -50,6 +51,7 @@ class AdminUserCreateSerializer(serializers.Serializer):
     )
     district = serializers.CharField(required=False, allow_blank=True)
     region = serializers.CharField(required=False, allow_blank=True)
+    warehouse_id = serializers.IntegerField(required=False)
 
 
 class AdminUserUpdateSerializer(serializers.Serializer):
@@ -57,6 +59,7 @@ class AdminUserUpdateSerializer(serializers.Serializer):
     first_name = serializers.CharField(required=False, allow_blank=True)
     last_name = serializers.CharField(required=False, allow_blank=True)
     email = serializers.EmailField(required=False, allow_blank=True)
+    is_active = serializers.BooleanField(required=False)
     supplier_name = serializers.CharField(required=False, allow_blank=True)
     supplier_region = serializers.CharField(required=False, allow_blank=True)
     contact_phone = serializers.CharField(required=False, allow_blank=True)
@@ -66,28 +69,56 @@ class AdminUserUpdateSerializer(serializers.Serializer):
     )
     district = serializers.CharField(required=False, allow_blank=True)
     region = serializers.CharField(required=False, allow_blank=True)
+    warehouse_id = serializers.IntegerField(required=False, allow_null=True)
 
 
 class SupplierSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
+    store_image_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Supplier
-        fields = ["id", "name", "region", "contact_phone", "user", "created_at"]
+        fields = [
+            "id", "name", "region", "contact_phone",
+            "store_image", "store_image_url",
+            "location_lat", "location_lng",
+            "user", "created_at",
+        ]
+        extra_kwargs = {"store_image": {"write_only": True, "required": False}}
+
+    def get_store_image_url(self, obj):
+        request = self.context.get("request")
+        if not obj.store_image:
+            return None
+        url = obj.store_image.url
+        if request:
+            return request.build_absolute_uri(url)
+        return url
 
 
 class WarehouseManagerSerializer(serializers.ModelSerializer):
     supplier = SupplierSerializer(read_only=True)
     user = UserSerializer(read_only=True)
+    assigned_warehouse_id = serializers.SerializerMethodField()
+    assigned_warehouse_name = serializers.SerializerMethodField()
 
     class Meta:
         model = WarehouseManager
-        fields = ["id", "supplier", "user", "created_at"]
+        fields = ["id", "supplier", "user", "created_at", "assigned_warehouse_id", "assigned_warehouse_name"]
+
+    def get_assigned_warehouse_id(self, obj):
+        w = getattr(obj, "assigned_warehouse", None)
+        return w.id if w else None
+
+    def get_assigned_warehouse_name(self, obj):
+        w = getattr(obj, "assigned_warehouse", None)
+        return w.name if w else None
 
 
 class BranchSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
     farmers_count = serializers.IntegerField(source="farmers.count", read_only=True)
+    shop_image_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Branch
@@ -97,10 +128,49 @@ class BranchSerializer(serializers.ModelSerializer):
             "branch_type",
             "district",
             "region",
+            "contact_phone",
+            "shop_image",
+            "shop_image_url",
+            "location_lat",
+            "location_lng",
             "user",
             "created_at",
             "farmers_count",
         ]
+        extra_kwargs = {"shop_image": {"write_only": True, "required": False}}
+
+    def get_shop_image_url(self, obj):
+        request = self.context.get("request")
+        if not obj.shop_image:
+            return None
+        url = obj.shop_image.url
+        if request:
+            return request.build_absolute_uri(url)
+        return url
+
+
+class PendingRegistrationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PendingRegistration
+        fields = [
+            "id", "username", "email", "first_name", "last_name",
+            "role", "organisation_name", "contact_phone", "region", "district",
+            "status", "rejection_reason", "created_at", "reviewed_at",
+        ]
+        read_only_fields = ["status", "rejection_reason", "created_at", "reviewed_at"]
+
+
+class PublicRegisterSerializer(serializers.Serializer):
+    username = serializers.CharField()
+    password = serializers.CharField(write_only=True, min_length=6)
+    email = serializers.EmailField(required=False, allow_blank=True)
+    first_name = serializers.CharField(required=False, allow_blank=True)
+    last_name = serializers.CharField(required=False, allow_blank=True)
+    role = serializers.ChoiceField(choices=["supplier", "retailer", "cooperative"])
+    organisation_name = serializers.CharField()
+    contact_phone = serializers.CharField(required=False, allow_blank=True)
+    region = serializers.CharField(required=False, allow_blank=True)
+    district = serializers.CharField(required=False, allow_blank=True)
 
 
 class FarmerSerializer(serializers.ModelSerializer):
@@ -130,6 +200,15 @@ class FarmerSerializer(serializers.ModelSerializer):
 
 
 class WarehouseSerializer(serializers.ModelSerializer):
+    assigned_manager_id = serializers.PrimaryKeyRelatedField(
+        queryset=WarehouseManager.objects.all(),
+        source="assigned_manager",
+        write_only=True,
+        required=False,
+        allow_null=True,
+    )
+    assigned_manager = WarehouseManagerSerializer(read_only=True)
+
     class Meta:
         model = Warehouse
         fields = [
@@ -143,6 +222,8 @@ class WarehouseSerializer(serializers.ModelSerializer):
             "notes",
             "capacity_bags",
             "current_bags",
+            "assigned_manager",
+            "assigned_manager_id",
             "created_at",
         ]
 
