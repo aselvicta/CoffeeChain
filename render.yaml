@@ -33,6 +33,8 @@ services:
         sync: false
       - key: BRIQ_APP_KEY
         sync: false
+      - key: SEED_DEMO
+        sync: false
 
   - type: web
     name: coffeechain-upload
