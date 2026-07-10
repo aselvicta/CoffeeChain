@@ -67,6 +67,7 @@ from .serializers import (
 )
 from .services.blockchain import anchor_to_polygon, build_hash, build_payload_signature
 from .services.ipfs import (
+    load_receipt,
     normalize_receipt_access,
     save_receipt_bytes,
     save_receipt_local,
@@ -139,6 +140,24 @@ def resolve_role(user):
     if "Regulator" in group_names:
         return "regulator"
     return "user"
+
+
+def user_can_view_transfer_receipt(user, transfer) -> bool:
+    role = resolve_role(user)
+    if role in {"admin", "regulator"}:
+        return True
+    if role == "supplier":
+        supplier = Supplier.objects.filter(user=user).first()
+        return bool(supplier and transfer.from_supplier_id == supplier.id)
+    if role == "warehouse_manager":
+        manager = WarehouseManager.objects.filter(user=user).first()
+        return bool(manager and transfer.from_supplier_id == manager.supplier_id)
+    if role in {"retailer", "cooperative"}:
+        branch = Branch.objects.filter(user=user).first()
+        if not branch:
+            return False
+        return transfer.to_branch_id == branch.id or transfer.from_branch_id == branch.id
+    return False
 
 
 def build_user_payload(user):
@@ -1733,6 +1752,7 @@ class TransferViewSet(viewsets.ModelViewSet):
             )
 
         return {
+            "transfer_id": transfer.id,
             "cid": cid,
             "tx_hash": tx_hash,
             "data_hash": data_hash,
@@ -1840,6 +1860,77 @@ class TransferViewSet(viewsets.ModelViewSet):
             in_app_sent = True
 
         return Response({"email_sent": email_sent, "in_app_sent": in_app_sent})
+
+    @action(detail=True, methods=["get"])
+    def receipt(self, request, pk=None):
+        transfer = self.get_object()
+        if not user_can_view_transfer_receipt(request.user, transfer):
+            return Response({"detail": "Not allowed."}, status=status.HTTP_403_FORBIDDEN)
+
+        receipt = load_receipt(transfer.id)
+        anchor = BlockchainAnchor.objects.filter(transfer_id=transfer.id).first()
+        if not receipt and anchor:
+            payload = anchor.payload or {}
+            receipt = {
+                "transfer_id": transfer.id,
+                "quantity_bags": transfer.quantity_bags,
+                "batch": {
+                    "code": transfer.batch.batch_code if transfer.batch else None,
+                    "fertilizer_type": (
+                        transfer.batch.fertilizer_type if transfer.batch else None
+                    ),
+                },
+                "farmer": (
+                    {
+                        "ministry_id": transfer.farmer.ministry_id,
+                        "name": transfer.farmer.name,
+                    }
+                    if transfer.farmer
+                    else None
+                ),
+                "verified_at": anchor.anchored_at.isoformat() if anchor.anchored_at else None,
+                "integrity": {
+                    "data_hash": anchor.data_hash,
+                    "tx_hash": anchor.tx_hash,
+                    "network": anchor.network,
+                    "explorer_url": (
+                        f"https://amoy.polygonscan.com/tx/{anchor.tx_hash}"
+                        if anchor.tx_hash
+                        else None
+                    ),
+                },
+                "receipt_summary": payload.get("receipt_summary"),
+                "note": "Partial receipt rebuilt from blockchain anchor.",
+            }
+
+        if not receipt:
+            return Response(
+                {"detail": "Verification receipt not found for this transfer."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        storage_url = ""
+        storage_is_remote = False
+        cid = ""
+        if anchor:
+            cid = anchor.payload.get("cid", "")
+            storage_url = anchor.payload.get("storage_url", "")
+            storage_is_remote = anchor.payload.get("storage_is_remote", False)
+            storage_url, storage_is_remote = normalize_receipt_access(
+                transfer.id, cid, storage_url, storage_is_remote
+            )
+
+        return Response(
+            {
+                "transfer_id": transfer.id,
+                "receipt": receipt,
+                "storage": {
+                    "cid": cid or receipt.get("content_cid"),
+                    "url": storage_url,
+                    "is_remote": storage_is_remote,
+                },
+            }
+        )
 
     @action(detail=True, methods=["post"])
     def upload_proof(self, request, pk=None):

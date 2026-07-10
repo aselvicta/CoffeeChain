@@ -875,7 +875,10 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
           onVerify={async (code) => {
             const result = await verifyOtp(pendingTransfer.id, code);
             if (result?.verification) {
-              setLatestVerification(result.verification);
+              setLatestVerification({
+                ...result.verification,
+                transfer_id: pendingTransfer.id,
+              });
             }
           }}
           onResend={async (options) => {

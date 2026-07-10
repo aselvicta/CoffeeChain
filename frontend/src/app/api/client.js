@@ -346,6 +346,10 @@ export function verifyOtp(id, code) {
   });
 }
 
+export function fetchTransferReceipt(transferId) {
+  return apiFetch(`/api/transfers/${transferId}/receipt/`);
+}
+
 export async function uploadProof(id, file, meta = {}, retryOnUnauthorized = true) {
   const token = getAccessToken();
   const formData = new FormData();
