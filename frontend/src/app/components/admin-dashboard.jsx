@@ -124,6 +124,36 @@ function FieldLabel({ children, required }) {
   );
 }
 
+const REGULATOR_BANNER_COPY = {
+  overview: 'You can monitor national supply-chain activity, reports, and chain integrity. Account changes are managed by CoffeeChain administrators.',
+  users: 'You can browse registered suppliers, retailers, cooperatives, and other users. Creating, editing, or deactivating accounts requires an administrator.',
+  registrations: 'You can review self-registration requests submitted to CoffeeChain. Approving or rejecting registrations is reserved for administrators.',
+  reports: 'You can generate and export regulatory reports for oversight and audit purposes.',
+  integrity: 'You can inspect verification records and run integrity checks across the supply chain.',
+  profile: 'You can update your own regulator profile and contact details.',
+};
+
+function RegulatorReadOnlyBanner({ tab = 'overview' }) {
+  return (
+    <div className="rounded-xl border border-sky-200 bg-white px-4 py-4 shadow-sm">
+      <div className="flex items-start gap-3">
+        <div className="rounded-full bg-sky-100 p-2 shrink-0">
+          <Shield className="h-5 w-5 text-sky-700" />
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-gray-900">Regulatory view-only access</p>
+          <p className="text-sm text-gray-600 mt-1 leading-relaxed">
+            {REGULATOR_BANNER_COPY[tab] || REGULATOR_BANNER_COPY.overview}
+          </p>
+          <p className="text-xs text-sky-700 mt-2 font-medium">
+            Need to add or change accounts? Contact a CoffeeChain administrator.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FormInput({ label, required, className = '', ...props }) {
   return (
     <div>
@@ -351,7 +381,7 @@ function UserFormModal({ role, editingUser, suppliers, warehouses, onClose, onSa
 
 // ─── User Detail Drawer ──────────────────────────────────────────────────────
 
-function UserDetailModal({ record, onClose, onEdit }) {
+function UserDetailModal({ record, onClose, onEdit, readOnly = false }) {
   if (!record) return null;
   const { user, role, supplier, branch, warehouse_manager } = record;
   const entity = supplier || branch;
@@ -402,12 +432,14 @@ function UserDetailModal({ record, onClose, onEdit }) {
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={() => onEdit(record)}
-              className="flex items-center gap-1.5 text-sm text-green-700 border border-green-200 hover:bg-green-50 rounded-lg px-3 py-1.5 font-medium"
-            >
-              <Pencil className="h-3.5 w-3.5" /> Edit
-            </button>
+            {!readOnly && (
+              <button
+                onClick={() => onEdit(record)}
+                className="flex items-center gap-1.5 text-sm text-green-700 border border-green-200 hover:bg-green-50 rounded-lg px-3 py-1.5 font-medium"
+              >
+                <Pencil className="h-3.5 w-3.5" /> Edit
+              </button>
+            )}
             <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100">
               <X className="h-5 w-5" />
             </button>
@@ -505,7 +537,7 @@ function Row({ label, value, children }) {
 
 // ─── Per-role user table ─────────────────────────────────────────────────────
 
-function RoleUserTable({ role, users, suppliers, warehouses, onRefresh }) {
+function RoleUserTable({ role, users, suppliers, warehouses, onRefresh, readOnly = false }) {
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editingRecord, setEditingRecord] = useState(null);
@@ -603,13 +635,15 @@ function RoleUserTable({ role, users, suppliers, warehouses, onRefresh }) {
             className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
           />
         </div>
-        <button
-          onClick={openCreate}
-          className="flex items-center gap-2 bg-green-700 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-green-800 shrink-0"
-        >
-          <Plus className="h-4 w-4" />
-          Add {getRoleLabel(role)}
-        </button>
+        {!readOnly && (
+          <button
+            onClick={openCreate}
+            className="flex items-center gap-2 bg-green-700 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-green-800 shrink-0"
+          >
+            <Plus className="h-4 w-4" />
+            Add {getRoleLabel(role)}
+          </button>
+        )}
       </div>
 
       {/* Table */}
@@ -623,7 +657,7 @@ function RoleUserTable({ role, users, suppliers, warehouses, onRefresh }) {
               <th className="text-left py-3 px-4 font-semibold text-gray-700">Contact</th>
               <th className="text-left py-3 px-4 font-semibold text-gray-700">Region</th>
               <th className="text-left py-3 px-4 font-semibold text-gray-700">Status</th>
-              <th className="text-left py-3 px-4 font-semibold text-gray-700">Actions</th>
+              <th className="text-left py-3 px-4 font-semibold text-gray-700">{readOnly ? 'View' : 'Actions'}</th>
             </tr>
           </thead>
           <tbody>
@@ -668,31 +702,35 @@ function RoleUserTable({ role, users, suppliers, warehouses, onRefresh }) {
                       >
                         <Eye className="h-4 w-4" />
                       </button>
-                      <button
-                        onClick={() => openEdit(record)}
-                        title="Edit"
-                        className="p-1.5 text-gray-500 hover:text-green-600 hover:bg-green-50 rounded"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={() => handleToggleActive(record)}
-                        disabled={togglingActive === u.id}
-                        title={u.is_active ? 'Deactivate' : 'Activate'}
-                        className={`p-1.5 rounded ${u.is_active
-                          ? 'text-gray-500 hover:text-amber-600 hover:bg-amber-50'
-                          : 'text-gray-500 hover:text-green-600 hover:bg-green-50'}`}
-                      >
-                        {u.is_active ? <UserX className="h-4 w-4" /> : <UserCheck className="h-4 w-4" />}
-                      </button>
-                      <button
-                        onClick={() => handleDelete(record)}
-                        disabled={deleting === u.id}
-                        title="Delete"
-                        className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      {!readOnly && (
+                        <>
+                          <button
+                            onClick={() => openEdit(record)}
+                            title="Edit"
+                            className="p-1.5 text-gray-500 hover:text-green-600 hover:bg-green-50 rounded"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => handleToggleActive(record)}
+                            disabled={togglingActive === u.id}
+                            title={u.is_active ? 'Deactivate' : 'Activate'}
+                            className={`p-1.5 rounded ${u.is_active
+                              ? 'text-gray-500 hover:text-amber-600 hover:bg-amber-50'
+                              : 'text-gray-500 hover:text-green-600 hover:bg-green-50'}`}
+                          >
+                            {u.is_active ? <UserX className="h-4 w-4" /> : <UserCheck className="h-4 w-4" />}
+                          </button>
+                          <button
+                            onClick={() => handleDelete(record)}
+                            disabled={deleting === u.id}
+                            title="Delete"
+                            className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -723,6 +761,7 @@ function RoleUserTable({ role, users, suppliers, warehouses, onRefresh }) {
           record={detailRecord}
           onClose={() => setDetailRecord(null)}
           onEdit={(r) => { setDetailRecord(null); openEdit(r); }}
+          readOnly={readOnly}
         />
       )}
     </div>
@@ -731,7 +770,7 @@ function RoleUserTable({ role, users, suppliers, warehouses, onRefresh }) {
 
 // ─── Pending Registrations Tab ───────────────────────────────────────────────
 
-function PendingRegistrationsPanel() {
+function PendingRegistrationsPanel({ readOnly = false }) {
   const [registrations, setRegistrations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('PENDING');
@@ -786,10 +825,16 @@ function PendingRegistrationsPanel() {
 
   return (
     <div className="space-y-5">
+      {readOnly && <RegulatorReadOnlyBanner tab="registrations" />}
+
       <div className="flex flex-col sm:flex-row sm:items-center gap-3">
         <div>
           <h2 className="text-xl font-bold text-gray-900">Registration Requests</h2>
-          <p className="text-sm text-gray-500">Review and approve or reject self-registration submissions.</p>
+          <p className="text-sm text-gray-500">
+            {readOnly
+              ? 'Review submissions from suppliers, retailers, and cooperatives. Approval actions are administrator-only.'
+              : 'Review and approve or reject self-registration submissions.'}
+          </p>
         </div>
         <div className="sm:ml-auto flex gap-2">
           {['PENDING', 'APPROVED', 'REJECTED', 'all'].map((s) => (
@@ -846,7 +891,7 @@ function PendingRegistrationsPanel() {
                   )}
                 </div>
 
-                {reg.status === 'PENDING' && (
+                {reg.status === 'PENDING' && !readOnly && (
                   <div className="flex gap-2 shrink-0">
                     <button
                       onClick={() => handleApprove(reg.id)}
@@ -865,6 +910,11 @@ function PendingRegistrationsPanel() {
                       Reject
                     </button>
                   </div>
+                )}
+                {reg.status === 'PENDING' && readOnly && (
+                  <span className="shrink-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800">
+                    Awaiting admin review
+                  </span>
                 )}
               </div>
             </div>
@@ -1149,7 +1199,8 @@ function AdminProfilePanel({ userProfile }) {
 // ─── Main Admin Dashboard ────────────────────────────────────────────────────
 
 export function AdminDashboard({ userProfile, onLogout }) {
-  const dashboardRole = 'admin';
+  const readOnly = Boolean(userProfile?.readOnly || userProfile?.role === 'regulator');
+  const dashboardRole = readOnly ? 'regulator' : 'admin';
   const dashboardTabs = ['overview', 'users', 'registrations', 'reports', 'integrity', 'profile'];
   const [activeTab, setActiveTab] = useState('overview');
   const [activeRoleTab, setActiveRoleTab] = useState('supplier');
@@ -1265,21 +1316,30 @@ export function AdminDashboard({ userProfile, onLogout }) {
 
   const TAB_CONFIG = [
     { id: 'overview', label: 'Overview', icon: BarChart3 },
-    { id: 'users', label: 'User Management', icon: Users },
+    { id: 'users', label: readOnly ? 'User Directory' : 'User Management', icon: Users },
     { id: 'registrations', label: 'Registrations', icon: UserCheck },
     { id: 'reports', label: 'Reports', icon: TrendingUp },
     { id: 'integrity', label: 'Chain Integrity', icon: Shield },
     { id: 'profile', label: 'My Account', icon: User },
   ];
 
-  const TAB_TITLES = {
-    overview: 'Admin Dashboard',
-    users: 'User Management',
-    registrations: 'Registration Requests',
-    reports: 'Reports',
-    integrity: 'Chain Integrity',
-    profile: 'My Account',
-  };
+  const TAB_TITLES = readOnly
+    ? {
+        overview: 'Regulatory Dashboard',
+        users: 'User Directory',
+        registrations: 'Registration Requests',
+        reports: 'Reports',
+        integrity: 'Chain Integrity',
+        profile: 'My Account',
+      }
+    : {
+        overview: 'Admin Dashboard',
+        users: 'User Management',
+        registrations: 'Registration Requests',
+        reports: 'Reports',
+        integrity: 'Chain Integrity',
+        profile: 'My Account',
+      };
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
@@ -1316,7 +1376,9 @@ export function AdminDashboard({ userProfile, onLogout }) {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">{TAB_TITLES[activeTab] || 'Admin Dashboard'}</h1>
-              <p className="text-sm text-gray-600">{userProfile?.name} · Administrator</p>
+              <p className="text-sm text-gray-600">
+                {userProfile?.name} · {userProfile?.level || (readOnly ? 'Regulatory Authority' : 'Administrator')}
+              </p>
             </div>
             <div className="flex items-center gap-4">
               <NotificationBell
@@ -1355,6 +1417,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
           {/* Overview */}
           {activeTab === 'overview' && (
             <div className="space-y-6">
+              {readOnly && <RegulatorReadOnlyBanner tab="overview" />}
               {statusMessage && <p className="text-sm text-red-600">{statusMessage}</p>}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
                 {[
@@ -1464,6 +1527,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
           {/* User Management */}
           {activeTab === 'users' && (
             <div className="space-y-5">
+              {readOnly && <RegulatorReadOnlyBanner tab="users" />}
               {/* Role sub-tabs */}
               <div className="flex gap-1 bg-gray-100 rounded-xl p-1 overflow-x-auto">
                 {ROLE_TABS.map(({ key, label, icon: Icon, color }) => (
@@ -1490,27 +1554,39 @@ export function AdminDashboard({ userProfile, onLogout }) {
                 suppliers={supplierOptions}
                 warehouses={warehouses}
                 onRefresh={loadData}
+                readOnly={readOnly}
               />
             </div>
           )}
 
           {/* Registrations */}
-          {activeTab === 'registrations' && <PendingRegistrationsPanel />}
+          {activeTab === 'registrations' && <PendingRegistrationsPanel readOnly={readOnly} />}
 
           {/* Reports */}
-          {activeTab === 'reports' && <ReportsPanel />}
+          {activeTab === 'reports' && (
+            <div className="space-y-5">
+              {readOnly && <RegulatorReadOnlyBanner tab="reports" />}
+              <ReportsPanel />
+            </div>
+          )}
 
           {/* Integrity */}
           {activeTab === 'integrity' && (
-            <IntegrityPanel
-              userProfile={userProfile}
-              initialHighlightId={integrityHighlightId}
-              onClearHighlight={() => setIntegrityHighlightId('')}
-            />
+            <div className="space-y-5">
+              {readOnly && <RegulatorReadOnlyBanner tab="integrity" />}
+              <IntegrityPanel
+                userProfile={userProfile}
+                initialHighlightId={integrityHighlightId}
+                onClearHighlight={() => setIntegrityHighlightId('')}
+              />
+            </div>
           )}
 
           {activeTab === 'profile' && (
-            <AdminProfilePanel userProfile={userProfile} />
+            <div className="space-y-5">
+              {readOnly && <RegulatorReadOnlyBanner tab="profile" />}
+              <AdminProfilePanel userProfile={userProfile} />
+            </div>
           )}
         </main>
       </div>

@@ -16,6 +16,10 @@ const DASHBOARD_CONFIG = {
     defaultTab: 'overview',
     validTabs: ['overview', 'users', 'registrations', 'reports', 'integrity', 'profile'],
   },
+  regulator: {
+    defaultTab: 'overview',
+    validTabs: ['overview', 'users', 'registrations', 'reports', 'integrity', 'profile'],
+  },
   supplier: {
     defaultTab: 'overview',
     validTabs: ['overview', 'dispatch', 'dispatched', 'warehouse', 'issues', 'analytics', 'history'],
@@ -93,7 +97,8 @@ export function MainApp() {
     }
     if (role === 'regulator') {
       return {
-        role: 'admin',
+        role: 'regulator',
+        readOnly: true,
         userId: user.id,
         username: user.username,
         firstName: user.first_name,
@@ -212,6 +217,7 @@ export function MainApp() {
     switch (userProfile.role) {
       case 'admin':
       case 'national':
+      case 'regulator':
         return <AdminDashboard userProfile={userProfile} onLogout={handleLogout} />;
       case 'supplier':
         return <SupplierDashboard userProfile={userProfile} onLogout={handleLogout} />;

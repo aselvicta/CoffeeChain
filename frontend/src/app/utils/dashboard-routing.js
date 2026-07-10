@@ -1,5 +1,6 @@
 const ROLE_ALIASES = {
   national: 'admin',
+  regulator: 'admin',
 };
 
 function normalizeRole(role) {

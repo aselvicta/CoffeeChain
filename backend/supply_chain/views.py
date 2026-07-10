@@ -308,7 +308,12 @@ def validate_warehouse_capacity(warehouse, bags, exclude_batch_id=None):
 
 
 class AdminUserViewSet(viewsets.ViewSet):
-    permission_classes = [IsAuthenticated, IsAdmin]
+    permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        if self.action in ("list", "retrieve"):
+            return [IsAuthenticated(), RegulatorOrAdmin()]
+        return [IsAuthenticated(), IsAdmin()]
 
     def list(self, request):
         users = User.objects.all().order_by("username")
@@ -676,7 +681,12 @@ class PublicRegisterView(APIView):
 
 
 class PendingRegistrationViewSet(viewsets.ViewSet):
-    permission_classes = [IsAuthenticated, IsAdmin]
+    permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        if self.action in ("list", "retrieve"):
+            return [IsAuthenticated(), RegulatorOrAdmin()]
+        return [IsAuthenticated(), IsAdmin()]
 
     def list(self, request):
         status_filter = request.query_params.get("status", PendingRegistration.PENDING)
@@ -808,7 +818,11 @@ class PendingRegistrationViewSet(viewsets.ViewSet):
 class SupplierViewSet(viewsets.ModelViewSet):
     queryset = Supplier.objects.all()
     serializer_class = SupplierSerializer
-    permission_classes = [IsAdmin]
+
+    def get_permissions(self):
+        if self.action in ["list", "retrieve"]:
+            return [IsAuthenticated(), RegulatorOrAdmin()]
+        return [IsAuthenticated(), IsAdmin()]
 
 
 class BranchViewSet(viewsets.ModelViewSet):
