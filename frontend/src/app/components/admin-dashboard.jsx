@@ -124,29 +124,20 @@ function FieldLabel({ children, required }) {
   );
 }
 
-const REGULATOR_BANNER_COPY = {
-  overview: 'You can monitor national supply-chain activity, reports, and chain integrity. Account changes are managed by CoffeeChain administrators.',
-  users: 'You can browse registered suppliers, retailers, cooperatives, and other users. Creating, editing, or deactivating accounts requires an administrator.',
-  registrations: 'You can review self-registration requests submitted to CoffeeChain. Approving or rejecting registrations is reserved for administrators.',
-  reports: 'You can generate and export regulatory reports for oversight and audit purposes.',
-  integrity: 'You can inspect verification records and run integrity checks across the supply chain.',
-  profile: 'You can update your own regulator profile and contact details.',
-};
-
-function RegulatorReadOnlyBanner({ tab = 'overview' }) {
+function RegulatorAccessNotice() {
   return (
-    <div className="rounded-xl border border-sky-200 bg-white px-4 py-4 shadow-sm">
-      <div className="flex items-start gap-3">
-        <div className="rounded-full bg-sky-100 p-2 shrink-0">
-          <Shield className="h-5 w-5 text-sky-700" />
-        </div>
-        <div className="min-w-0">
-          <p className="text-sm font-semibold text-gray-900">Regulatory view-only access</p>
-          <p className="text-sm text-gray-600 mt-1 leading-relaxed">
-            {REGULATOR_BANNER_COPY[tab] || REGULATOR_BANNER_COPY.overview}
+    <div className="mx-4 md:mx-6 lg:mx-8 mt-4 px-5 py-4 bg-white border border-gray-200 rounded-xl">
+      <div className="flex items-start gap-3 max-w-4xl">
+        <Shield className="h-4 w-4 text-gray-400 mt-1 shrink-0" />
+        <div className="space-y-1.5 text-sm leading-relaxed">
+          <p className="font-semibold text-gray-900">Regulatory view-only access</p>
+          <p className="text-gray-600">
+            You can monitor the supply chain, browse users, review registration requests,
+            generate reports, and run integrity checks.
           </p>
-          <p className="text-xs text-sky-700 mt-2 font-medium">
-            Need to add or change accounts? Contact a CoffeeChain administrator.
+          <p className="text-gray-500 text-xs">
+            Account creation and edits are reserved for administrators. You may update your
+            own profile under My Account. For other changes, contact a CoffeeChain administrator.
           </p>
         </div>
       </div>
@@ -825,15 +816,11 @@ function PendingRegistrationsPanel({ readOnly = false }) {
 
   return (
     <div className="space-y-5">
-      {readOnly && <RegulatorReadOnlyBanner tab="registrations" />}
-
       <div className="flex flex-col sm:flex-row sm:items-center gap-3">
         <div>
           <h2 className="text-xl font-bold text-gray-900">Registration Requests</h2>
           <p className="text-sm text-gray-500">
-            {readOnly
-              ? 'Review submissions from suppliers, retailers, and cooperatives. Approval actions are administrator-only.'
-              : 'Review and approve or reject self-registration submissions.'}
+            Review self-registration submissions from suppliers, retailers, and cooperatives.
           </p>
         </div>
         <div className="sm:ml-auto flex gap-2">
@@ -1412,12 +1399,13 @@ export function AdminDashboard({ userProfile, onLogout }) {
           </div>
         </header>
 
+        {readOnly && <RegulatorAccessNotice />}
+
         {/* Page body */}
         <main className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-4 md:p-6 lg:p-8">
           {/* Overview */}
           {activeTab === 'overview' && (
             <div className="space-y-6">
-              {readOnly && <RegulatorReadOnlyBanner tab="overview" />}
               {statusMessage && <p className="text-sm text-red-600">{statusMessage}</p>}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
                 {[
@@ -1527,7 +1515,6 @@ export function AdminDashboard({ userProfile, onLogout }) {
           {/* User Management */}
           {activeTab === 'users' && (
             <div className="space-y-5">
-              {readOnly && <RegulatorReadOnlyBanner tab="users" />}
               {/* Role sub-tabs */}
               <div className="flex gap-1 bg-gray-100 rounded-xl p-1 overflow-x-auto">
                 {ROLE_TABS.map(({ key, label, icon: Icon, color }) => (
@@ -1563,30 +1550,19 @@ export function AdminDashboard({ userProfile, onLogout }) {
           {activeTab === 'registrations' && <PendingRegistrationsPanel readOnly={readOnly} />}
 
           {/* Reports */}
-          {activeTab === 'reports' && (
-            <div className="space-y-5">
-              {readOnly && <RegulatorReadOnlyBanner tab="reports" />}
-              <ReportsPanel />
-            </div>
-          )}
+          {activeTab === 'reports' && <ReportsPanel />}
 
           {/* Integrity */}
           {activeTab === 'integrity' && (
-            <div className="space-y-5">
-              {readOnly && <RegulatorReadOnlyBanner tab="integrity" />}
-              <IntegrityPanel
-                userProfile={userProfile}
-                initialHighlightId={integrityHighlightId}
-                onClearHighlight={() => setIntegrityHighlightId('')}
-              />
-            </div>
+            <IntegrityPanel
+              userProfile={userProfile}
+              initialHighlightId={integrityHighlightId}
+              onClearHighlight={() => setIntegrityHighlightId('')}
+            />
           )}
 
           {activeTab === 'profile' && (
-            <div className="space-y-5">
-              {readOnly && <RegulatorReadOnlyBanner tab="profile" />}
-              <AdminProfilePanel userProfile={userProfile} />
-            </div>
+            <AdminProfilePanel userProfile={userProfile} />
           )}
         </main>
       </div>
