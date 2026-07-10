@@ -3,6 +3,7 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 from django.conf import settings
 import requests
@@ -21,10 +22,17 @@ class StorageResult:
     error: str | None = None
 
 
+def _storacha_enabled() -> bool:
+    enabled = getattr(settings, "STORACHA_UPLOAD_ENABLED", True)
+    url = (getattr(settings, "STORACHA_UPLOAD_URL", "") or "").strip()
+    return bool(enabled and url)
+
+
 def _ensure_url() -> str:
-    if not settings.STORACHA_UPLOAD_URL:
+    url = (getattr(settings, "STORACHA_UPLOAD_URL", "") or "").strip()
+    if not url:
         raise RuntimeError("STORACHA_UPLOAD_URL is not configured.")
-    return settings.STORACHA_UPLOAD_URL
+    return url
 
 
 def _receipts_dir() -> Path:
@@ -45,6 +53,12 @@ def _is_local_cid(cid: str) -> bool:
 def _absolute_backend_url(relative_path: str) -> str:
     """Build a browser-openable URL for files served by Django MEDIA."""
     if relative_path.startswith(("http://", "https://")):
+        parsed = urlparse(relative_path)
+        host = (parsed.hostname or "").lower()
+        if host in {"localhost", "127.0.0.1"}:
+            path = parsed.path.lstrip("/")
+            base = getattr(settings, "BACKEND_PUBLIC_URL", "http://127.0.0.1:8000").rstrip("/")
+            return f"{base}/{path}"
         return relative_path
     base = getattr(settings, "BACKEND_PUBLIC_URL", "http://127.0.0.1:8000").rstrip("/")
     path = relative_path.lstrip("/")
@@ -63,12 +77,24 @@ def _is_remote_upload(body: dict, cid: str) -> bool:
 
 def _save_local(name: str, content: bytes) -> tuple[str, str]:
     safe = (name or "record").strip().replace(" ", "-") or "record"
-    target = _receipts_dir() / f"{safe}.json"
+    if not safe.endswith(".json"):
+        safe = f"{safe}.json"
+    target = _receipts_dir() / safe
     target.write_bytes(content)
     cid = _local_pseudo_cid(content)
     media_url = (settings.MEDIA_URL or "media/").strip("/")
     relative = f"{media_url}/receipts/{target.name}"
     return cid, _absolute_backend_url(relative)
+
+
+def _local_storage_result(name: str, content: bytes, error: str | None = None) -> StorageResult:
+    cid, local_url = _save_local(name, content)
+    return StorageResult(
+        cid=cid,
+        is_remote=False,
+        url=local_url,
+        error=error or "Storacha unavailable; receipt saved on backend.",
+    )
 
 
 def normalize_receipt_access(
@@ -85,7 +111,10 @@ def normalize_receipt_access(
             and storage_url.startswith(("http://", "https://"))
             and "/ipfs/local-" not in storage_url
         ):
-            return storage_url, False
+            fixed_url = _absolute_backend_url(storage_url)
+            host = urlparse(fixed_url).hostname or ""
+            if host not in {"localhost", "127.0.0.1"}:
+                return fixed_url, False
         if (_receipts_dir() / receipt_file).exists():
             return _absolute_backend_url(f"media/receipts/{receipt_file}"), False
         if storage_url:
@@ -99,18 +128,36 @@ def normalize_receipt_access(
 
 
 def store_file(file_obj):
-    """Upload a binary file-like object to Storacha and return the CID."""
-    url = _ensure_url()
-    files = {"file": (getattr(file_obj, "name", "upload.bin"), file_obj)}
-    response = requests.post(url, files=files, timeout=30)
-    response.raise_for_status()
-    payload = response.json()
-    cid = payload.get("cid")
-    if not cid:
-        raise RuntimeError("Storacha upload failed to return a CID.")
-    if not _is_remote_upload(payload, cid):
-        raise RuntimeError("Storacha upload fell back to local storage for binary file.")
-    return cid
+    """Upload a binary file-like object to Storacha, or return a local pseudo-CID."""
+    name = getattr(file_obj, "name", "upload.bin")
+    content = b""
+    if hasattr(file_obj, "read"):
+        content = file_obj.read()
+        if hasattr(file_obj, "seek"):
+            file_obj.seek(0)
+
+    if _storacha_enabled():
+        try:
+            url = _ensure_url()
+            files = {"file": (name, content, getattr(file_obj, "content_type", None) or "application/octet-stream")}
+            response = requests.post(url, files=files, timeout=30)
+            response.raise_for_status()
+            payload = response.json()
+            cid = payload.get("cid")
+            if cid and _is_remote_upload(payload, cid):
+                return cid
+            logger.warning(
+                "Storacha binary upload unavailable for %s; using local pseudo-CID.",
+                name,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Storacha binary upload failed for %s: %s. Using local pseudo-CID.",
+                name,
+                exc,
+            )
+
+    return _local_pseudo_cid(content)
 
 
 def receipt_file_path(transfer_id: int) -> Path:
@@ -132,26 +179,32 @@ def load_receipt(transfer_id: int) -> dict | None:
 def save_receipt_local(name: str, payload: dict) -> str:
     """Overwrite a receipt JSON file on disk (used after integrity metadata is added)."""
     content = json.dumps(payload, indent=2, default=str).encode("utf-8")
-    safe = (name or "record").strip().replace(" ", "-") or "record"
-    target = _receipts_dir() / f"{safe}.json"
-    target.write_bytes(content)
-    media_url = (settings.MEDIA_URL or "media/").strip("/")
-    return _absolute_backend_url(f"{media_url}/receipts/{target.name}")
+    _, local_url = _save_local(name, content)
+    return local_url
+
+
+def save_receipt_bytes(name: str, content: bytes) -> StorageResult:
+    """Persist raw receipt bytes on the Django backend (internal callback)."""
+    return _local_storage_result(name, content, error="Saved via backend receipt callback.")
 
 
 def store_json(name: str, payload: dict) -> StorageResult:
     """Serialize a dict to JSON and persist a content-addressable receipt.
 
-    Attempts to upload to Storacha first. If Storacha is unavailable (account
-    disabled, network failure, etc.) the receipt is still written to
-    ``MEDIA_ROOT/receipts/`` with a sha256-derived pseudo-CID so the rest of
-    the verification flow (blockchain anchoring, audit log) can proceed and
-    the data is never lost.
+    Attempts Storacha when enabled. Otherwise — or on any failure — the receipt
+    is written to ``MEDIA_ROOT/receipts/`` on the Django backend so integrity
+    checks and anchoring still work in production without Storacha.
     """
     content = json.dumps(payload, indent=2, default=str).encode("utf-8")
     safe_name = (name or "record").strip().replace(" ", "-") or "record"
 
-    # Try Storacha first
+    if not _storacha_enabled():
+        return _local_storage_result(
+            safe_name,
+            content,
+            error="Storacha upload disabled; receipt saved on backend.",
+        )
+
     storacha_error: str | None = None
     try:
         url = _ensure_url()
@@ -171,36 +224,14 @@ def store_json(name: str, payload: dict) -> StorageResult:
                 url=f"{gateway}{cid}",
             )
 
-        service_url = body.get("url") or ""
-        fallback_error = body.get("note") or "Storacha unavailable; saved locally."
-        if not service_url:
-            cid, local_url = _save_local(safe_name, content)
-            return StorageResult(
-                cid=cid,
-                is_remote=False,
-                url=local_url,
-                error=fallback_error,
-            )
-
-        return StorageResult(
-            cid=cid,
-            is_remote=False,
-            url=_absolute_backend_url(service_url),
-            error=fallback_error,
-        )
+        fallback_error = body.get("note") or "Storacha unavailable; saved on backend."
+        return _local_storage_result(safe_name, content, error=fallback_error)
     except Exception as exc:
         storacha_error = str(exc)
         logger.warning(
-            "Storacha upload failed for %s: %s. Falling back to local storage.",
+            "Storacha upload failed for %s: %s. Falling back to backend storage.",
             safe_name,
             storacha_error,
         )
 
-    # Fallback: local content-addressed storage so the flow never breaks
-    cid, local_url = _save_local(safe_name, content)
-    return StorageResult(
-        cid=cid,
-        is_remote=False,
-        url=local_url,
-        error=storacha_error,
-    )
+    return _local_storage_result(safe_name, content, error=storacha_error)

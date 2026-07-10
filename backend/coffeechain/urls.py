@@ -13,5 +13,5 @@ urlpatterns = [
     path("api/", include("supply_chain.urls")),
 ]
 
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+# Receipts fall back to MEDIA_ROOT when Storacha is down — serve them in production too.
+urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

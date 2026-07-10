@@ -29,9 +29,10 @@ export function storeLocalFallback(buffer, originalName) {
   fs.writeFileSync(target, buffer);
   const cid = pseudoCid(buffer);
   const mediaUrl = `/media/receipts/${path.basename(target)}`;
+  const backendBase = (process.env.BACKEND_PUBLIC_URL || "http://localhost:8000").replace(/\/$/, "");
   return {
     cid,
-    url: `http://localhost:8000${mediaUrl}`,
+    url: `${backendBase}${mediaUrl}`,
     storage: "local",
     storacha_ok: false,
     path: target,

@@ -132,8 +132,10 @@ OTP_CODE_LENGTH = int(os.getenv("OTP_CODE_LENGTH", "6"))
 OTP_EXPIRY_MINUTES = int(os.getenv("OTP_EXPIRY_MINUTES", "10"))
 
 IPFS_GATEWAY_URL = os.getenv("IPFS_GATEWAY_URL", "https://w3s.link/ipfs/")
-STORACHA_UPLOAD_URL = os.getenv("STORACHA_UPLOAD_URL", "http://localhost:3001/upload")
+STORACHA_UPLOAD_URL = os.getenv("STORACHA_UPLOAD_URL", "http://localhost:3001/upload").strip()
+STORACHA_UPLOAD_ENABLED = os.getenv("STORACHA_UPLOAD_ENABLED", "true").lower() == "true"
 BACKEND_PUBLIC_URL = os.getenv("BACKEND_PUBLIC_URL", "http://127.0.0.1:8000")
+RECEIPT_CALLBACK_SECRET = os.getenv("RECEIPT_CALLBACK_SECRET", "").strip()
 POLYGON_RPC_URL = os.getenv("POLYGON_RPC_URL", "")
 POLYGON_CONTRACT_ADDRESS = os.getenv("POLYGON_CONTRACT_ADDRESS", "")
 POLYGON_PRIVATE_KEY = os.getenv("POLYGON_PRIVATE_KEY", "")

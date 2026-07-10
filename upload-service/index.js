@@ -2,6 +2,7 @@ import dotenv from "dotenv";
 import express from "express";
 import multer from "multer";
 import { createStorachaClient, uploadFile, verifyUploadReady } from "./storacha-client.js";
+import { postReceiptToBackend } from "./backend-callback.js";
 import { isStorachaDisabledError, storeLocalFallback } from "./local-storage.js";
 
 dotenv.config();
@@ -113,7 +114,24 @@ app.post("/upload", upload.single("file"), async (req, res) => {
     }
   }
 
-  // Local fallback (FYP/demo keeps working)
+  // Backend callback (production) then local disk (dev)
+  try {
+    const backend = await postReceiptToBackend(req.file.buffer, req.file.originalname);
+    if (backend?.cid && backend?.url) {
+      console.log(`[upload] backend callback OK cid=${backend.cid}`);
+      return res.json({
+        success: true,
+        cid: backend.cid,
+        url: backend.url,
+        storage: "backend",
+        storacha_ok: false,
+        note: backend.note || "Storacha unavailable; receipt saved on Django backend.",
+      });
+    }
+  } catch (error) {
+    console.warn("[upload] backend callback failed:", error.message);
+  }
+
   const local = storeLocalFallback(req.file.buffer, req.file.originalname);
   console.log(`[upload] local fallback cid=${local.cid} path=${local.path}`);
   return res.json({

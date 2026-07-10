@@ -29,6 +29,10 @@ services:
         sync: false
       - key: STORACHA_UPLOAD_URL
         sync: false
+      - key: STORACHA_UPLOAD_ENABLED
+        value: "false"
+      - key: RECEIPT_CALLBACK_SECRET
+        sync: false
       - key: BRIQ_API_KEY
         sync: false
       - key: BRIQ_APP_KEY
@@ -49,6 +53,12 @@ services:
       - key: STORACHA_KEY
         sync: false
       - key: STORACHA_PROOF
+        sync: false
+      - key: BACKEND_RECEIPT_CALLBACK_URL
+        sync: false
+      - key: BACKEND_PUBLIC_URL
+        sync: false
+      - key: RECEIPT_CALLBACK_SECRET
         sync: false
 
 databases:

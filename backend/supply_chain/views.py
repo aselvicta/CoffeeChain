@@ -66,7 +66,13 @@ from .serializers import (
     WarehouseManagerSerializer,
 )
 from .services.blockchain import anchor_to_polygon, build_hash, build_payload_signature
-from .services.ipfs import normalize_receipt_access, save_receipt_local, store_file, store_json
+from .services.ipfs import (
+    normalize_receipt_access,
+    save_receipt_bytes,
+    save_receipt_local,
+    store_file,
+    store_json,
+)
 from .services.integrity import (
     compare_transfers,
     list_verified_transfers,
@@ -521,6 +527,38 @@ class MeView(APIView):
             up.save()
 
         return Response(self._build_me_payload(user))
+
+
+class ReceiptCallbackView(APIView):
+    """Internal endpoint for upload-service to persist receipts when Storacha is down."""
+
+    authentication_classes = []
+    permission_classes = []
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        expected = getattr(settings, "RECEIPT_CALLBACK_SECRET", "")
+        provided = request.headers.get("X-Receipt-Callback-Token", "")
+        if not expected or provided != expected:
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        file_obj = request.FILES.get("file")
+        if not file_obj:
+            return Response({"detail": "file is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        name = (request.data.get("name") or file_obj.name or "receipt").strip()
+        content = file_obj.read()
+        result = save_receipt_bytes(name, content)
+        return Response(
+            {
+                "success": True,
+                "cid": result.cid,
+                "url": result.url,
+                "storage": "backend",
+                "storacha_ok": False,
+                "note": result.error,
+            }
+        )
 
 
 class PublicRegisterView(APIView):
