@@ -967,16 +967,15 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                   ) : (
                     <>
                       <div className="overflow-x-auto rounded-lg border border-gray-200">
-                        <table className="w-full min-w-[720px] table-fixed divide-y divide-gray-200">
+                        <table className="w-full min-w-[640px] table-fixed divide-y divide-gray-200">
                           <thead className="bg-gray-50">
                             <tr>
-                              <th className={`${tableHeadCell} w-[18%]`}>Batch</th>
-                              <th className={`${tableHeadCell} w-[12%]`}>Shipment</th>
-                              <th className={`${tableHeadCell} w-[16%]`}>Receiver</th>
-                              <th className={`${tableHeadCell} hidden w-[14%] xl:table-cell`}>Warehouse</th>
-                              <th className={`${tableHeadCell} w-[14%]`}>Status</th>
+                              <th className={`${tableHeadCell} w-[20%]`}>Batch</th>
+                              <th className={`${tableHeadCell} w-[14%]`}>Shipment</th>
+                              <th className={`${tableHeadCell} w-[18%]`}>Receiver</th>
+                              <th className={`${tableHeadCell} hidden w-[16%] xl:table-cell`}>Warehouse</th>
+                              <th className={`${tableHeadCell} w-[22%]`}>Status</th>
                               <th className={`${tableHeadCell} w-[10%]`}>Date</th>
-                              <th className={`${tableHeadCell} w-[16%]`}>Actions</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-200 bg-white">
@@ -1009,47 +1008,43 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                                   {dispatch.warehouse}
                                 </td>
                                 <td className={tableBodyCell}>
-                                  <div className="inline-flex flex-col items-start">
+                                  <div className="inline-flex flex-col items-start gap-1.5">
                                     <span
                                       className={`inline-block max-w-full truncate rounded-full px-2 py-0.5 text-[11px] font-medium sm:text-xs ${dispatch.statusTone}`}
                                     >
                                       {dispatch.status}
                                     </span>
-                                    <span className="mt-0.5 truncate text-[11px] text-gray-500">
+                                    <span className="truncate text-[11px] text-gray-500">
                                       {dispatch.confirmedAt
                                         ? formatShortDate(dispatch.confirmedAt)
                                         : dispatch.rawStatus === 'REJECTED'
                                           ? 'Needs correction'
                                           : 'Awaiting'}
                                     </span>
+                                    {dispatch.rawStatus === 'REJECTED' && (
+                                      <div className="flex flex-wrap gap-1.5 pt-0.5">
+                                        <PanelOutlineButton
+                                          type="button"
+                                          icon={MessageSquare}
+                                          onClick={() => openRejectedReview(dispatch)}
+                                          className="!px-2 !py-1 text-xs"
+                                        >
+                                          Feedback
+                                        </PanelOutlineButton>
+                                        <PanelPrimaryButton
+                                          type="button"
+                                          icon={RotateCcw}
+                                          onClick={() => handleRedispatch(dispatch)}
+                                          className="!px-2 !py-1 text-xs"
+                                        >
+                                          Redispatch
+                                        </PanelPrimaryButton>
+                                      </div>
+                                    )}
                                   </div>
                                 </td>
                                 <td className={`${tableBodyCell} text-gray-500`}>
                                   {dispatch.date || '—'}
-                                </td>
-                                <td className={tableBodyCell}>
-                                  {dispatch.rawStatus === 'REJECTED' ? (
-                                    <div className="flex flex-col gap-1.5 sm:flex-row sm:flex-wrap">
-                                      <PanelOutlineButton
-                                        type="button"
-                                        icon={MessageSquare}
-                                        onClick={() => openRejectedReview(dispatch)}
-                                        className="!px-2 !py-1 text-xs"
-                                      >
-                                        Feedback
-                                      </PanelOutlineButton>
-                                      <PanelPrimaryButton
-                                        type="button"
-                                        icon={RotateCcw}
-                                        onClick={() => handleRedispatch(dispatch)}
-                                        className="!px-2 !py-1 text-xs"
-                                      >
-                                        Redispatch
-                                      </PanelPrimaryButton>
-                                    </div>
-                                  ) : (
-                                    <span className="text-xs text-gray-400">—</span>
-                                  )}
                                 </td>
                               </tr>
                             ))}
