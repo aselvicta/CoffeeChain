@@ -512,7 +512,7 @@ def notify_for_integrity_mismatch(result) -> bool:
     last_mod = getattr(result, "last_api_modification", None)
     if last_mod and last_mod.get("username"):
         details_lines.append(
-            f"Last modified via API by: {last_mod['username']} "
+            f"Last updated by: {last_mod['username']} "
             f"({last_mod.get('modified_at', '')[:19].replace('T', ' ')})"
         )
         for change in last_mod.get("changes") or []:
@@ -521,7 +521,7 @@ def notify_for_integrity_mismatch(result) -> bool:
             )
     elif changes:
         details_lines.append(
-            "Last modified via API by: unknown (possible direct database edit)"
+            "Direct database edit detected — the record was changed outside the app (no linked user)"
         )
     if explorer_url:
         details_lines.append(f"Polygon: {explorer_url}")

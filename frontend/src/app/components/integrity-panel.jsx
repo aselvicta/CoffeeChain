@@ -231,12 +231,11 @@ function DetailModal({ item, onClose, initialView = 'compare' }) {
               )}
 
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-800">
-                <p className="font-semibold text-gray-900">Last API modification</p>
+                <p className="font-semibold text-gray-900">Source of tampering</p>
                 {item.last_api_modification?.username ? (
                   <div className="mt-2 space-y-1">
                     <p>
-                      Last modified via API by{' '}
-                      <strong>{item.last_api_modification.username}</strong>
+                      App · <strong>{item.last_api_modification.username}</strong>
                       {item.last_api_modification.modified_at && (
                         <span className="text-gray-600">
                           {' '}
@@ -256,12 +255,9 @@ function DetailModal({ item, onClose, initialView = 'compare' }) {
                     )}
                   </div>
                 ) : item.status === 'mismatch' ? (
-                  <p className="mt-2 text-amber-800">
-                    Last modified via API by: unknown — change may have been made directly in
-                    the database.
-                  </p>
+                  <p className="mt-2 text-amber-800">Direct database edit.</p>
                 ) : (
-                  <p className="mt-2 text-gray-600">No API modification recorded for this transfer.</p>
+                  <p className="mt-2 text-gray-600">No app changes on record.</p>
                 )}
               </div>
 
