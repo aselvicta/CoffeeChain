@@ -18,17 +18,10 @@ export function VerificationTrustSeal({ verification, onDismiss }) {
     cid,
     tx_hash: txHash,
     explorer_url: explorerUrl,
-    storage_is_remote: storageIsRemote,
-    storacha_ok: storachaOk,
     blockchain_ok: blockchainOk,
-    storacha_error: storachaError,
     blockchain_error: blockchainError,
   } = verification;
 
-  const isLocalCid = Boolean(cid && String(cid).startsWith('local-'));
-  const isRemote = storageIsRemote && !isLocalCid;
-  const storageLabel = isRemote ? 'Storacha (IPFS)' : 'Backend archive';
-  const receiptOk = isRemote ? Boolean(storachaOk) : Boolean(transferId);
   const canViewReceipt = Boolean(transferId);
 
   return (
@@ -46,7 +39,7 @@ export function VerificationTrustSeal({ verification, onDismiss }) {
                     Trust Seal — Delivery Verified
                   </h3>
                   <p className="text-sm text-gray-600 mt-1">
-                    This distribution is anchored on Polygon Amoy and the receipt is stored for audit.
+                    This distribution is anchored on Polygon Amoy and the receipt is stored in decentralized storage.
                   </p>
                 </div>
                 {onDismiss && (
@@ -73,7 +66,7 @@ export function VerificationTrustSeal({ verification, onDismiss }) {
                   Receipt storage
                 </p>
               </div>
-              <p className="text-sm font-medium text-gray-900">{storageLabel}</p>
+              <p className="text-sm font-medium text-gray-900">Decentralized storage</p>
               <p className="mt-1 font-mono text-xs text-gray-600 break-all">
                 {cid ? truncate(cid, 14, 6) : '—'}
               </p>
@@ -86,16 +79,6 @@ export function VerificationTrustSeal({ verification, onDismiss }) {
                   <FileText className="h-3.5 w-3.5" />
                   View receipt
                 </button>
-              )}
-              {!receiptOk && storachaError && (
-                <p className="mt-3 text-xs text-amber-700 leading-relaxed">
-                  Storacha unavailable — receipt saved on CoffeeChain backend.
-                </p>
-              )}
-              {!isRemote && !storachaError && (
-                <p className="mt-3 text-xs text-gray-500 leading-relaxed">
-                  Stored securely on the backend. Polygon anchor still applies.
-                </p>
               )}
             </div>
 

@@ -179,7 +179,7 @@ function DetailModal({ item, onClose, initialView = 'compare' }) {
             <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="text-sm text-gray-600">
-                  Stored on {item.receipt_storage === 'storacha' ? 'Storacha (IPFS)' : 'local server'}
+                  Stored in decentralized storage
                 </p>
                 {receiptHref && (
                   <a
@@ -226,8 +226,7 @@ function DetailModal({ item, onClose, initialView = 'compare' }) {
 
               {item.status === 'ok' && (
                 <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
-                  Database hash and fields match the receipt on{' '}
-                  {item.receipt_storage === 'storacha' ? 'Storacha' : 'local storage'}.
+                  Database hash and fields match the stored receipt.
                 </div>
               )}
 
@@ -281,7 +280,7 @@ function DetailModal({ item, onClose, initialView = 'compare' }) {
                     <tbody className="divide-y divide-gray-100">
                       {[
                         ['Database', item.stored_hash],
-                        ['Receipt (Storacha/local)', item.receipt_hash],
+                        ['Receipt', item.receipt_hash],
                       ].map(([label, hash]) => (
                         <tr key={label}>
                           <td className="px-4 py-2 text-gray-700">{label}</td>
@@ -565,7 +564,7 @@ export function IntegrityPanel({ highlightTransferId = '', onScanComplete }) {
           <h2 className="text-xl font-bold text-gray-900">Chain Integrity</h2>
         </div>
         <p className="mt-1 text-sm text-gray-600">
-          Search transfers and compare the database against Storacha receipts. Mismatches trigger
+          Search transfers and compare the database against stored verification receipts. Mismatches trigger
           critical alerts.
         </p>
 

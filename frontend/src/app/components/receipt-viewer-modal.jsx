@@ -122,9 +122,7 @@ export function ReceiptViewerModal({ open, transferId, onClose }) {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="rounded-xl border border-gray-200 bg-white p-4">
                   <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Storage</p>
-                  <p className="mt-1 text-sm font-medium text-gray-900">
-                    {storage.is_remote ? 'Storacha (IPFS)' : 'Backend archive'}
-                  </p>
+                  <p className="mt-1 text-sm font-medium text-gray-900">Decentralized storage</p>
                   {storage.cid && (
                     <p className="mt-1 font-mono text-xs text-gray-600 break-all">{storage.cid}</p>
                   )}
@@ -187,11 +185,6 @@ export function ReceiptViewerModal({ open, transferId, onClose }) {
                 </Section>
               )}
 
-              {receipt.note && (
-                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                  {receipt.note}
-                </p>
-              )}
             </>
           )}
         </div>
