@@ -132,7 +132,17 @@ OTP_CODE_LENGTH = int(os.getenv("OTP_CODE_LENGTH", "6"))
 OTP_EXPIRY_MINUTES = int(os.getenv("OTP_EXPIRY_MINUTES", "10"))
 
 IPFS_GATEWAY_URL = os.getenv("IPFS_GATEWAY_URL", "https://w3s.link/ipfs/")
-STORACHA_UPLOAD_URL = os.getenv("STORACHA_UPLOAD_URL", "http://localhost:3001/upload").strip()
+
+# Receipt storage: Storacha (upload service) first, then backend disk + DB fallback.
+# STORACHA_UPLOAD_URL can be set explicitly, or built from STORACHA_UPLOAD_HOST (Render).
+_storacha_upload_url = os.getenv("STORACHA_UPLOAD_URL", "").strip()
+if not _storacha_upload_url:
+    _upload_host = os.getenv("STORACHA_UPLOAD_HOST", "").strip()
+    if _upload_host:
+        _storacha_upload_url = f"https://{_upload_host.rstrip('/')}/upload"
+    else:
+        _storacha_upload_url = "http://localhost:3001/upload"
+STORACHA_UPLOAD_URL = _storacha_upload_url
 STORACHA_UPLOAD_ENABLED = os.getenv("STORACHA_UPLOAD_ENABLED", "true").lower() == "true"
 BACKEND_PUBLIC_URL = os.getenv("BACKEND_PUBLIC_URL", "http://127.0.0.1:8000")
 RECEIPT_CALLBACK_SECRET = os.getenv("RECEIPT_CALLBACK_SECRET", "").strip()

@@ -71,6 +71,7 @@ from .services.ipfs import (
     normalize_receipt_access,
     save_receipt_bytes,
     save_receipt_local,
+    save_receipt_to_db,
     store_file,
     store_json,
 )
@@ -1610,6 +1611,10 @@ class TransferViewSet(viewsets.ModelViewSet):
             storage_url, storage_is_remote = normalize_receipt_access(
                 transfer.id, cid, storage_url, storage_is_remote
             )
+            if not (existing.payload or {}).get("receipt"):
+                receipt_on_disk = load_receipt(transfer.id)
+                if receipt_on_disk:
+                    save_receipt_to_db(transfer.id, receipt_on_disk)
             storacha_ok = existing.payload.get("storacha_ok", False)
             if cid.startswith("local-"):
                 storacha_ok = False
@@ -1764,6 +1769,8 @@ class TransferViewSet(viewsets.ModelViewSet):
                 transfer.id,
                 exc,
             )
+        # Always keep a DB copy — survives Render redeploys even when disk/Storacha differ.
+        save_receipt_to_db(transfer.id, receipt)
 
         return {
             "transfer_id": transfer.id,

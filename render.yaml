@@ -27,10 +27,15 @@ services:
         sync: false
       - key: BACKEND_PUBLIC_URL
         sync: false
+      - key: STORACHA_UPLOAD_HOST
+        fromService:
+          type: web
+          name: coffeechain-upload
+          property: host
       - key: STORACHA_UPLOAD_URL
         sync: false
       - key: STORACHA_UPLOAD_ENABLED
-        value: "false"
+        value: "true"
       - key: RECEIPT_CALLBACK_SECRET
         sync: false
       - key: BRIQ_API_KEY
@@ -54,6 +59,11 @@ services:
         sync: false
       - key: STORACHA_PROOF
         sync: false
+      - key: BACKEND_API_HOST
+        fromService:
+          type: web
+          name: coffeechain-api
+          property: host
       - key: BACKEND_RECEIPT_CALLBACK_URL
         sync: false
       - key: BACKEND_PUBLIC_URL
