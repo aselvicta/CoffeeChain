@@ -36,10 +36,18 @@ function extractDetail(payload) {
   if (typeof payload.message === 'string') return payload.message;
   if (typeof payload.error === 'string') return payload.error;
 
-  const fieldMessages = Object.values(payload)
-    .flatMap((value) => (Array.isArray(value) ? value : [value]))
-    .filter((value) => typeof value === 'string');
-  if (fieldMessages.length) return fieldMessages[0];
+  // Field-level validation errors — include the field name so it's actionable
+  const fieldEntries = Object.entries(payload).filter(([, v]) => v);
+  const fieldMessages = fieldEntries.flatMap(([field, value]) => {
+    const msgs = Array.isArray(value) ? value : [value];
+    return msgs
+      .filter((m) => typeof m === 'string')
+      .map((m) => {
+        const label = field.replace(/_/g, ' ');
+        return `${label.charAt(0).toUpperCase() + label.slice(1)}: ${m}`;
+      });
+  });
+  if (fieldMessages.length) return fieldMessages.join(' · ');
 
   return '';
 }

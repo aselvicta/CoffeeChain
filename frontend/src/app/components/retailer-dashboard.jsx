@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { Package, Users, Send, History, LogOut, TrendingUp, ShieldCheck, Search } from 'lucide-react';
+import { Package, Users, Send, History, LogOut, TrendingUp, ShieldCheck, Search, ShoppingCart, Store } from 'lucide-react';
 import { NotificationBell } from './notification-bell';
 import { useNotifications } from '../hooks/use-notifications';
 import { LineChart, Line, PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
@@ -11,8 +11,11 @@ import { RetailerSalePanel } from './retailer-sale-panel';
 import { StockBatchPicker } from './stock-batch-picker';
 import { CooperativeHistoryPanel } from './cooperative-history-panel';
 import { VerificationTrustSeal } from './verification-trust-seal';
+import { SupplierCatalogPanel } from './supplier-catalog-panel';
+import { BranchOrdersPanel } from './branch-orders-panel';
 import {
   createTransfer,
+  fetchOrders,
   fetchTransfers,
   sendOtp,
   uploadProof,
@@ -41,7 +44,7 @@ import { PaginationBar, RecentListNote } from './ui/pagination-bar';
 
 export function RetailerDashboard({ userProfile, onLogout }) {
   const dashboardRole = 'retailer';
-  const dashboardTabs = ['overview', 'receive', 'distribute', 'customers', 'verification', 'history', 'analytics'];
+  const dashboardTabs = ['overview', 'catalog', 'orders', 'receive', 'distribute', 'customers', 'verification', 'history', 'analytics'];
   const [activeTab, setActiveTab] = useState('overview');
   const [inboundTransfers, setInboundTransfers] = useState([]);
   const [distributionForm, setDistributionForm] = useState({ batchId: '', bags: '' });
@@ -55,6 +58,7 @@ export function RetailerDashboard({ userProfile, onLogout }) {
   const [smsInfo, setSmsInfo] = useState(null);
   const [otpCodeLength, setOtpCodeLength] = useState(6);
   const [latestVerification, setLatestVerification] = useState(null);
+  const [orders, setOrders] = useState([]);
   const [statusMessage, setStatusMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [savePhase, setSavePhase] = useState('');
@@ -242,6 +246,8 @@ export function RetailerDashboard({ userProfile, onLogout }) {
           rawTransfer: transfer,
         }))
       );
+      const ordersData = await fetchOrders();
+      setOrders(Array.isArray(ordersData) ? ordersData : (ordersData?.results || []));
       await refreshNotifications();
     } catch (error) {
       setStatusMessage(getUserMessage(error));
@@ -278,6 +284,8 @@ export function RetailerDashboard({ userProfile, onLogout }) {
         <nav className="flex-1 p-4 space-y-2">
           {[
             { id: 'overview', label: 'Overview', icon: TrendingUp },
+            { id: 'catalog', label: 'Supplier Catalog', icon: Store },
+            { id: 'orders', label: 'My Orders', icon: ShoppingCart },
             { id: 'receive', label: 'Receive Batches', icon: Package },
             { id: 'distribute', label: 'Point of Sale', icon: Send },
             { id: 'customers', label: 'Customers', icon: Users },
@@ -539,6 +547,14 @@ export function RetailerDashboard({ userProfile, onLogout }) {
                 </>
               )}
             </div>
+          )}
+
+          {activeTab === 'catalog' && (
+            <SupplierCatalogPanel onOrderPlaced={refreshData} userProfile={userProfile} />
+          )}
+
+          {activeTab === 'orders' && (
+            <BranchOrdersPanel orders={orders} onRefresh={refreshData} />
           )}
 
           {activeTab === 'receive' && (

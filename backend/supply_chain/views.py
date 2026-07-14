@@ -24,6 +24,7 @@ from .models import (
     FertilizerBatch,
     Issue,
     Notification,
+    Order,
     PendingRegistration,
     UserProfile,
     Warehouse,
@@ -56,6 +57,7 @@ from .serializers import (
     FertilizerBatchSerializer,
     IssueSerializer,
     NotificationSerializer,
+    OrderSerializer,
     PendingRegistrationSerializer,
     PublicRegisterSerializer,
     WarehouseSerializer,
@@ -179,6 +181,10 @@ def build_user_payload(user):
             else None
         ),
     }
+
+
+def _get_supplier_for_user(user):
+    return Supplier.objects.filter(user=user).first()
 
 
 def get_batch_available_quantity(batch):
@@ -2382,3 +2388,454 @@ class IntegrityScanView(APIView):
                 "results": [item.to_dict() for item in results],
             }
         )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Orders  (Retailer / AMCOS → Supplier, with Warehouse Manager involvement)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _notify_order_event(order, event: str):
+    """Create in-app notifications for key order lifecycle events."""
+    branch_user = order.branch.user if order.branch else None
+    supplier_user = order.supplier.user if order.supplier else None
+    wm_users = list(
+        User.objects.filter(warehouse_manager_profile__supplier=order.supplier).distinct()
+    )
+
+    branch_name = order.branch.name if order.branch else "Branch"
+    supplier_name = order.supplier.name if order.supplier else "Supplier"
+    ftype = order.fertilizer_type
+    qty = order.quantity_bags
+
+    def _n(user, title, message, priority=Notification.PRIORITY_MEDIUM, meta=None):
+        if not user:
+            return
+        Notification.objects.create(
+            user=user,
+            notification_type=Notification.TYPE_STOCK,
+            title=title,
+            message=message,
+            priority=priority,
+            metadata=meta or {},
+        )
+
+    if event == "placed":
+        _n(
+            supplier_user,
+            f"New order from {branch_name}",
+            f"{branch_name} ordered {qty} bags of {ftype}.",
+            priority=Notification.PRIORITY_HIGH,
+            meta={"tab": "orders"},
+        )
+        for wm in wm_users:
+            _n(
+                wm,
+                f"New order for {supplier_name}",
+                f"{branch_name} requested {qty} bags of {ftype}. Awaiting supplier review.",
+                priority=Notification.PRIORITY_MEDIUM,
+                meta={"tab": "orders"},
+            )
+
+    elif event == "accepted":
+        _n(
+            branch_user,
+            f"Order accepted by {supplier_name}",
+            f"Your order for {qty} bags of {ftype} has been accepted.",
+            priority=Notification.PRIORITY_HIGH,
+            meta={"tab": "orders"},
+        )
+        for wm in wm_users:
+            _n(
+                wm,
+                f"Order to process – {branch_name}",
+                f"Supplier accepted {qty} bags of {ftype} for {branch_name}. Prepare dispatch.",
+                priority=Notification.PRIORITY_HIGH,
+                meta={"tab": "orders"},
+            )
+
+    elif event == "rejected":
+        _n(
+            branch_user,
+            f"Order rejected by {supplier_name}",
+            f"Your order for {qty} bags of {ftype} was not accepted. Reason: {order.rejected_reason or 'N/A'}",
+            priority=Notification.PRIORITY_HIGH,
+            meta={"tab": "orders"},
+        )
+
+    elif event == "ready":
+        _n(
+            branch_user,
+            "Order on the way — confirm delivery",
+            f"{qty} bags of {ftype} have been verified by the warehouse and are en route to you.",
+            priority=Notification.PRIORITY_HIGH,
+            meta={"tab": "orders"},
+        )
+
+    elif event == "dispatched":
+        _n(
+            branch_user,
+            "Order dispatched from warehouse",
+            f"{qty} bags of {ftype} from {supplier_name} have been dispatched — awaiting warehouse verification.",
+            priority=Notification.PRIORITY_MEDIUM,
+            meta={"tab": "orders"},
+        )
+        for wm in wm_users:
+            _n(
+                wm,
+                f"Verify dispatch – Order #{order.id}",
+                f"{supplier_name} dispatched {qty} bags of {ftype} to {branch_name}. Please verify.",
+                priority=Notification.PRIORITY_HIGH,
+                meta={"tab": "orders"},
+            )
+
+    elif event == "delivered":
+        _n(
+            supplier_user,
+            f"Order delivered to {branch_name}",
+            f"{branch_name} confirmed receipt of {qty} bags of {ftype}.",
+            priority=Notification.PRIORITY_MEDIUM,
+            meta={"tab": "orders"},
+        )
+        for wm in wm_users:
+            _n(
+                wm,
+                f"Order delivered – {branch_name}",
+                f"{branch_name} confirmed receipt of {qty} bags of {ftype}.",
+                priority=Notification.PRIORITY_LOW,
+                meta={"tab": "orders"},
+            )
+
+    elif event == "cancelled":
+        _n(
+            supplier_user,
+            f"Order cancelled by {branch_name}",
+            f"{branch_name} cancelled their order for {qty} bags of {ftype}.",
+            priority=Notification.PRIORITY_MEDIUM,
+            meta={"tab": "orders"},
+        )
+
+
+class OrderViewSet(viewsets.ModelViewSet):
+    """CRUD + lifecycle actions for fertilizer orders (Retailer / AMCOS → Supplier)."""
+
+    serializer_class = OrderSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        role = resolve_role(user)
+        qs = Order.objects.select_related(
+            "branch", "supplier", "preferred_batch", "linked_transfer"
+        )
+
+        if role == "admin":
+            return qs.all()
+        if role in ("retailer", "cooperative"):
+            branch = Branch.objects.filter(user=user).first()
+            return qs.filter(branch=branch) if branch else qs.none()
+        if role == "supplier":
+            supplier = Supplier.objects.filter(user=user).first()
+            return qs.filter(supplier=supplier) if supplier else qs.none()
+        if role == "warehouse_manager":
+            wm = WarehouseManager.objects.filter(user=user).first()
+            if not wm:
+                return qs.none()
+            return qs.filter(supplier=wm.supplier)
+        if role == "regulator":
+            return qs.all()
+        return qs.none()
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        branch = Branch.objects.filter(user=user).first()
+        if not branch:
+            raise ValidationError("Only retailers or cooperatives can place orders.")
+        order = serializer.save(branch=branch, created_by=user, status=Order.PENDING)
+        _notify_order_event(order, "placed")
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated, SupplierOrAdmin | WarehouseManagerOrAdmin])
+    def accept(self, request, pk=None):
+        order = self.get_object()
+        if order.status != Order.PENDING:
+            return Response(
+                {"detail": "Only pending orders can be accepted."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        order.status = Order.ACCEPTED
+        order.supplier_notes = request.data.get("supplier_notes", "")
+        order.save()
+        _notify_order_event(order, "accepted")
+        return Response(OrderSerializer(order).data)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated, SupplierOrAdmin])
+    def reject(self, request, pk=None):
+        order = self.get_object()
+        if order.status not in (Order.PENDING, Order.ACCEPTED):
+            return Response(
+                {"detail": "Order cannot be rejected at this stage."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        order.status = Order.REJECTED
+        order.rejected_reason = request.data.get("reason", "")
+        order.supplier_notes = request.data.get("supplier_notes", "")
+        order.save()
+        _notify_order_event(order, "rejected")
+        return Response(OrderSerializer(order).data)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        permission_classes=[IsAuthenticated, WarehouseManagerOrAdmin],
+    )
+    def mark_processing(self, request, pk=None):
+        order = self.get_object()
+        if order.status != Order.ACCEPTED:
+            return Response(
+                {"detail": "Order must be accepted before marking as processing."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        order.status = Order.PROCESSING
+        order.save()
+        return Response(OrderSerializer(order).data)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        permission_classes=[IsAuthenticated, WarehouseManagerOrAdmin],
+    )
+    def mark_ready(self, request, pk=None):
+        order = self.get_object()
+        if order.status not in (Order.ACCEPTED, Order.PROCESSING):
+            return Response(
+                {"detail": "Order must be accepted or processing to mark as ready."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        order.status = Order.READY
+        order.save()
+        _notify_order_event(order, "ready")
+        return Response(OrderSerializer(order).data)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        permission_classes=[IsAuthenticated, WarehouseManagerOrAdmin],
+    )
+    def link_transfer(self, request, pk=None):
+        """Attach an existing Transfer to this order (marks order as DISPATCHED)."""
+        order = self.get_object()
+        transfer_id = request.data.get("transfer_id")
+        if not transfer_id:
+            return Response({"detail": "transfer_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        transfer = get_object_or_404(Transfer, pk=transfer_id)
+        order.linked_transfer = transfer
+        order.status = Order.DISPATCHED
+        order.save()
+        _notify_order_event(order, "dispatched")
+        return Response(OrderSerializer(order).data)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="send_dispatch",
+        permission_classes=[IsAuthenticated, SupplierOrAdmin],
+    )
+    def send_dispatch(self, request, pk=None):
+        """Supplier dispatches an order from a warehouse batch.
+        Requires batch_id. Deducts stock and auto-creates a Transfer."""
+        order = self.get_object()
+        if order.status not in (Order.PENDING, Order.ACCEPTED):
+            return Response(
+                {"detail": "Only pending or accepted orders can be dispatched."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        batch_id = request.data.get("batch_id")
+        if not batch_id:
+            return Response(
+                {"detail": "batch_id is required to dispatch from warehouse stock."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        batch = get_object_or_404(FertilizerBatch, pk=batch_id)
+
+        # Verify the batch belongs to this supplier
+        supplier = _get_supplier_for_user(request.user)
+        if not supplier:
+            return Response({"detail": "Supplier profile not found."}, status=status.HTTP_403_FORBIDDEN)
+
+        if batch.supplier != supplier:
+            return Response({"detail": "Batch does not belong to your inventory."}, status=status.HTTP_403_FORBIDDEN)
+
+        # Check available stock
+        available = get_batch_available_quantity(batch)
+        if available < order.quantity_bags:
+            return Response(
+                {"detail": f"Insufficient stock. Available: {available} bags, needed: {order.quantity_bags} bags."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Auto-create a Transfer record
+        transfer = Transfer.objects.create(
+            batch=batch,
+            transfer_type=Transfer.SUPPLIER_TO_BRANCH,
+            from_supplier=supplier,
+            to_branch=order.branch,
+            quantity_bags=order.quantity_bags,
+            delivery_address=order.delivery_address,
+            status=Transfer.DISPATCHED,
+        )
+
+        order.linked_transfer = transfer
+        order.status = Order.DISPATCHED
+        order.save()
+        _notify_order_event(order, "dispatched")
+        return Response(OrderSerializer(order).data)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="verify_dispatch",
+        permission_classes=[IsAuthenticated, WarehouseManagerOrAdmin],
+    )
+    def verify_dispatch(self, request, pk=None):
+        """Warehouse manager verifies a dispatched order — marks it READY for delivery."""
+        order = self.get_object()
+        if order.status != Order.DISPATCHED:
+            return Response(
+                {"detail": "Only dispatched orders can be verified."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        order.status = Order.READY
+        order.save()
+        _notify_order_event(order, "ready")
+        return Response(OrderSerializer(order).data)
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="available_batches",
+        permission_classes=[IsAuthenticated, SupplierOrAdmin],
+    )
+    def available_batches(self, request):
+        """Return supplier's warehouse batches for a fertilizer type with available stock."""
+        fertilizer_type = request.query_params.get("fertilizer_type", "").strip()
+        supplier = _get_supplier_for_user(request.user)
+        if not supplier:
+            return Response({"detail": "Supplier profile not found."}, status=status.HTTP_403_FORBIDDEN)
+
+        qs = FertilizerBatch.objects.filter(
+            supplier=supplier,
+            lifecycle_state__in=["IN_STORAGE", "RECEIVED", "MANUFACTURED"],
+        )
+        if fertilizer_type:
+            qs = qs.filter(fertilizer_type__icontains=fertilizer_type)
+
+        results = []
+        for batch in qs.order_by("-quantity_bags"):
+            available = get_batch_available_quantity(batch)
+            results.append({
+                "id": batch.id,
+                "batch_code": batch.batch_code,
+                "fertilizer_type": batch.fertilizer_type,
+                "total_bags": batch.quantity_bags,
+                "available_bags": available,
+                "unit_weight_kg": float(batch.unit_weight_kg),
+                "storage_location_id": batch.storage_location_id,
+            })
+        return Response(results)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated, BranchStaffOrAdmin])
+    def cancel(self, request, pk=None):
+        order = self.get_object()
+        if order.status not in (Order.PENDING, Order.ACCEPTED):
+            return Response(
+                {"detail": "Only pending or accepted orders can be cancelled."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        order.status = Order.CANCELLED
+        order.save()
+        _notify_order_event(order, "cancelled")
+        return Response(OrderSerializer(order).data)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
+    def mark_delivered(self, request, pk=None):
+        order = self.get_object()
+        if order.status != Order.READY:
+            return Response(
+                {"detail": "Order must be verified by the warehouse before confirming delivery."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        order.status = Order.DELIVERED
+        order.save()
+        _notify_order_event(order, "delivered")
+        return Response(OrderSerializer(order).data)
+
+
+class SupplierCatalogView(APIView):
+    """
+    Authenticated supplier catalog for Retailers and AMCOS.
+    Returns registered suppliers with their available fertilizer types and
+    in-stock certified batch summaries so buyers know what to order from whom.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        supplier_id = request.query_params.get("supplier_id")
+        fertilizer_type = request.query_params.get("fertilizer_type", "").strip()
+        region = request.query_params.get("region", "").strip()
+
+        suppliers = Supplier.objects.all()
+        if supplier_id:
+            suppliers = suppliers.filter(pk=supplier_id)
+        if region:
+            suppliers = suppliers.filter(region__icontains=region)
+
+        catalog = []
+        for supplier in suppliers:
+            batch_qs = FertilizerBatch.objects.filter(
+                supplier=supplier,
+                lifecycle_state__in=["IN_STORAGE", "RECEIVED", "MANUFACTURED"],
+            )
+            if fertilizer_type:
+                batch_qs = batch_qs.filter(fertilizer_type__icontains=fertilizer_type)
+
+            available_batches = []
+            for batch in batch_qs:
+                avail = get_batch_available_quantity(batch)
+                if avail > 0:
+                    available_batches.append(
+                        {
+                            "id": batch.id,
+                            "batch_code": batch.batch_code,
+                            "fertilizer_type": batch.fertilizer_type,
+                            "available_bags": avail,
+                            "unit_weight_kg": float(batch.unit_weight_kg),
+                            "expiry_date": batch.expiry_date,
+                            "certification_status": batch.certification_status,
+                        }
+                    )
+
+            type_summary = {}
+            for b in available_batches:
+                ft = b["fertilizer_type"]
+                type_summary[ft] = type_summary.get(ft, 0) + b["available_bags"]
+
+            catalog.append(
+                {
+                    "supplier_id": supplier.id,
+                    "supplier_name": supplier.name,
+                    "region": supplier.region,
+                    "contact_phone": supplier.contact_phone,
+                    "store_image_url": (
+                        request.build_absolute_uri(supplier.store_image.url)
+                        if supplier.store_image
+                        else None
+                    ),
+                    "available_fertilizer_types": [
+                        {"fertilizer_type": ft, "total_available_bags": bags}
+                        for ft, bags in sorted(type_summary.items())
+                    ],
+                    "available_batches": available_batches,
+                }
+            )
+
+        return Response({"results": catalog, "count": len(catalog)})

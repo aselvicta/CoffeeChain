@@ -10,6 +10,7 @@ import {
   LogOut,
   Package,
   Search,
+  ShoppingBag,
   TrendingUp,
   Truck,
   Warehouse,
@@ -33,8 +34,9 @@ import { toast } from 'sonner';
 import { Logo } from './logo';
 import { NotificationBell } from './notification-bell';
 import { useNotifications } from '../hooks/use-notifications';
-import { fetchWarehouses, fetchWarehouseCatalog } from '../api/client';
+import { fetchOrders, fetchWarehouses, fetchWarehouseCatalog } from '../api/client';
 import { approveTransfer, fetchTransfers, rejectTransfer } from '../api/client';
+import { OrdersQueuePanel } from './orders-queue-panel';
 import { buildDashboardPath, resolveDashboardTab } from '../utils/dashboard-routing';
 import { getUserMessage } from '../utils/user-messages';
 import { sortByDateDesc, HISTORY_PAGE_SIZE } from '../utils/list-limits';
@@ -392,11 +394,12 @@ function TransferList({ items, busyId, onReview, emptyMessage }) {
 
 export function WarehouseManagerDashboard({ userProfile, onLogout }) {
   const dashboardRole = 'warehouse_manager';
-  const dashboardTabs = ['overview', 'pending', 'inventory', 'history', 'analytics'];
+  const dashboardTabs = ['overview', 'orders', 'pending', 'inventory', 'history', 'analytics'];
   const [activeTab, setActiveTab] = useState('overview');
   const [transfers, setTransfers] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
   const [warehouseCatalog, setWarehouseCatalog] = useState([]);
+  const [ordersQueue, setOrdersQueue] = useState([]);
   const [busyId, setBusyId] = useState(null);
   const [selectedTransfer, setSelectedTransfer] = useState(null);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -448,6 +451,12 @@ export function WarehouseManagerDashboard({ userProfile, onLogout }) {
       supplier_id: userProfile.supplierRecordId,
     });
     setTransfers(data.map(mapTransfer));
+    try {
+      const ordersData = await fetchOrders();
+      setOrdersQueue(Array.isArray(ordersData) ? ordersData : (ordersData?.results || []));
+    } catch {
+      // non-critical
+    }
   };
 
   useEffect(() => {
@@ -572,8 +581,13 @@ export function WarehouseManagerDashboard({ userProfile, onLogout }) {
     }
   };
 
+  const activeOrdersCount = ordersQueue.filter((o) =>
+    ['ACCEPTED', 'PROCESSING', 'READY'].includes(o.status)
+  ).length;
+
   const sidebarItems = [
     { id: 'overview', label: 'Overview', icon: BarChart3 },
+    { id: 'orders', label: 'Orders Queue', icon: ShoppingBag, badge: activeOrdersCount },
     { id: 'pending', label: 'Pending Approval', icon: Clock, badge: pendingTransfers.length },
     { id: 'inventory', label: 'Warehouse Inventory', icon: Warehouse },
     { id: 'history', label: 'Dispatch History', icon: History },
@@ -721,6 +735,10 @@ export function WarehouseManagerDashboard({ userProfile, onLogout }) {
                 />
               </div>
             </div>
+          )}
+
+          {activeTab === 'orders' && (
+            <OrdersQueuePanel orders={ordersQueue} onRefresh={refreshData} />
           )}
 
           {activeTab === 'pending' && (

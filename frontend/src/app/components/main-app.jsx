@@ -22,19 +22,19 @@ const DASHBOARD_CONFIG = {
   },
   supplier: {
     defaultTab: 'overview',
-    validTabs: ['overview', 'dispatch', 'dispatched', 'warehouse', 'issues', 'analytics', 'history'],
+    validTabs: ['overview', 'orders', 'dispatch', 'dispatched', 'warehouse', 'issues', 'analytics', 'history'],
   },
   retailer: {
     defaultTab: 'overview',
-    validTabs: ['overview', 'receive', 'distribute', 'customers', 'verification', 'history', 'analytics'],
+    validTabs: ['overview', 'catalog', 'orders', 'receive', 'distribute', 'customers', 'verification', 'history', 'analytics'],
   },
   cooperative: {
     defaultTab: 'overview',
-    validTabs: ['overview', 'farmers', 'fertilizer-in', 'fertilizer-out', 'verification', 'history', 'analytics'],
+    validTabs: ['overview', 'catalog', 'orders', 'farmers', 'fertilizer-in', 'fertilizer-out', 'verification', 'history', 'analytics'],
   },
   warehouse_manager: {
     defaultTab: 'overview',
-    validTabs: ['overview', 'pending', 'inventory', 'history', 'analytics'],
+    validTabs: ['overview', 'orders', 'pending', 'inventory', 'history', 'analytics'],
   },
 };
 

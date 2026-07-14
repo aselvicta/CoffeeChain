@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CoffeeChain System Architecture</title>
+<style>
+@page { size: A4; margin: 18mm 15mm; }
+* { box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: 11pt;
+  line-height: 1.55;
+  color: #1a1a1a;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px 32px 48px;
+}
+h1 { font-size: 26pt; color: #166534; border-bottom: 3px solid #16a34a; padding-bottom: 8px; margin-top: 0; }
+h2 { font-size: 16pt; color: #15803d; margin-top: 28px; page-break-after: avoid; border-bottom: 1px solid #bbf7d0; padding-bottom: 4px; }
+h3 { font-size: 12pt; color: #166534; margin-top: 18px; page-break-after: avoid; }
+p { margin: 8px 0; }
+ul, ol { margin: 8px 0 12px 20px; }
+li { margin: 4px 0; }
+table { width: 100%; border-collapse: collapse; margin: 12px 0 18px; font-size: 10pt; page-break-inside: avoid; }
+th { background: #dcfce7; color: #14532d; text-align: left; padding: 8px 10px; border: 1px solid #86efac; }
+td { padding: 7px 10px; border: 1px solid #d1d5db; vertical-align: top; }
+tr:nth-child(even) td { background: #f9fafb; }
+pre, code { font-family: 'Consolas', 'Monaco', monospace; font-size: 9pt; }
+pre {
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-left: 4px solid #16a34a;
+  padding: 12px 14px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  page-break-inside: avoid;
+}
+code { background: #f3f4f6; padding: 1px 5px; border-radius: 3px; }
+.meta { color: #4b5563; font-size: 10pt; margin-bottom: 24px; }
+.toc { background: #f0fdf4; border: 1px solid #bbf7d0; padding: 16px 20px; border-radius: 8px; margin: 20px 0 32px; }
+.toc ol { margin: 0; }
+.toc a { color: #15803d; text-decoration: none; }
+.toc a:hover { text-decoration: underline; }
+.cover-note { font-style: italic; color: #6b7280; margin-top: 40px; font-size: 10pt; }
+@media print {
+  body { padding: 0; max-width: none; }
+  h2 { page-break-before: auto; }
+  a { color: inherit; text-decoration: none; }
+}
+</style>
+</head>
+<body>
+<h1 id="coffeechain-system-architecture">CoffeeChain — System Architecture</h1>
+<p><strong>Version:</strong> July 2026</p>
+<p><strong>Audience:</strong> Engineering team, stakeholders, and onboarding</p>
+<p><strong>Purpose:</strong> End-to-end understanding of what CoffeeChain is, how it is built, and how data flows from supplier dispatch to blockchain-verified farmer receipt.</p>
+<hr>
+<h2 id="table-of-contents">Table of Contents</h2>
+<ol><li>[Executive Summary](#1-executive-summary)</li><li>[High-Level Architecture](#2-high-level-architecture)</li><li>[Technology Stack](#3-technology-stack)</li><li>[User Roles &amp; Access Control](#4-user-roles--access-control)</li><li>[Domain Model](#5-domain-model)</li><li>[End-to-End Supply Chain Workflow](#6-end-to-end-supply-chain-workflow)</li><li>[Farmer Verification (OTP)](#7-farmer-verification-otp)</li><li>[Trust Layer: Receipts, Storage &amp; Blockchain](#8-trust-layer-receipts-storage--blockchain)</li><li>[Data Integrity &amp; Tamper Detection](#9-data-integrity--tamper-detection)</li><li>[Notifications](#10-notifications)</li><li>[Frontend Application](#11-frontend-application)</li><li>[Backend API Overview](#12-backend-api-overview)</li><li>[Deployment Architecture](#13-deployment-architecture)</li><li>[Environment Configuration](#14-environment-configuration)</li><li>[Security Summary](#15-security-summary)</li><li>[Project Structure](#16-project-structure)</li></ol>
+<hr>
+<h2 id="1-executive-summary">1. Executive Summary</h2>
+<p>CoffeeChain is a <strong>trust and traceability platform</strong> for fertilizer distribution across Tanzania&#x27;s coffee-producing regions. It connects suppliers, warehouse managers, retailers, cooperatives (AMCOS), regulators, and administrators in a single digital supply chain.</p>
+<p><strong>What makes it trustworthy:</strong></p>
+<ul><li>Every farmer delivery can be confirmed with an **SMS OTP** (via Briq Karibu).</li><li>A **verification receipt** is stored on **decentralized storage (Storacha/IPFS)** with backend fallback.</li><li>A **cryptographic hash** of the receipt is **anchored on Polygon Amoy** (public blockchain).</li><li>**Integrity monitoring** continuously compares database records against stored receipts and alerts admins on tampering.</li></ul>
+<p><strong>Farmers do not log in.</strong> They are identified by Ministry of Agriculture IDs and confirm receipt via OTP only.</p>
+<hr>
+<h2 id="2-high-level-architecture">2. High-Level Architecture</h2>
+<pre><code>┌─────────────────────────────────────────────────────────────────────────────┐
+│                              USERS &amp; ACTORS                                  │
+├──────────────┬──────────────┬──────────────┬──────────────┬─────────────────┤
+│   Admin      │  Supplier    │  Warehouse   │ Retailer /   │   Regulator     │
+│              │              │   Manager    │  AMCOS       │  (read-only)    │
+└──────┬───────┴──────┬───────┴──────┬───────┴──────┬───────┴────────┬────────┘
+       │              │              │              │                │
+       └──────────────┴──────────────┴──────────────┴────────────────┘
+                                    │
+                          HTTPS + JWT (Bearer token)
+                                    │
+       ┌────────────────────────────▼────────────────────────────────────────┐
+       │                    REACT FRONTEND (Vercel)                         │
+       │   Landing · Login · Signup · Role dashboards · Integrity panel     │
+       └────────────────────────────┬────────────────────────────────────────┘
+                                    │  REST API  (VITE_API_URL)
+       ┌────────────────────────────▼────────────────────────────────────────┐
+       │                 DJANGO REST API (Render: coffeechain-api)            │
+       │   Auth · Transfers · Farmers · Batches · Integrity · Reports         │
+       └─┬──────────────┬──────────────┬──────────────┬──────────────────────┘
+         │              │              │              │
+         ▼              ▼              ▼              ▼
+   ┌──────────┐  ┌────────────┐  ┌──────────┐  ┌─────────────────┐
+   │PostgreSQL│  │Upload Svc  │  │Briq SMS  │  │ Polygon Amoy    │
+   │(Render)  │  │(Storacha)  │  │OTP API   │  │ Smart Contract  │
+   └──────────┘  └─────┬──────┘  └──────────┘  └─────────────────┘
+                        │
+                        ▼
+                 ┌─────────────┐
+                 │ Storacha /  │
+                 │ IPFS (w3s)  │
+                 └─────────────┘</code></pre>
+<h3 id="component-responsibilities">Component Responsibilities</h3>
+<table><thead><tr><th>Component</th><th>Location</th><th>Responsibility</th></tr></thead><tbody><tr><td>**Frontend**</td><td>`frontend/` → Vercel</td><td>User interface, role dashboards, JWT session</td></tr><tr><td>**Backend API**</td><td>`backend/` → Render</td><td>Business logic, auth, DB, blockchain calls</td></tr><tr><td>**Upload service**</td><td>`upload-service/` → Render</td><td>Storacha file uploads with fallback</td></tr><tr><td>**PostgreSQL**</td><td>Render managed DB</td><td>Persistent data, receipts in anchor payload</td></tr><tr><td>**Smart contract**</td><td>`smart-contracts/` → Polygon Amoy</td><td>Immutable hash anchoring</td></tr><tr><td>**Briq Karibu**</td><td>External API</td><td>Farmer OTP + admin SMS alerts</td></tr></tbody></table>
+<hr>
+<h2 id="3-technology-stack">3. Technology Stack</h2>
+<h3 id="frontend">Frontend</h3>
+<table><thead><tr><th>Technology</th><th>Purpose</th></tr></thead><tbody><tr><td>React 18</td><td>UI framework</td></tr><tr><td>Vite 6</td><td>Build tool</td></tr><tr><td>React Router 7</td><td>Client-side routing</td></tr><tr><td>Tailwind CSS v4</td><td>Styling</td></tr><tr><td>Radix UI</td><td>Accessible components</td></tr><tr><td>Recharts</td><td>Analytics charts</td></tr><tr><td>jsPDF / xlsx</td><td>Report export</td></tr><tr><td>Sonner</td><td>Toast notifications</td></tr></tbody></table>
+<h3 id="backend">Backend</h3>
+<table><thead><tr><th>Technology</th><th>Purpose</th></tr></thead><tbody><tr><td>Django 5.2</td><td>Web framework</td></tr><tr><td>Django REST Framework</td><td>REST API</td></tr><tr><td>SimpleJWT</td><td>JWT authentication</td></tr><tr><td>PostgreSQL</td><td>Production database</td></tr><tr><td>Gunicorn</td><td>Production WSGI server</td></tr><tr><td>web3.py</td><td>Polygon blockchain integration</td></tr><tr><td>WhiteNoise</td><td>Static file serving</td></tr></tbody></table>
+<h3 id="upload-service">Upload Service</h3>
+<table><thead><tr><th>Technology</th><th>Purpose</th></tr></thead><tbody><tr><td>Node.js 20</td><td>Runtime</td></tr><tr><td>Express</td><td>HTTP server</td></tr><tr><td>@storacha/client</td><td>IPFS uploads</td></tr><tr><td>Multer</td><td>Multipart file handling</td></tr></tbody></table>
+<h3 id="blockchain">Blockchain</h3>
+<table><thead><tr><th>Technology</th><th>Purpose</th></tr></thead><tbody><tr><td>Solidity 0.8.20</td><td>Smart contract language</td></tr><tr><td>Hardhat</td><td>Compile &amp; deploy</td></tr><tr><td>Polygon Amoy (chainId 80002)</td><td>Test network</td></tr></tbody></table>
+<hr>
+<h2 id="4-user-roles-access-control">4. User Roles &amp; Access Control</h2>
+<h3 id="authentication-model">Authentication Model</h3>
+<p>CoffeeChain uses <strong>JWT (JSON Web Tokens)</strong> for platform users:</p>
+<ol><li>User submits username + password → `POST /api/login/`</li><li>Server returns **access token** (1 hour) + **refresh token** (7 days)</li><li>Frontend stores tokens in `localStorage`</li><li>All API requests include `Authorization: Bearer &lt;access&gt;`</li><li>On expiry, frontend silently refreshes; on failure → redirect to login</li></ol>
+<p><strong>Public endpoints (no JWT):</strong></p>
+<ul><li>`POST /api/auth/register/` — self-service signup (creates pending request, not a live account)</li><li>`POST /api/internal/receipt-callback/` — upload-service fallback (shared secret header)</li></ul>
+<h3 id="roles">Roles</h3>
+<table><thead><tr><th>Role</th><th>Django Group</th><th>Dashboard</th><th>Key Permissions</th></tr></thead><tbody><tr><td>**Admin**</td><td>`is_staff`</td><td>Admin panel</td><td>Full CRUD: users, registrations, integrity, reports</td></tr><tr><td>**Regulator**</td><td>`Regulator`</td><td>Admin panel (read-only)</td><td>View users, registrations, integrity — cannot approve or edit</td></tr><tr><td>**Supplier**</td><td>`Supplier`</td><td>Supplier dashboard</td><td>Create batches, dispatch to branches</td></tr><tr><td>**Warehouse Manager**</td><td>`WarehouseManager`</td><td>Warehouse dashboard</td><td>Approve/reject supplier dispatches</td></tr><tr><td>**Retailer**</td><td>`Retailer`</td><td>Retailer dashboard</td><td>Receive stock, sell to farmers, OTP verify</td></tr><tr><td>**Cooperative (AMCOS)**</td><td>`Cooperative`</td><td>Cooperative dashboard</td><td>Register farmers, distribute, OTP verify</td></tr><tr><td>**Farmer**</td><td>*(none)*</td><td>No login</td><td>Identified by Ministry ID; confirms via SMS OTP</td></tr></tbody></table>
+<h3 id="account-creation-paths">Account Creation Paths</h3>
+<pre><code>Path A — Self registration:
+  Signup form → PendingRegistration → Admin approves → User + role record created
+
+Path B — Admin creates user:
+  Admin dashboard → User Management → immediate account
+
+Path C — Demo seed:
+  SEED_DEMO=true on deploy → seed_demo management command</code></pre>
+<h3 id="authorization-enforcement">Authorization Enforcement</h3>
+<ul><li>**Backend:** Permission classes on every viewset (`IsAdmin`, `SupplierOrAdmin`, `RegulatorOrAdmin`, etc.)</li><li>**Frontend:** Role-based routing to dashboards; regulator gets `readOnly: true`</li><li>**Data scoping:** Querysets filtered by supplier/branch; receipt access checked per transfer</li></ul>
+<hr>
+<h2 id="5-domain-model">5. Domain Model</h2>
+<p>Core entities and relationships:</p>
+<pre><code>Supplier ──&lt; FertilizerBatch &gt;── Warehouse
+    │              │
+    │              └──&lt; Transfer &gt;── Branch (Retailer / Cooperative)
+    │                      │
+    └──&lt; WarehouseManager  ├── Farmer (Ministry ID)
+                           ├── OTPVerification (1:1)
+                           ├── BlockchainAnchor (1:1) ← receipt + tx hash
+                           ├── DeliveryProof
+                           └── Issue (complaints)</code></pre>
+<h3 id="key-models-backendsupply-chainmodelspy">Key Models (`backend/supply_chain/models.py`)</h3>
+<table><thead><tr><th>Model</th><th>Description</th></tr></thead><tbody><tr><td>**Supplier**</td><td>Fertilizer supplier organization, linked to User</td></tr><tr><td>**Warehouse**</td><td>Physical storage location with capacity</td></tr><tr><td>**WarehouseManager**</td><td>User who approves dispatches for a supplier</td></tr><tr><td>**Branch**</td><td>Retailer shop or AMCOS cooperative</td></tr><tr><td>**Farmer**</td><td>Registered farmer with unique `ministry_id`</td></tr><tr><td>**FertilizerBatch**</td><td>Batch of fertilizer (code, type, quantity, certification)</td></tr><tr><td>**Transfer**</td><td>Movement of bags — supplier→branch or branch→farmer</td></tr><tr><td>**OTPVerification**</td><td>Farmer OTP session for a transfer</td></tr><tr><td>**BlockchainAnchor**</td><td>On-chain hash + receipt metadata (JSON payload)</td></tr><tr><td>**Notification**</td><td>In-app alerts per user</td></tr><tr><td>**PendingRegistration**</td><td>Self-service signup awaiting approval</td></tr><tr><td>**AuditLog**</td><td>Record of significant API actions</td></tr></tbody></table>
+<h3 id="transfer-types-statuses">Transfer Types &amp; Statuses</h3>
+<p><strong>Types:</strong></p>
+<ul><li>`SUPPLIER_TO_BRANCH` — supplier dispatches to retailer/AMCOS</li><li>`BRANCH_TO_FARMER` — branch distributes to farmer</li></ul>
+<p><strong>Status lifecycle:</strong></p>
+<pre><code>PENDING → DISPATCHED → RECEIVED → VERIFIED
+              ↓
+           REJECTED (warehouse rejection)</code></pre>
+<hr>
+<h2 id="6-end-to-end-supply-chain-workflow">6. End-to-End Supply Chain Workflow</h2>
+<h3 id="phase-1-supplier-creates-inventory">Phase 1: Supplier Creates Inventory</h3>
+<ol><li>**Supplier** creates a `FertilizerBatch` (batch code, fertilizer type, quantity, warehouse).</li><li>Batch is tied to supplier and optional warehouse location.</li></ol>
+<h3 id="phase-2-dispatch-to-branch">Phase 2: Dispatch to Branch</h3>
+<ol><li>**Supplier** creates a `Transfer` (`SUPPLIER_TO_BRANCH`, status `PENDING`).</li><li>Destination: retailer or cooperative branch.</li><li>**Warehouse manager** receives notification.</li><li>Manager **approves** → status `DISPATCHED`, or **rejects** with reason.</li><li>Destination branch notified of incoming delivery.</li></ol>
+<h3 id="phase-3-branch-receives-stock">Phase 3: Branch Receives Stock</h3>
+<ol><li>**Retailer or AMCOS** confirms receipt → `POST /api/transfers/{id}/receive/`.</li><li>Status → `RECEIVED`; `confirmed_at` timestamp recorded.</li><li>Supplier and branch receive in-app notifications.</li></ol>
+<h3 id="phase-4-distribution-to-farmer">Phase 4: Distribution to Farmer</h3>
+<ol><li>**Branch** creates `Transfer` (`BRANCH_TO_FARMER`) linking farmer + batch + quantity.</li><li>System validates stock (branch must have received bags first).</li><li>**Cooperative:** farmer must belong to that AMCOS.</li><li>**Retailer:** Ministry-verified buyers may receive subsidy discount (configurable %).</li><li>OTP automatically sent to farmer&#x27;s phone via Briq Karibu.</li></ol>
+<h3 id="phase-5-farmer-confirms-otp">Phase 5: Farmer Confirms (OTP)</h3>
+<ol><li>Farmer receives SMS with verification code.</li><li>Branch staff enters OTP in the app → `POST /api/transfers/{id}/verify_otp/`.</li><li>Briq verifies code; transfer status → `VERIFIED`.</li></ol>
+<h3 id="phase-6-trust-record-created">Phase 6: Trust Record Created</h3>
+<ol><li>System builds verification receipt JSON.</li><li>Receipt uploaded to Storacha (or backend fallback).</li><li>Cryptographic hash computed and anchored on Polygon Amoy.</li><li>`BlockchainAnchor` record saved with tx hash, CID, and receipt copy in DB.</li></ol>
+<hr>
+<h2 id="7-farmer-verification-otp">7. Farmer Verification (OTP)</h2>
+<p>Farmers are <strong>not app users</strong>. Verification is proof-of-receipt, not login.</p>
+<table><thead><tr><th>Step</th><th>Action</th></tr></thead><tbody><tr><td>1</td><td>Branch creates farmer distribution transfer</td></tr><tr><td>2</td><td>`issue_distribution_otp()` calls Briq `/v1/otp/request`</td></tr><tr><td>3</td><td>Farmer receives SMS (or call/WhatsApp on resend)</td></tr><tr><td>4</td><td>Branch enters code → Briq `/v1/otp/verify`</td></tr><tr><td>5</td><td>On success → verification proof recorded + blockchain anchor</td></tr></tbody></table>
+<p><strong>Configuration:</strong> <code>BRIQ_API_KEY</code>, <code>BRIQ_APP_KEY</code>, <code>OTP_CODE_LENGTH</code> (default 6), <code>OTP_EXPIRY_MINUTES</code> (default 10).</p>
+<p><strong>Local dev fallback:</strong> <code>BRIQ_OTP_LOCAL_FALLBACK=true</code> accepts any code when Briq is unavailable.</p>
+<hr>
+<h2 id="8-trust-layer-receipts-storage-blockchain">8. Trust Layer: Receipts, Storage &amp; Blockchain</h2>
+<h3 id="receipt-contents">Receipt Contents</h3>
+<p>Each verification receipt JSON includes:</p>
+<ul><li>Transfer ID, batch code, quantity, fertilizer type</li><li>Farmer details (Ministry ID, name, phone)</li><li>Branch/cooperative details</li><li>Verified timestamp and verifying user</li><li>Delivery proof CID (if photo uploaded)</li><li>Integrity block: `data_hash`, `payload_signature`, `content_cid`, `tx_hash`, explorer URL</li></ul>
+<h3 id="storage-strategy-priority-order">Storage Strategy (Priority Order)</h3>
+<pre><code>1. Storacha / IPFS     ← primary (decentralized, permanent)
+2. Backend disk        ← fallback cache (media/receipts/)
+3. PostgreSQL          ← durable fallback (BlockchainAnchor.payload.receipt)
+4. IPFS gateway fetch  ← load-time recovery if only CID known</code></pre>
+<p><strong>Why DB copy matters:</strong> Render&#x27;s filesystem is ephemeral — disk files are lost on redeploy. The PostgreSQL copy ensures new receipts survive redeployments.</p>
+<h3 id="hash-blockchain-pipeline">Hash &amp; Blockchain Pipeline</h3>
+<pre><code>payload_signature = &quot;{batch_code}|{quantity}|{content_cid}|{transfer_id}|{verified_at}&quot;
+data_hash         = SHA-256(payload_signature)
+on-chain tx       = CoffeeChainAudit.anchorTransaction(transfer_id, data_hash)</code></pre>
+<h3 id="smart-contract-coffeechainauditsol">Smart Contract (`CoffeeChainAudit.sol`)</h3>
+<pre><code>function anchorTransaction(string transactionId, string hashValue) external {
+    emit TransactionAnchored(transactionId, hashValue, block.timestamp);
+}</code></pre>
+<ul><li>Stores **only the hash**, not the full receipt (privacy + cost efficiency).</li><li>Full receipt remains in Storacha/backend/DB.</li><li>Verify on [Polygonscan Amoy](https://amoy.polygonscan.com) → Logs tab → `TransactionAnchored` event.</li></ul>
+<hr>
+<h2 id="9-data-integrity-tamper-detection">9. Data Integrity &amp; Tamper Detection</h2>
+<h3 id="manual-integrity-checks">Manual Integrity Checks</h3>
+<p>Admin/regulator uses the <strong>Integrity panel</strong> to:</p>
+<ul><li>List all verified transfers</li><li>Compare database fields vs stored receipt</li><li>Compare DB hash vs receipt hash vs computed hash</li><li>View source of tampering (app user vs direct database edit)</li></ul>
+<p><strong>API:</strong> <code>GET /api/integrity/</code>, <code>POST /api/integrity/scan/</code></p>
+<h3 id="automatic-tamper-detection">Automatic Tamper Detection</h3>
+<p>Django signal on <code>Transfer</code> post_save (<code>signals.py</code>):</p>
+<ul><li>Monitors changes to anchored transfers (quantity, batch, farmer, status)</li><li>Runs integrity check in background</li><li>On mismatch → in-app notification + SMS to admins</li></ul>
+<h3 id="integrity-result-statuses">Integrity Result Statuses</h3>
+<table><thead><tr><th>Status</th><th>Meaning</th></tr></thead><tbody><tr><td>`ok`</td><td>Database matches receipt and hash</td></tr><tr><td>`mismatch`</td><td>Fields or hash differ — possible tampering</td></tr><tr><td>`missing_receipt`</td><td>Anchor exists but receipt not found</td></tr><tr><td>`missing_anchor`</td><td>Transfer not yet verified on chain</td></tr><tr><td>`unchecked`</td><td>Not yet compared</td></tr></tbody></table>
+<hr>
+<h2 id="10-notifications">10. Notifications</h2>
+<h3 id="in-app-notifications">In-App Notifications</h3>
+<p>Stored in <code>Notification</code> model; polled every 45 seconds by frontend.</p>
+<table><thead><tr><th>Type</th><th>Trigger examples</th></tr></thead><tbody><tr><td>`dispatch`</td><td>Supplier submitted dispatch</td></tr><tr><td>`receipt`</td><td>Branch confirmed receipt</td></tr><tr><td>`delivery`</td><td>Transfer dispatched</td></tr><tr><td>`otp`</td><td>OTP sent / verified</td></tr><tr><td>`registry`</td><td>Farmer registered</td></tr><tr><td>`system`</td><td>Integrity alert, registration request</td></tr></tbody></table>
+<h3 id="sms-briq-karibu">SMS (Briq Karibu)</h3>
+<table><thead><tr><th>Use case</th><th>Recipients</th></tr></thead><tbody><tr><td>Farmer OTP</td><td>Farmer phone on transfer</td></tr><tr><td>Registration approved/rejected</td><td>Applicant phone</td></tr><tr><td>Integrity tamper / restore</td><td>Admin phones (`UserProfile.contact_phone`)</td></tr></tbody></table>
+<hr>
+<h2 id="11-frontend-application">11. Frontend Application</h2>
+<h3 id="routes">Routes</h3>
+<table><thead><tr><th>Path</th><th>Screen</th></tr></thead><tbody><tr><td>`/`</td><td>Public landing page (bilingual EN/SW)</td></tr><tr><td>`/login`</td><td>Login form</td></tr><tr><td>`/signup`</td><td>Self-registration (supplier, retailer, cooperative)</td></tr><tr><td>`/app/{role}/{tab}`</td><td>Role dashboard</td></tr></tbody></table>
+<h3 id="dashboards-by-role">Dashboards by Role</h3>
+<table><thead><tr><th>Role</th><th>Component</th><th>Main tabs</th></tr></thead><tbody><tr><td>Admin</td><td>`admin-dashboard.jsx`</td><td>Overview, Users, Registrations, Reports, Integrity, Profile</td></tr><tr><td>Regulator</td><td>`admin-dashboard.jsx` (read-only)</td><td>Same as admin, no edit actions</td></tr><tr><td>Supplier</td><td>`supplier-dashboard.jsx`</td><td>Overview, Dispatch, Dispatched, Warehouse, Issues, Analytics</td></tr><tr><td>Warehouse Manager</td><td>`warehouse-manager-dashboard.jsx`</td><td>Overview, Pending, Inventory, History, Analytics</td></tr><tr><td>Retailer</td><td>`retailer-dashboard.jsx`</td><td>Overview, Receive, Distribute, Customers, Verification, History</td></tr><tr><td>Cooperative</td><td>`cooperative-dashboard.jsx`</td><td>Overview, Farmers, Fertilizer In/Out, Verification, History</td></tr></tbody></table>
+<h3 id="key-frontend-modules">Key Frontend Modules</h3>
+<table><thead><tr><th>Path</th><th>Purpose</th></tr></thead><tbody><tr><td>`frontend/src/app/api/client.js`</td><td>API client, JWT, token refresh</td></tr><tr><td>`frontend/src/app/components/integrity-panel.jsx`</td><td>Integrity monitoring UI</td></tr><tr><td>`frontend/src/app/components/verification-trust-seal.jsx`</td><td>Trust seal / receipt viewer</td></tr><tr><td>`frontend/src/app/utils/analytics-export.js`</td><td>CSV/PDF export helpers</td></tr></tbody></table>
+<hr>
+<h2 id="12-backend-api-overview">12. Backend API Overview</h2>
+<p>Base URL: <code>{BACKEND_PUBLIC_URL}/api/</code></p>
+<h3 id="authentication">Authentication</h3>
+<ul><li>`POST /login/` — obtain JWT</li><li>`POST /token/refresh/` — refresh access token</li><li>`GET/PATCH /me/` — current user profile</li></ul>
+<h3 id="supply-chain">Supply Chain</h3>
+<ul><li>`/suppliers/`, `/branches/`, `/warehouses/`, `/batches/`</li><li>`/transfers/` — CRUD + workflow actions (approve, receive, verify_otp, receipt)</li><li>`/farmers/` — lookup, register (cooperative), resolve_buyer (retailer POS)</li></ul>
+<h3 id="governance">Governance</h3>
+<ul><li>`/auth/register/` — public signup</li><li>`/registrations/` — pending signup review (admin)</li><li>`/users/` — user management (admin)</li></ul>
+<h3 id="trust-audit">Trust &amp; Audit</h3>
+<ul><li>`/integrity/` — list, compare, batch scan</li><li>`/anchors/` — blockchain anchor records</li><li>`/audit-logs/` — action audit trail</li><li>`/reports/` — analytics and CSV export</li></ul>
+<h3 id="internal">Internal</h3>
+<ul><li>`/internal/receipt-callback/` — upload-service receipt fallback</li></ul>
+<hr>
+<h2 id="13-deployment-architecture">13. Deployment Architecture</h2>
+<h3 id="production-topology">Production Topology</h3>
+<pre><code>┌─────────────────────┐         ┌─────────────────────────────┐
+│  Vercel             │  HTTPS  │  Render                      │
+│  coffeechain-rust   │ ──────► │  coffeechain-api (Django)    │
+│  .vercel.app        │         │  coffeechain-upload (Node)   │
+│                     │         │  coffeechain-db (PostgreSQL) │
+│  VITE_API_URL ──────┼────────►│                              │
+└─────────────────────┘         └─────────────────────────────┘
+                                           │
+                    ┌──────────────────────┼──────────────────────┐
+                    ▼                      ▼                      ▼
+              Polygon Amoy            Storacha/IPFS           Briq Karibu</code></pre>
+<h3 id="render-services-renderyaml">Render Services (`render.yaml`)</h3>
+<table><thead><tr><th>Service</th><th>Name</th><th>Start command</th></tr></thead><tbody><tr><td>Web (Python)</td><td>`coffeechain-api`</td><td>`bash start.sh` (migrate → backfill receipts → gunicorn)</td></tr><tr><td>Web (Node)</td><td>`coffeechain-upload`</td><td>`node index.js`</td></tr><tr><td>Database</td><td>`coffeechain-db`</td><td>PostgreSQL (free tier)</td></tr></tbody></table>
+<h3 id="deploy-checklist">Deploy Checklist</h3>
+<p><strong>Backend (Render):</strong></p>
+<ul><li>`DJANGO_SECRET_KEY`, `DJANGO_ALLOWED_HOSTS`, `BACKEND_PUBLIC_URL`</li><li>`DATABASE_URL` (auto from Render)</li><li>`CORS_ALLOWED_ORIGINS=https://coffeechain-rust.vercel.app`</li><li>`STORACHA_UPLOAD_ENABLED=true`, `STORACHA_UPLOAD_HOST` (auto-wired)</li><li>`RECEIPT_CALLBACK_SECRET` (same on upload service)</li><li>`POLYGON_RPC_URL`, `POLYGON_CONTRACT_ADDRESS`, `POLYGON_PRIVATE_KEY`</li><li>`BRIQ_API_KEY`, `BRIQ_APP_KEY`</li></ul>
+<p><strong>Upload service (Render):</strong></p>
+<ul><li>`STORACHA_KEY`, `STORACHA_PROOF`</li><li>`BACKEND_API_HOST` (auto-wired), `RECEIPT_CALLBACK_SECRET`</li></ul>
+<p><strong>Frontend (Vercel):</strong></p>
+<ul><li>`VITE_API_URL=https://coffeechain-api.onrender.com` (your API URL)</li></ul>
+<p><strong>Smart contract (one-time):</strong></p>
+<pre><code>cd smart-contracts &amp;&amp; npm install &amp;&amp; npm run compile &amp;&amp; npm run deploy:amoy
+# Set POLYGON_CONTRACT_ADDRESS in backend env</code></pre>
+<hr>
+<h2 id="14-environment-configuration">14. Environment Configuration</h2>
+<p>See <code>backend/.env.example</code>, <code>upload-service/.env.example</code>, and <code>render.yaml</code> for full lists.</p>
+<h3 id="critical-variables">Critical Variables</h3>
+<table><thead><tr><th>Variable</th><th>Service</th><th>Purpose</th></tr></thead><tbody><tr><td>`VITE_API_URL`</td><td>Frontend</td><td>Backend API base URL</td></tr><tr><td>`DATABASE_URL`</td><td>Backend</td><td>PostgreSQL connection</td></tr><tr><td>`STORACHA_UPLOAD_ENABLED`</td><td>Backend</td><td>Enable Storacha uploads</td></tr><tr><td>`STORACHA_KEY` / `STORACHA_PROOF`</td><td>Upload</td><td>Storacha credentials</td></tr><tr><td>`RECEIPT_CALLBACK_SECRET`</td><td>Both</td><td>Secure receipt fallback</td></tr><tr><td>`POLYGON_*`</td><td>Backend</td><td>Blockchain anchoring</td></tr><tr><td>`BRIQ_*`</td><td>Backend</td><td>SMS OTP</td></tr></tbody></table>
+<hr>
+<h2 id="15-security-summary">15. Security Summary</h2>
+<table><thead><tr><th>Layer</th><th>Mechanism</th></tr></thead><tbody><tr><td>User auth</td><td>JWT (access + refresh), bcrypt passwords</td></tr><tr><td>API access</td><td>Role-based permissions on every endpoint</td></tr><tr><td>Regulator</td><td>Read-only enforcement (backend + frontend)</td></tr><tr><td>Farmer proof</td><td>OTP via Briq — separate from user login</td></tr><tr><td>Receipt callback</td><td>Shared secret header, not public</td></tr><tr><td>CORS</td><td>Restricted to Vercel frontend origin in production</td></tr><tr><td>Integrity</td><td>Hash anchoring + continuous tamper monitoring</td></tr><tr><td>Audit</td><td>AuditLog for user actions; record modification tracking</td></tr></tbody></table>
+<hr>
+<h2 id="16-project-structure">16. Project Structure</h2>
+<pre><code>CoffeeChain/
+├── frontend/                 # React SPA (Vercel)
+│   └── src/app/
+│       ├── api/client.js     # API + JWT
+│       ├── components/       # Dashboards, modals, UI
+│       └── routes.jsx        # Router config
+├── backend/                  # Django API (Render)
+│   ├── coffeechain/          # Settings, root URLs
+│   ├── supply_chain/         # Models, views, services
+│   │   ├── models.py
+│   │   ├── views.py
+│   │   ├── permissions.py
+│   │   └── services/         # ipfs, integrity, briq, polygon, notifications
+│   └── start.sh              # Production startup
+├── upload-service/           # Storacha upload (Render)
+│   ├── index.js
+│   ├── storacha-client.js
+│   └── backend-callback.js
+├── smart-contracts/          # Polygon Amoy contract
+│   └── contracts/CoffeeChainAudit.sol
+├── docs/
+│   └── SYSTEM_ARCHITECTURE.md  # This document
+└── render.yaml               # Render blueprint</code></pre>
+<hr>
+<h2 id="appendix-demo-workflow-quick-test">Appendix: Demo Workflow (Quick Test)</h2>
+<ol><li>Login as **supplier** → create batch → dispatch to branch</li><li>Login as **warehouse manager** → approve dispatch</li><li>Login as **retailer/cooperative** → receive batch → distribute to farmer</li><li>Enter farmer OTP → transfer becomes **VERIFIED**</li><li>Login as **admin** → Integrity tab → compare transfer → see hash match</li><li>View receipt / trust seal → decentralized storage + Polygon link</li></ol>
+<hr>
+<p>*Document generated for CoffeeChain team onboarding — Tanzania Coffee Board, 2026.*</p>
+<p class="cover-note">CoffeeChain — Tanzania Coffee Board · System Architecture · July 2026</p>
+</body>
+</html>

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { Package, Users, Send, History, LogOut, TrendingUp, ShieldCheck } from 'lucide-react';
+import { Package, Users, Send, History, LogOut, TrendingUp, ShieldCheck, ShoppingCart, Store } from 'lucide-react';
 import { NotificationBell } from './notification-bell';
 import { useNotifications } from '../hooks/use-notifications';
 import { BarChart, Bar, PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, XAxis, YAxis, CartesianGrid } from 'recharts';
@@ -11,9 +11,12 @@ import { ReceiveFertilizerPanel } from './receive-fertilizer-panel';
 import { CooperativeHistoryPanel } from './cooperative-history-panel';
 import { StockBatchPicker } from './stock-batch-picker';
 import { VerificationTrustSeal } from './verification-trust-seal';
+import { SupplierCatalogPanel } from './supplier-catalog-panel';
+import { BranchOrdersPanel } from './branch-orders-panel';
 import {
   createTransfer,
   fetchFarmers,
+  fetchOrders,
   fetchTransfers,
   sendOtp,
   uploadProof,
@@ -42,7 +45,7 @@ import {
 
 export function CooperativeDashboard({ userProfile, onLogout }) {
   const dashboardRole = 'cooperative';
-  const dashboardTabs = ['overview', 'farmers', 'fertilizer-in', 'fertilizer-out', 'verification', 'history', 'analytics'];
+  const dashboardTabs = ['overview', 'catalog', 'orders', 'farmers', 'fertilizer-in', 'fertilizer-out', 'verification', 'history', 'analytics'];
   const [activeTab, setActiveTab] = useState('overview');
   const [inboundTransfers, setInboundTransfers] = useState([]);
   const [distributionForm, setDistributionForm] = useState({
@@ -62,6 +65,7 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
   const [smsInfo, setSmsInfo] = useState(null);
   const [otpCodeLength, setOtpCodeLength] = useState(6);
   const [latestVerification, setLatestVerification] = useState(null);
+  const [orders, setOrders] = useState([]);
   const [statusMessage, setStatusMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [savePhase, setSavePhase] = useState('');
@@ -225,6 +229,8 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
           rawTransfer: transfer,
         }))
       );
+      const ordersData = await fetchOrders();
+      setOrders(Array.isArray(ordersData) ? ordersData : (ordersData?.results || []));
       await refreshNotifications();
     } catch (error) {
       setStatusMessage(getUserMessage(error));
@@ -248,6 +254,8 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
         <nav className="flex-1 p-4 space-y-2">
           {[
             { id: 'overview', label: 'Overview', icon: TrendingUp },
+            { id: 'catalog', label: 'Supplier Catalog', icon: Store },
+            { id: 'orders', label: 'My Orders', icon: ShoppingCart },
             { id: 'farmers', label: 'Farmer Registry', icon: Users },
             { id: 'fertilizer-in', label: 'Receive Fertilizer', icon: Package },
             { id: 'fertilizer-out', label: 'Distribute Fertilizer', icon: Send },
@@ -380,6 +388,14 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                 </div>
               </div>
             </div>
+          )}
+
+          {activeTab === 'catalog' && (
+            <SupplierCatalogPanel onOrderPlaced={refreshData} userProfile={userProfile} />
+          )}
+
+          {activeTab === 'orders' && (
+            <BranchOrdersPanel orders={orders} onRefresh={refreshData} />
           )}
 
           {activeTab === 'farmers' && (

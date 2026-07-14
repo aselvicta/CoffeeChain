@@ -17,11 +17,13 @@ from .views import (
     IssueViewSet,
     MeView,
     NotificationViewSet,
+    OrderViewSet,
     OTPVerificationViewSet,
     PendingRegistrationViewSet,
     PublicRegisterView,
     ReceiptCallbackView,
     ReportsView,
+    SupplierCatalogView,
     SupplierViewSet,
     TransferViewSet,
     WarehouseCatalogView,
@@ -44,11 +46,13 @@ router.register("otps", OTPVerificationViewSet)
 router.register("anchors", BlockchainAnchorViewSet)
 router.register("audit-logs", AuditLogViewSet)
 router.register("registrations", PendingRegistrationViewSet, basename="registrations")
+router.register("orders", OrderViewSet, basename="orders")
 
 
 urlpatterns = [
     path("", include(router.urls)),
     path("warehouse-catalog/", WarehouseCatalogView.as_view(), name="warehouse-catalog"),
+    path("supplier-catalog/", SupplierCatalogView.as_view(), name="supplier-catalog"),
     path("fertilizer-types/", FertilizerTypeCatalogView.as_view(), name="fertilizer-types"),
     path("reports/audit/", AuditReportView.as_view(), name="audit-report"),
     path("reports/", ReportsView.as_view(), name="reports"),

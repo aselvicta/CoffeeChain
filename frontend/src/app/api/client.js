@@ -604,3 +604,85 @@ export function assignWarehouseManager(warehouseId, managerId) {
     body: JSON.stringify({ assigned_manager_id: managerId }),
   });
 }
+
+// ─── Orders API ──────────────────────────────────────────────────────────────
+
+export function fetchOrders(params = {}) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && v !== '') query.set(k, String(v));
+  });
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  return apiFetch(`/api/orders/${suffix}`);
+}
+
+export function createOrder(payload) {
+  return apiFetch('/api/orders/', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function acceptOrder(id, supplierNotes = '') {
+  return apiFetch(`/api/orders/${id}/accept/`, {
+    method: 'POST',
+    body: JSON.stringify({ supplier_notes: supplierNotes }),
+  });
+}
+
+export function rejectOrder(id, reason = '', supplierNotes = '') {
+  return apiFetch(`/api/orders/${id}/reject/`, {
+    method: 'POST',
+    body: JSON.stringify({ reason, supplier_notes: supplierNotes }),
+  });
+}
+
+export function markOrderProcessing(id) {
+  return apiFetch(`/api/orders/${id}/mark_processing/`, { method: 'POST' });
+}
+
+export function markOrderReady(id) {
+  return apiFetch(`/api/orders/${id}/mark_ready/`, { method: 'POST' });
+}
+
+export function linkOrderTransfer(id, transferId) {
+  return apiFetch(`/api/orders/${id}/link_transfer/`, {
+    method: 'POST',
+    body: JSON.stringify({ transfer_id: transferId }),
+  });
+}
+
+export function dispatchOrder(id, batchId) {
+  return apiFetch(`/api/orders/${id}/send_dispatch/`, {
+    method: 'POST',
+    body: JSON.stringify({ batch_id: batchId }),
+  });
+}
+
+export function verifyDispatch(id) {
+  return apiFetch(`/api/orders/${id}/verify_dispatch/`, { method: 'POST' });
+}
+
+export function fetchOrderAvailableBatches(fertilizerType) {
+  const qs = fertilizerType ? `?fertilizer_type=${encodeURIComponent(fertilizerType)}` : '';
+  return apiFetch(`/api/orders/available_batches/${qs}`);
+}
+
+export function cancelOrder(id) {
+  return apiFetch(`/api/orders/${id}/cancel/`, { method: 'POST' });
+}
+
+export function markOrderDelivered(id) {
+  return apiFetch(`/api/orders/${id}/mark_delivered/`, { method: 'POST' });
+}
+
+// ─── Supplier Catalog API ────────────────────────────────────────────────────
+
+export function fetchSupplierCatalog(params = {}) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && v !== '') query.set(k, String(v));
+  });
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  return apiFetch(`/api/supplier-catalog/${suffix}`);
+}

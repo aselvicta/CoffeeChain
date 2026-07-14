@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { Package, Send, History, BarChart3, LogOut, TrendingUp, Search, AlertCircle, CheckCircle2, Plus, Eye, Trash2, MessageSquare, RotateCcw } from 'lucide-react';
+import { Package, Send, History, BarChart3, LogOut, TrendingUp, Search, AlertCircle, CheckCircle2, Plus, Eye, Trash2, MessageSquare, RotateCcw, Inbox } from 'lucide-react';
 import { LineChart, Line, PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import { Logo } from './logo';
 import { NotificationBell } from './notification-bell';
 import { useNotifications } from '../hooks/use-notifications';
 import { WarehouseModal } from './warehouse-modal';
 import { StockInModal } from './stock-in-modal';
-import { createTransfer, createWarehouse, deleteWarehouse, fetchBatches, fetchBranches, fetchIssues, fetchTransfers, fetchWarehouseCatalog, fetchWarehouses, resolveIssue } from '../api/client';
+import { createTransfer, createWarehouse, deleteWarehouse, fetchBatches, fetchBranches, fetchIssues, fetchOrders, fetchTransfers, fetchWarehouseCatalog, fetchWarehouses, resolveIssue } from '../api/client';
+import { IncomingOrdersPanel } from './incoming-orders-panel';
 import { QuickActionCard, PanelPrimaryButton, PanelOutlineButton } from './ui/dashboard-ui';
 import { ConfirmDialog } from './ui/confirm-dialog';
 import { buildDashboardPath, resolveDashboardTab } from '../utils/dashboard-routing';
@@ -56,7 +57,7 @@ function mapSupplierTransfer(transfer, getDispatchStatusMeta) {
 
 export function SupplierDashboard({ userProfile, onLogout }) {
   const dashboardRole = 'supplier';
-  const dashboardTabs = ['overview', 'dispatch', 'dispatched', 'warehouse', 'issues', 'analytics', 'history'];
+  const dashboardTabs = ['overview', 'orders', 'dispatch', 'dispatched', 'warehouse', 'issues', 'analytics', 'history'];
   function createDispatchLineItem() {
     return {
       id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -87,6 +88,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
   const [warehouseFormError, setWarehouseFormError] = useState('');
   const [selectedWarehouse, setSelectedWarehouse] = useState(null);
   const [newWarehouse, setNewWarehouse] = useState({ name: '', section: '', capacity: '', contact_name: '', contact_phone: '+255 ', address: '', region: '', district: '' });
+  const [incomingOrders, setIncomingOrders] = useState([]);
   const [statusMessage, setStatusMessage] = useState('');
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -251,6 +253,8 @@ export function SupplierDashboard({ userProfile, onLogout }) {
       });
       setInventory(batchInventory);
       setIssues(issueData);
+      const ordersData = await fetchOrders();
+      setIncomingOrders(Array.isArray(ordersData) ? ordersData : (ordersData?.results || []));
       await refreshNotifications();
     } catch (error) {
       setStatusMessage(getUserMessage(error));
@@ -577,6 +581,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
         <nav className="flex-1 p-4 space-y-2">
           {[
             { id: 'overview', label: 'Overview', icon: BarChart3 },
+            { id: 'orders', label: 'Incoming Orders', icon: Inbox },
             { id: 'dispatch', label: 'Dispatch Batches', icon: Send },
             { id: 'dispatched', label: 'Dispatched', icon: History },
             { id: 'warehouse', label: 'Warehouse', icon: Package },
@@ -680,6 +685,10 @@ export function SupplierDashboard({ userProfile, onLogout }) {
               </div>
             </div>
           )}
+          {activeTab === 'orders' && (
+            <IncomingOrdersPanel orders={incomingOrders} onRefresh={refreshData} />
+          )}
+
           {activeTab === 'dispatch' && (
             <div className="space-y-6">
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">

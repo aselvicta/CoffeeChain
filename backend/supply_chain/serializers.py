@@ -10,6 +10,7 @@ from .models import (
     FertilizerBatch,
     Issue,
     Notification,
+    Order,
     OTPVerification,
     PendingRegistration,
     Supplier,
@@ -468,3 +469,54 @@ class AuditLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = AuditLog
         fields = ["id", "action", "user", "transfer", "details", "created_at"]
+
+
+class OrderSerializer(serializers.ModelSerializer):
+    branch_name = serializers.CharField(source="branch.name", read_only=True)
+    branch_type = serializers.CharField(source="branch.branch_type", read_only=True)
+    supplier_name = serializers.CharField(source="supplier.name", read_only=True)
+    preferred_batch_code = serializers.CharField(
+        source="preferred_batch.batch_code", read_only=True
+    )
+    linked_transfer_id = serializers.IntegerField(source="linked_transfer.id", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    order_type_display = serializers.CharField(source="get_order_type_display", read_only=True)
+
+    class Meta:
+        model = Order
+        fields = [
+            "id",
+            "branch",
+            "branch_name",
+            "branch_type",
+            "supplier",
+            "supplier_name",
+            "order_type",
+            "order_type_display",
+            "fertilizer_type",
+            "quantity_bags",
+            "unit_weight_kg",
+            "preferred_batch",
+            "preferred_batch_code",
+            "custom_specifications",
+            "delivery_address",
+            "required_by_date",
+            "status",
+            "status_display",
+            "supplier_notes",
+            "rejected_reason",
+            "linked_transfer_id",
+            "notes",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "branch",
+            "preferred_batch",
+            "status",
+            "supplier_notes",
+            "rejected_reason",
+            "linked_transfer_id",
+            "created_at",
+            "updated_at",
+        ]

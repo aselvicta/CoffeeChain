@@ -457,6 +457,93 @@ class Notification(models.Model):
         return f"{self.title} → {self.user_id}"
 
 
+class Order(models.Model):
+    """A fertilizer order placed by a Branch (Retailer or AMCOS) to a Supplier."""
+
+    # Order types
+    STANDARD = "STANDARD"
+    CUSTOM = "CUSTOM"
+    ORDER_TYPES = [
+        (STANDARD, "Standard (from existing batch)"),
+        (CUSTOM, "Custom (special request)"),
+    ]
+
+    # Order statuses
+    PENDING = "PENDING"
+    ACCEPTED = "ACCEPTED"
+    REJECTED = "REJECTED"
+    PROCESSING = "PROCESSING"
+    READY = "READY"
+    DISPATCHED = "DISPATCHED"
+    DELIVERED = "DELIVERED"
+    CANCELLED = "CANCELLED"
+    STATUS_CHOICES = [
+        (PENDING, "Pending Supplier Review"),
+        (ACCEPTED, "Accepted by Supplier"),
+        (REJECTED, "Rejected by Supplier"),
+        (PROCESSING, "Processing in Warehouse"),
+        (READY, "Ready for Dispatch"),
+        (DISPATCHED, "Dispatched"),
+        (DELIVERED, "Delivered"),
+        (CANCELLED, "Cancelled"),
+    ]
+
+    branch = models.ForeignKey(
+        Branch, on_delete=models.CASCADE, related_name="orders"
+    )
+    supplier = models.ForeignKey(
+        Supplier, on_delete=models.CASCADE, related_name="received_orders"
+    )
+    order_type = models.CharField(max_length=10, choices=ORDER_TYPES, default=STANDARD)
+    fertilizer_type = models.CharField(max_length=120)
+    quantity_bags = models.PositiveIntegerField()
+    unit_weight_kg = models.DecimalField(max_digits=6, decimal_places=2, default=50)
+    # For standard orders: the specific batch requested
+    preferred_batch = models.ForeignKey(
+        FertilizerBatch,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="order_requests",
+    )
+    # For custom orders: specifications text
+    custom_specifications = models.TextField(blank=True)
+    delivery_address = models.CharField(max_length=255, blank=True)
+    required_by_date = models.DateField(null=True, blank=True)
+
+    status = models.CharField(max_length=15, choices=STATUS_CHOICES, default=PENDING)
+
+    # Supplier response
+    supplier_notes = models.TextField(blank=True)
+    rejected_reason = models.TextField(blank=True)
+
+    # Link to the Transfer once dispatched
+    linked_transfer = models.ForeignKey(
+        Transfer,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="source_orders",
+    )
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="placed_orders",
+    )
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Order #{self.pk} – {self.branch.name} → {self.supplier.name} ({self.status})"
+
+
 class UserProfile(models.Model):
     """Lightweight extension for fields not on Django's built-in User model."""
     user = models.OneToOneField(
