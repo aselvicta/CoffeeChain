@@ -7,3 +7,7 @@ class SupplyChainConfig(AppConfig):
 
     def ready(self):
         import supply_chain.signals  # noqa: F401
+
+        from supply_chain.services.integrity_watcher import start_integrity_watcher
+
+        start_integrity_watcher()

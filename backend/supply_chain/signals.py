@@ -112,27 +112,8 @@ def detect_transfer_tampering(sender, instance, created, **kwargs):
 def _run_integrity_check_and_notify(transfer_pk: int, changed_fields: list) -> None:
     """Run in a background thread: full integrity check + notification + SMS."""
     try:
-        # Use absolute imports inside the thread to avoid relative-import issues
-        from supply_chain.models import Transfer as T
-        from supply_chain.services.integrity import verify_transfer_integrity
-        from supply_chain.services.notifications import (
-            notify_for_integrity_mismatch,
-            notify_for_integrity_restored,
-        )
+        from supply_chain.services.integrity_watcher import process_transfer_integrity
 
-        transfer = (
-            T.objects.select_related("batch", "farmer", "from_branch", "blockchain_anchor")
-            .filter(pk=transfer_pk)
-            .first()
-        )
-        if not transfer:
-            return
-
-        result = verify_transfer_integrity(transfer, check_chain=False)
-
-        if result.status == "mismatch":
-            notify_for_integrity_mismatch(result)
-        elif result.status == "ok":
-            notify_for_integrity_restored(result, restored_fields=changed_fields)
+        process_transfer_integrity(transfer_pk, restored_fields=changed_fields)
     except Exception:
         logger.exception("[Tamper] Integrity check thread failed for Transfer #%s", transfer_pk)

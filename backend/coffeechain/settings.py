@@ -163,3 +163,8 @@ BRIQ_REQUEST_TIMEOUT = int(os.getenv("BRIQ_REQUEST_TIMEOUT", "45"))
 
 # Retailer POS: discount for buyers verified against the Ministry registry
 RETAILER_MINISTRY_DISCOUNT_PERCENT = int(os.getenv("RETAILER_MINISTRY_DISCOUNT_PERCENT", "10"))
+
+# Background integrity watcher — detects pgAdmin / direct SQL edits on anchored transfers
+INTEGRITY_WATCHER_ENABLED = os.getenv("INTEGRITY_WATCHER_ENABLED", "true").lower() == "true"
+INTEGRITY_WATCHER_INTERVAL_SECONDS = int(os.getenv("INTEGRITY_WATCHER_INTERVAL_SECONDS", "30"))
+INTEGRITY_WATCHER_FULL_SCAN_EVERY = int(os.getenv("INTEGRITY_WATCHER_FULL_SCAN_EVERY", "4"))

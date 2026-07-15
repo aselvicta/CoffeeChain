@@ -556,3 +556,17 @@ class UserProfile(models.Model):
 
     def __str__(self):
         return f"Profile({self.user.username})"
+
+
+class IntegrityCheckQueue(models.Model):
+    """Queue populated by PostgreSQL trigger when transfers are edited outside Django."""
+
+    transfer_id = models.IntegerField(db_index=True)
+    source = models.CharField(max_length=32, default="db_trigger")
+    queued_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["queued_at"]
+
+    def __str__(self):
+        return f"IntegrityCheck(transfer={self.transfer_id}, source={self.source})"
