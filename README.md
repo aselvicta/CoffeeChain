@@ -138,7 +138,7 @@ CoffeeChain/
 ├── frontend/          React app and role dashboards
 ├── upload-service/    Storacha/IPFS receipt upload
 ├── smart-contracts/   Polygon Amoy audit anchor contract
-└── docs/              Architecture docs and testing manual
+        
 ```
 
 ---
@@ -154,7 +154,7 @@ CoffeeChain/
 
 **Location:** Dar es Salaam, Tanzania
 
-> > > >
+> > >
 
 ## License
 
