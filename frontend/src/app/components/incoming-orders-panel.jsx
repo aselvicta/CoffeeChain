@@ -16,24 +16,31 @@ import {
 } from 'lucide-react';
 import { acceptOrder, rejectOrder, dispatchOrder, fetchOrderAvailableBatches } from '../api/client';
 import { sortByDateDesc } from '../utils/list-limits';
+import {
+  orderStatusLabel,
+  orderStatusBadge,
+  SUPPLIER_ACTION_STATUSES,
+  SUPPLIER_DONE_STATUSES,
+  supplierCanDispatch,
+} from '../utils/order-status';
 
-const STATUS_CONFIG = {
-  PENDING:    { label: 'Pending Review', classes: 'bg-amber-100 text-amber-700',    Icon: Clock },
-  ACCEPTED:   { label: 'Accepted',       classes: 'bg-blue-100 text-blue-700',      Icon: CheckCircle2 },
-  REJECTED:   { label: 'Rejected',       classes: 'bg-red-100 text-red-600',        Icon: XCircle },
-  PROCESSING: { label: 'Processing',     classes: 'bg-purple-100 text-purple-700',  Icon: Package },
-  READY:      { label: 'Ready',          classes: 'bg-green-100 text-green-700',    Icon: CheckCircle2 },
-  DISPATCHED: { label: 'Dispatched',     classes: 'bg-green-100 text-green-700',    Icon: Truck },
-  DELIVERED:  { label: 'Delivered',      classes: 'bg-emerald-100 text-emerald-700', Icon: CheckCircle2 },
-  CANCELLED:  { label: 'Cancelled',      classes: 'bg-gray-100 text-gray-500',      Icon: Ban },
+const STATUS_ICONS = {
+  PENDING: Clock,
+  ACCEPTED: CheckCircle2,
+  REJECTED: XCircle,
+  PROCESSING: Package,
+  READY: Truck,
+  DISPATCHED: Truck,
+  DELIVERED: CheckCircle2,
+  CANCELLED: Ban,
 };
 
 function StatusBadge({ status }) {
-  const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.PENDING;
+  const Icon = STATUS_ICONS[status] || Clock;
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${cfg.classes}`}>
-      <cfg.Icon className="h-3 w-3" />
-      {cfg.label}
+    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${orderStatusBadge(status)}`}>
+      <Icon className="h-3 w-3" />
+      {orderStatusLabel(status)}
     </span>
   );
 }
@@ -75,15 +82,16 @@ export function IncomingOrdersPanel({ orders = [], onRefresh }) {
   }
 
   const sorted = useMemo(() => sortByDateDesc(orders), [orders]);
-  const pendingCount    = sorted.filter((o) => o.status === 'PENDING').length;
-  const inProgressCount = sorted.filter((o) => ['ACCEPTED', 'PROCESSING', 'READY'].includes(o.status)).length;
-  const doneCount       = sorted.filter((o) => ['DISPATCHED', 'DELIVERED', 'REJECTED', 'CANCELLED'].includes(o.status)).length;
+  const pendingCount = sorted.filter((o) => o.status === 'PENDING').length;
+  const fulfillCount = sorted.filter((o) => ['ACCEPTED', 'PROCESSING'].includes(o.status)).length;
+  const actionCount  = sorted.filter((o) => SUPPLIER_ACTION_STATUSES.includes(o.status)).length;
+  const doneCount    = sorted.filter((o) => SUPPLIER_DONE_STATUSES.includes(o.status)).length;
 
   const displayed = useMemo(() => {
     if (filter === 'pending') return sorted.filter((o) => o.status === 'PENDING');
-    if (filter === 'active')  return sorted.filter((o) => ['ACCEPTED', 'PROCESSING', 'READY'].includes(o.status));
-    if (filter === 'done')    return sorted.filter((o) => ['DISPATCHED', 'DELIVERED', 'REJECTED', 'CANCELLED'].includes(o.status));
-    return sorted;
+    if (filter === 'fulfill') return sorted.filter((o) => ['ACCEPTED', 'PROCESSING'].includes(o.status));
+    if (filter === 'done')    return sorted.filter((o) => SUPPLIER_DONE_STATUSES.includes(o.status));
+    return sorted.filter((o) => SUPPLIER_ACTION_STATUSES.includes(o.status));
   }, [sorted, filter]);
 
   async function openReview(order) {
@@ -95,7 +103,7 @@ export function IncomingOrdersPanel({ orders = [], onRefresh }) {
     setBatches([]);
     setError('');
     // Pre-load batches for this fertilizer type
-    if (['PENDING', 'ACCEPTED'].includes(order.status)) {
+    if (supplierCanDispatch(order.status)) {
       setLoadingBatches(true);
       try {
         const data = await fetchOrderAvailableBatches(order.fertilizer_type);
@@ -168,9 +176,9 @@ export function IncomingOrdersPanel({ orders = [], onRefresh }) {
         <div>
           <h2 className="flex items-center gap-2 text-lg font-semibold text-gray-900">
             Incoming Orders
-            {pendingCount > 0 && (
+            {actionCount > 0 && (
               <span className="rounded-full bg-amber-500 px-2 py-0.5 text-xs font-bold text-white">
-                {pendingCount}
+                {actionCount}
               </span>
             )}
           </h2>
@@ -190,9 +198,8 @@ export function IncomingOrdersPanel({ orders = [], onRefresh }) {
       <div className="flex gap-1 rounded-lg bg-gray-100 p-1 text-sm">
         {[
           { key: 'pending', label: `Pending (${pendingCount})` },
-          { key: 'active',  label: `In Progress (${inProgressCount})` },
+          { key: 'fulfill', label: `To Fulfill (${fulfillCount})` },
           { key: 'done',    label: `Completed (${doneCount})` },
-          { key: 'all',     label: `All (${sorted.length})` },
         ].map((tab) => (
           <button
             key={tab.key}
@@ -379,7 +386,7 @@ export function IncomingOrdersPanel({ orders = [], onRefresh }) {
               )}
 
               {/* Actions — Dispatch from stock (PENDING or ACCEPTED) */}
-              {['PENDING', 'ACCEPTED'].includes(selected.status) && (() => {
+              {supplierCanDispatch(selected.status) && (() => {
                 const enoughBatches = batches.filter((b) => b.available_bags >= selected.quantity_bags);
                 return (
                 <div className="border-t border-gray-100 pt-4 space-y-3">

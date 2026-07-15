@@ -15,24 +15,32 @@ import {
 } from 'lucide-react';
 import { cancelOrder, markOrderDelivered } from '../api/client';
 import { sortByDateDesc } from '../utils/list-limits';
+import {
+  orderStatusLabel,
+  orderStatusBadge,
+  BRANCH_ACTIVE_STATUSES,
+  BRANCH_DONE_STATUSES,
+  branchCanCancel,
+  branchCanConfirmDelivery,
+} from '../utils/order-status';
 
-const STATUS_CONFIG = {
-  PENDING:    { label: 'Pending Review', classes: 'bg-amber-100 text-amber-700',    Icon: Clock },
-  ACCEPTED:   { label: 'Accepted',       classes: 'bg-blue-100 text-blue-700',      Icon: CheckCircle2 },
-  REJECTED:   { label: 'Rejected',       classes: 'bg-red-100 text-red-600',        Icon: XCircle },
-  PROCESSING: { label: 'Processing',     classes: 'bg-purple-100 text-purple-700',  Icon: Package },
-  READY:      { label: 'En route',     classes: 'bg-green-100 text-green-700',    Icon: Truck },
-  DISPATCHED: { label: 'Dispatched',   classes: 'bg-blue-100 text-blue-700',      Icon: Truck },
-  DELIVERED:  { label: 'Delivered',      classes: 'bg-emerald-100 text-emerald-700', Icon: CheckCircle2 },
-  CANCELLED:  { label: 'Cancelled',      classes: 'bg-gray-100 text-gray-500',      Icon: Ban },
+const STATUS_ICONS = {
+  PENDING: Clock,
+  ACCEPTED: CheckCircle2,
+  REJECTED: XCircle,
+  PROCESSING: Package,
+  READY: Truck,
+  DISPATCHED: Truck,
+  DELIVERED: CheckCircle2,
+  CANCELLED: Ban,
 };
 
 function StatusBadge({ status }) {
-  const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.PENDING;
+  const Icon = STATUS_ICONS[status] || Clock;
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${cfg.classes}`}>
-      <cfg.Icon className="h-3 w-3" />
-      {cfg.label}
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${orderStatusBadge(status)}`}>
+      <Icon className="h-3 w-3" />
+      {orderStatusLabel(status)}
     </span>
   );
 }
@@ -61,12 +69,12 @@ export function BranchOrdersPanel({ orders = [], onRefresh }) {
   const [success, setSuccess]       = useState('');
   const [filter, setFilter]         = useState('active');
 
-  const activeStatuses = ['PENDING', 'ACCEPTED', 'PROCESSING', 'READY', 'DISPATCHED'];
+  const activeStatuses = BRANCH_ACTIVE_STATUSES;
   const sortedOrders = useMemo(() => sortByDateDesc(orders), [orders]);
 
   const displayed = useMemo(() => {
-    if (filter === 'active') return sortedOrders.filter((o) => activeStatuses.includes(o.status));
-    if (filter === 'done')   return sortedOrders.filter((o) => ['DELIVERED', 'CANCELLED', 'REJECTED'].includes(o.status));
+    if (filter === 'active') return sortedOrders.filter((o) => BRANCH_ACTIVE_STATUSES.includes(o.status));
+    if (filter === 'done')   return sortedOrders.filter((o) => BRANCH_DONE_STATUSES.includes(o.status));
     return sortedOrders;
   }, [sortedOrders, filter]);
 
@@ -257,7 +265,7 @@ export function BranchOrdersPanel({ orders = [], onRefresh }) {
 
               {/* Actions */}
               <div className="border-t border-gray-100 pt-4 flex flex-wrap gap-2">
-                {['PENDING', 'ACCEPTED'].includes(selected.status) && (
+                {branchCanCancel(selected.status) && (
                   <button
                     onClick={() => handleCancel(selected)}
                     disabled={busyId === selected.id}
@@ -267,7 +275,7 @@ export function BranchOrdersPanel({ orders = [], onRefresh }) {
                     Cancel Order
                   </button>
                 )}
-                {selected.status === 'READY' && (
+                {branchCanConfirmDelivery(selected.status) && (
                   <button
                     onClick={() => handleMarkDelivered(selected)}
                     disabled={busyId === selected.id}
@@ -278,9 +286,9 @@ export function BranchOrdersPanel({ orders = [], onRefresh }) {
                   </button>
                 )}
                 {selected.status === 'DISPATCHED' && (
-                  <p className="text-xs italic text-gray-400">Awaiting warehouse verification before delivery.</p>
+                  <p className="text-xs italic text-gray-400">Awaiting warehouse verification before you can confirm delivery.</p>
                 )}
-                {['DELIVERED', 'CANCELLED', 'REJECTED'].includes(selected.status) && (
+                {BRANCH_DONE_STATUSES.includes(selected.status) && (
                   <p className="text-xs italic text-gray-400">No further actions for this order.</p>
                 )}
               </div>

@@ -478,12 +478,12 @@ class Order(models.Model):
     DELIVERED = "DELIVERED"
     CANCELLED = "CANCELLED"
     STATUS_CHOICES = [
-        (PENDING, "Pending Supplier Review"),
-        (ACCEPTED, "Accepted by Supplier"),
-        (REJECTED, "Rejected by Supplier"),
-        (PROCESSING, "Processing in Warehouse"),
-        (READY, "Ready for Dispatch"),
-        (DISPATCHED, "Dispatched"),
+        (PENDING, "Pending Review"),
+        (ACCEPTED, "Accepted"),
+        (REJECTED, "Rejected"),
+        (PROCESSING, "Processing"),
+        (DISPATCHED, "Awaiting Verification"),
+        (READY, "En Route"),
         (DELIVERED, "Delivered"),
         (CANCELLED, "Cancelled"),
     ]

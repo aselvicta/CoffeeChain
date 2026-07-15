@@ -35,6 +35,7 @@ import { Logo } from './logo';
 import { NotificationBell } from './notification-bell';
 import { useNotifications } from '../hooks/use-notifications';
 import { fetchOrders, fetchWarehouses, fetchWarehouseCatalog } from '../api/client';
+import { WM_ACTION_STATUSES } from '../utils/order-status';
 import { approveTransfer, fetchTransfers, rejectTransfer } from '../api/client';
 import { OrdersQueuePanel } from './orders-queue-panel';
 import { buildDashboardPath, resolveDashboardTab } from '../utils/dashboard-routing';
@@ -582,7 +583,7 @@ export function WarehouseManagerDashboard({ userProfile, onLogout }) {
   };
 
   const activeOrdersCount = ordersQueue.filter((o) =>
-    ['ACCEPTED', 'PROCESSING', 'READY'].includes(o.status)
+    WM_ACTION_STATUSES.includes(o.status)
   ).length;
 
   const sidebarItems = [

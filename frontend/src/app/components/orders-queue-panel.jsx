@@ -11,6 +11,12 @@ import {
 } from 'lucide-react';
 import { acceptOrder, verifyDispatch } from '../api/client';
 import { sortByDateDesc } from '../utils/list-limits';
+import {
+  orderStatusLabel,
+  orderStatusBadge,
+  WM_ACTION_STATUSES,
+  WM_DONE_STATUSES,
+} from '../utils/order-status';
 
 // WM actions: accept new orders, verify dispatched ones
 const NEXT_STEP = {
@@ -18,22 +24,12 @@ const NEXT_STEP = {
   DISPATCHED: { label: 'Verify Dispatch', icon: Package,      action: 'verify', color: 'bg-green-600 hover:bg-green-700' },
 };
 
-const STATUS_BADGE = {
-  PENDING:    { label: 'New',        classes: 'bg-amber-100 text-amber-700' },
-  ACCEPTED:   { label: 'Accepted',   classes: 'bg-blue-100 text-blue-700' },
-  DISPATCHED: { label: 'Needs verification', classes: 'border border-gray-200 text-gray-600 bg-white' },
-  READY:      { label: 'Sent to customer', classes: 'bg-green-100 text-green-700' },
-  DELIVERED:  { label: 'Delivered',  classes: 'bg-emerald-100 text-emerald-700' },
-  REJECTED:   { label: 'Rejected',   classes: 'bg-red-100 text-red-500' },
-  CANCELLED:  { label: 'Cancelled',  classes: 'bg-gray-100 text-gray-400' },
-};
-
 const STATUS_LABEL = {
-  PENDING:    'New order — awaiting acceptance',
-  ACCEPTED:   'Accepted — supplier is preparing stock',
-  DISPATCHED: 'Dispatched by supplier — verify before delivery',
-  READY:      'Verified — en route to customer',
-  DELIVERED:  'Delivered',
+  PENDING:    'New order awaiting acceptance',
+  ACCEPTED:   'Accepted, waiting for supplier dispatch',
+  DISPATCHED: 'Supplier dispatched, verify before delivery',
+  READY:      'Verified and en route to customer',
+  DELIVERED:  'Delivered to customer',
 };
 
 function safeStr(v) {
@@ -56,7 +52,7 @@ export function OrdersQueuePanel({ orders = [], onRefresh }) {
   const [busyId, setBusyId]     = useState(null);
   const [error, setError]       = useState('');
   const [success, setSuccess]   = useState('');
-  const [filter, setFilter]     = useState('active');
+  const [filter, setFilter]     = useState('queue');
   const [refreshing, setRefreshing] = useState(false);
 
   async function handleRefresh() {
@@ -67,13 +63,15 @@ export function OrdersQueuePanel({ orders = [], onRefresh }) {
   const sorted = useMemo(() => sortByDateDesc(orders), [orders]);
   const pendingCount    = sorted.filter((o) => o.status === 'PENDING').length;
   const dispatchedCount = sorted.filter((o) => o.status === 'DISPATCHED').length;
-  const actionCount     = pendingCount + dispatchedCount;
+  const actionCount     = sorted.filter((o) => WM_ACTION_STATUSES.includes(o.status)).length;
+  const doneCount       = sorted.filter((o) => WM_DONE_STATUSES.includes(o.status)).length;
 
   const displayed = useMemo(() => {
+    if (filter === 'queue')      return sorted.filter((o) => WM_ACTION_STATUSES.includes(o.status));
     if (filter === 'pending')    return sorted.filter((o) => o.status === 'PENDING');
     if (filter === 'dispatched') return sorted.filter((o) => o.status === 'DISPATCHED');
-    if (filter === 'done')       return sorted.filter((o) => ['READY', 'DELIVERED'].includes(o.status));
-    return sorted;
+    if (filter === 'done')       return sorted.filter((o) => WM_DONE_STATUSES.includes(o.status));
+    return sorted.filter((o) => WM_ACTION_STATUSES.includes(o.status));
   }, [sorted, filter]);
 
   function openOrder(order) {
@@ -135,10 +133,10 @@ export function OrdersQueuePanel({ orders = [], onRefresh }) {
       {/* Tabs */}
       <div className="flex gap-1 rounded-lg bg-gray-100 p-1 text-sm">
         {[
+          { key: 'queue',      label: `Queue (${actionCount})` },
           { key: 'pending',    label: `New (${pendingCount})` },
           { key: 'dispatched', label: `Verify (${dispatchedCount})` },
-          { key: 'done',       label: 'Done' },
-          { key: 'all',        label: 'All' },
+          { key: 'done',       label: `Done (${doneCount})` },
         ].map((tab) => (
           <button
             key={tab.key}
@@ -175,7 +173,7 @@ export function OrdersQueuePanel({ orders = [], onRefresh }) {
       {/* Order list */}
       <div className="space-y-2">
         {displayed.map((order) => {
-          const badge = STATUS_BADGE[order.status] || { label: order.status, classes: 'bg-gray-100 text-gray-500' };
+          const badge = { label: orderStatusLabel(order.status), classes: orderStatusBadge(order.status) };
           const next  = NEXT_STEP[order.status];
           const busy  = busyId === order.id;
           return (
