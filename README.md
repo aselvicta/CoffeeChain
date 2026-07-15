@@ -4,170 +4,170 @@
 
 ## Overview
 
-CoffeeChain is a comprehensive digital platform for managing fertilizer distribution and coffee collection across Tanzania's coffee-producing regions. The system provides transparent and secure tracking of agricultural inputs and outputs through a trust-based verification system.
+CoffeeChain is a digital trust and traceability platform for fertilizer distribution across Tanzania's coffee-producing regions. It connects suppliers, warehouse managers, retailers, cooperatives (AMCOS), regulators, and administrators in one supply chain with verified receipts, SMS OTP confirmation, and blockchain-backed integrity checks.
 
-## System Architecture
+**Live demo:** [coffeechain-rust.vercel.app](https://coffeechain-rust.vercel.app)
 
-### User Roles
-
-The system operates on a hierarchical structure with four distinct user roles:
-
-1. **Admin** - System administrators with full access
-2. **Suppliers** - Fertilizer suppliers who dispatch batches
-3. **Retailers** - Registered shops that distribute fertilizer
-4. **Cooperatives (AMCOS)** - Primary cooperatives that manage farmers
-
-### Farmer Data
-
-Farmers do not have login accounts. They are identified by their Ministry of Agriculture IDs and their data is seeded in the system for tracking fertilizer purchases and coffee collection.
-
-## Access & Account Setup
-
-Demo credentials are not listed in this repository. Create admin and role accounts through your deployment or via Django admin as part of your secure onboarding process.
-
-## Key Features
-
-### 1. Public Landing Page
-- Accessible without login at the home route (`/`)
-- Bilingual content (Swahili/English)
-- Information about the platform
-- Contact details and about section
-
-### 2. Role-Based Authentication
-- Secure login system with role-based access
-- Automatic routing to appropriate dashboard based on user role
-- Session management
-
-### 3. Admin Dashboard
-- Comprehensive metrics and analytics
-- Real-time monitoring of suppliers, retailers, and cooperatives
-- Regional overview across coffee-producing regions
-- Monthly trends visualization
-- Recent activity tracking
-
-### 4. Supplier Dashboard
-- Batch dispatch management
-- Inventory tracking
-- Delivery status monitoring
-- Dispatch history
-
-### 5. Retailer Dashboard
-- Receive batches from suppliers
-- Distribute fertilizer to farmers
-- Farmer registry
-- Stock management
-
-### 6. Cooperative Dashboard
-- Farmer registry management
-- Fertilizer distribution with OTP verification
-- Coffee collection tracking
-- Transaction history
-
-### 7. OTP Verification System
-- 4-digit OTP input for farmer verification
-- Bilingual support (English/Kiswahili)
-- Secure farmer identification
-
-### 8. Offline Functionality
-- Designed to work in rural areas with limited connectivity
-- Local data caching (to be implemented)
+Farmers do not log in. They are identified by Ministry of Agriculture IDs and confirm fertilizer receipt via SMS OTP.
 
 ---
 
-## Color Scheme
+## User Roles
 
-The platform uses a **green color scheme** throughout:
+| Role | Purpose |
+|------|---------|
+| **Admin** | User management, registration approval, reports, chain integrity |
+| **Regulator** | Read-only oversight of users, registrations, reports, and integrity |
+| **Supplier** | Register batches, manage warehouse stock, dispatch fertilizer, fulfil orders |
+| **Warehouse Manager** | Approve incoming dispatches, verify order dispatch, manage inventory |
+| **Retailer** | Order from suppliers, receive stock, sell to customers, verify deliveries |
+| **Cooperative (AMCOS)** | Same as retailer plus farmer registry and member distribution |
 
-- Primary Green: `#16a34a` (green-600)
-- Dark Green: `#15803d` (green-700)
-- Very Dark Green: `#166534` (green-800)
-- Light Green: `#86efac` (green-300)
-- Green Backgrounds: Various shades from green-50 to green-900
+---
 
-Primary buttons are designed with sufficient contrast for visibility.
+## Implemented Features
+
+### Public & Authentication
+- Bilingual landing page (English / Swahili)
+- Role-based login with JWT session management
+- Self-registration (Supplier, Retailer, Cooperative) with admin approval workflow
+- Automatic routing to the correct dashboard per role
+
+### Fertilizer Supply Chain
+- **Batch registration** with certification status, warehouse location, and lifecycle tracking
+- **Direct dispatch** from supplier to retailer or AMCOS
+- **Warehouse approval** for incoming supplier transfers
+- **Receive fertilizer** flow for retailers and cooperatives
+- **Supplier catalog** for retailers/AMCOS to browse stock and place orders (standard and custom)
+- **Order workflow:** place order → supplier dispatch from warehouse stock → warehouse manager verification → branch confirms delivery
+- **Stock visibility** with available bag counts per batch and warehouse
+
+### Farmer Distribution & Verification
+- Farmer registry linked to Ministry of Agriculture IDs (AMCOS)
+- Fertilizer distribution to farmers with **SMS OTP verification** (Briq Karibu)
+- Retailer walk-in sales with buyer lookup
+- **Verification panel** with trust seal and receipt viewer
+- Delivery proof upload support
+
+### Trust & Security Layer
+- Cryptographic **verification receipts** stored on Storacha/IPFS (with backend fallback)
+- Receipt hashes **anchored on Polygon Amoy** blockchain
+- **Chain Integrity** panel: scan transfers, detect database tampering, admin/regulator alerts
+- Automatic integrity checks on anchored transfer changes
+- SMS alerts to admins on tamper detection
+
+### Dashboards & Operations
+- Role-specific dashboards with overview metrics and analytics
+- In-app **notifications** (orders, dispatches, registrations, integrity events)
+- Dispatch history, analytics export (PDF/CSV), and paginated lists
+- Issue reporting and resolution (supplier)
+- Admin user management, pending registration review, and system reports
+
+### Deployment
+- Frontend on **Vercel**
+- Backend API and PostgreSQL on **Render**
+- Dedicated upload service for receipt storage
+
+---
+
+## Supply Chain Workflow
+
+### Direct dispatch (no order)
+1. **Supplier** dispatches batches from warehouse to retailer or AMCOS
+2. **Warehouse Manager** approves the transfer (if required)
+3. **Retailer/AMCOS** receives and confirms stock
+4. **Retailer/AMCOS** distributes to farmer or customer with OTP
+5. **System** stores receipt, anchors hash on chain, and records verification
+
+### Order-based flow
+1. **Retailer/AMCOS** places order via Supplier Catalog
+2. **Supplier** dispatches from warehouse batch stock
+3. **Warehouse Manager** verifies dispatch
+4. **Retailer/AMCOS** confirms delivery when en route
+5. Distribution to farmer follows the same OTP and receipt flow
+
+### Order statuses (unified)
+`Pending Review` → `Accepted` → `Awaiting Verification` → `En Route` → `Delivered`
 
 ---
 
 ## Technology Stack
 
-- **Frontend Framework:** React 18
-- **Routing:** React Router
-- **Styling:** Tailwind CSS v4
-- **Charts:** Recharts
-- **Icons:** Lucide React
-- **UI Components:** Custom components with Radix UI primitives
+| Layer | Technology |
+|-------|------------|
+| Frontend | React 18, Vite, React Router, Tailwind CSS v4 |
+| Backend | Django, Django REST Framework, PostgreSQL |
+| Auth | JWT (Simple JWT) |
+| Blockchain | Polygon Amoy, Solidity smart contract |
+| Storage | Storacha/IPFS via upload service |
+| SMS | Briq Karibu (OTP and alerts) |
+| Charts | Recharts |
+| UI | Lucide icons, Radix UI primitives |
+| Deploy | Vercel (frontend), Render (API + DB) |
 
 ---
 
 ## Getting Started
 
-1. **Access the Platform:**
-   - Navigate to the home page to see the public landing page
-   - Click "Ingia Mfumo" to access the login page
+### Local development
+1. Clone the repository
+2. Backend: `cd backend`, create venv, `pip install -r requirements.txt`, configure `.env`, run migrations, `python manage.py runserver`
+3. Frontend: `cd frontend`, `npm install`, set `VITE_API_URL`, `npm run dev`
+4. Optional: seed demo data with `python manage.py seed_demo`
 
-2. **Login:**
-   - Select your role (Admin, Supplier, Retailer, or Cooperative)
-   - Enter the credentials issued by your administrator
-
-3. **Explore:**
-   - Each role has a different dashboard and feature set
-   - Navigate using the sidebar menu
-   - Logout using the logout button in the header
+### Testing the live demo
+See **[docs/TESTING_MANUAL.pdf](docs/TESTING_MANUAL.pdf)** for step-by-step flows, test accounts, and role-by-role instructions.
 
 ---
 
-## System Workflow
+## Project Structure
 
-### Fertilizer Distribution Flow
-1. **Supplier** → Dispatches batches to Retailers/AMCOS
-2. **Retailer/AMCOS** → Receives batches and distributes to farmers
-3. **Farmer** → Verified using Ministry of Agriculture ID and OTP
-4. **System** → Records transaction with timestamp and verification
-
-### Coffee Collection Flow
-1. **Farmer** → Delivers coffee to AMCOS
-2. **AMCOS** → Records collection with farmer ID and quantity
-3. **System** → Updates records and generates reports
+```
+CoffeeChain/
+├── backend/           Django API, models, integrity services
+├── frontend/          React app and role dashboards
+├── upload-service/    Storacha/IPFS receipt upload
+├── smart-contracts/   Polygon Amoy audit anchor contract
+└── docs/              Architecture docs and testing manual
+```
 
 ---
 
 ## Contact Information
 
 **Project Participants and Contributions**
+<<<<<<< HEAD
 - **Victor Asel Kabugumila** - Backend Developer & Blockchain integration (TEAM LEAD)
 - **Maxmillian Kayombo** - Frontend Developer & UI/UX 
 - **Sirili Ammi** - Backend Developer & Co-System Architect
 - **Joshua Mbwilo** - Database designer & System Architect
   
 - Location: Dar es Salaam, Tanzania
+=======
+
+- **Victor Asel Kabugumila** - Backend Developer & Blockchain integration (TEAM LEAD)
+- **Maxmillian Kayombo** - Frontend Developer & UI/UX
+- **Sirili Ammi** - Backend Developer & Co-System Architect
+- **Joshua Mbwilo** - Database designer & System Architect
+
+**Location:** Dar es Salaam, Tanzania
+>>>>>>> 78f7ded (updated README)
 
 ---
 
-## Future Enhancements
+## Documentation
 
-- Integration with Ministry of Agriculture API for real-time farmer data
-- Mobile application for field agents
-- SMS notifications for farmers
-- Advanced analytics and predictive insights
-- Export functionality for reports
-- Multi-language support expansion
-
----
-
-## Support
-
-For technical support or questions about the platform, please contact:
-- **Email:** support@coffeechain.go.tz
-- **Phone:** +255 28 222 1234
+- [System Architecture](docs/SYSTEM_ARCHITECTURE.md)
+- [Testing Manual (PDF)](docs/TESTING_MANUAL.pdf)
 
 ---
 
 ## License
 
-© 2026 Tanzania Coffee Board. All rights reserved.
+© 2026 CoffeeChain Project Team. All rights reserved.
 
-This system is developed for the exclusive use of Tanzania Coffee Board and its authorized partners in Tanzania's coffee-producing regions.
+Built for transparent fertilizer distribution and farmer verification in Tanzania's coffee-producing regions.
 
 ---
 
-**Built with ❤️ for Tanzania's Coffee Farmers**
+**Built with care for Tanzania's Coffee Farmers**
