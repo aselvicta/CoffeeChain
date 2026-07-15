@@ -152,13 +152,11 @@ CoffeeChain/
 - **Sirili Ammi** - Backend Developer & Co-System Architect
 - **Joshua Mbwilo** - Database designer & System Architect
 
-> > > > > >
 
----
 
-# Location: Dar es Salaam, Tanzania
+**Location:** Dar es Salaam, Tanzania
 
----
+> > > > >
 
 ## License
 
