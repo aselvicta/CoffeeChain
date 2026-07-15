@@ -134,11 +134,10 @@ Primary buttons are designed with sufficient contrast for visibility.
 ## Contact Information
 
 **Project Participants and Contributions**
-- Victor Asel Kabugumila - Backend Developer & Blockchain integration (TEAM LEAD)
-- Maxmillian Kayombo - Frontend Developer & UI/UX 
-- Sirili Ammi - Backend Developer & Co-System Architect
-- Joshua Mbwilo - Database designer & System Architect
-- Phone: +255 745 979 712
+- **Victor Asel Kabugumila** - Backend Developer & Blockchain integration (TEAM LEAD)
+- **Maxmillian Kayombo** - Frontend Developer & UI/UX 
+- **Sirili Ammi** - Backend Developer & Co-System Architect
+- **Joshua Mbwilo** - Database designer & System Architect
 - Location: Dar es Salaam, Tanzania
 
 ---
