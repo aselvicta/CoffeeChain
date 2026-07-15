@@ -1,6 +1,8 @@
 # CoffeeChain - Trust & Security Platform
 
-CoffeeChain Logo
+<p align="center">
+  <img src="frontend/src/assets/logo.png" alt="CoffeeChain" width="320" />
+</p>
 
 ## Overview
 
