@@ -128,10 +128,6 @@ Farmers do not log in. They are identified by Ministry of Agriculture IDs and co
 2. Backend: `cd backend`, create venv, `pip install -r requirements.txt`, configure `.env`, run migrations, `python manage.py runserver`
 3. Frontend: `cd frontend`, `npm install`, set `VITE_API_URL`, `npm run deV`
 
-
-
-
-
 ---
 
 ## Project Structure
@@ -149,25 +145,18 @@ CoffeeChain/
 
 ## Contact Information
 
-**Project Participants and Contributions**
-<<<<<<< HEAD
+**Project Participants and Contributions** 
 
 - **Victor Asel Kabugumila** - Backend Developer & Blockchain integration (TEAM LEAD)
 - **Maxmillian Kayombo** - Frontend Developer & UI/UX 
 - **Sirili Ammi** - Backend Developer & Co-System Architect
 - **Joshua Mbwilo** - Database designer & System Architect
-- # Location: Dar es Salaam, Tanzania
-- 
 
-
-
-> > > > > > >
+> > > > > >
 
 ---
 
-
-
-- 
+# Location: Dar es Salaam, Tanzania
 
 ---
 
