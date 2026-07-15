@@ -152,18 +152,14 @@ CoffeeChain/
 - **Sirili Ammi** - Backend Developer & Co-System Architect
 - **Joshua Mbwilo** - Database designer & System Architect
 
-
-
 **Location:** Dar es Salaam, Tanzania
 
-> > > > >
+> > > >
 
 ## License
 
 © 2026 CoffeeChain Project Team. All rights reserved.
 
-Built for transparent fertilizer distribution and farmer verification in Tanzania's coffee-producing regions.
-
 ---
 
-**Built with care for Tanzania's Coffee Farmers**
+**Built with care ❤️ for Tanzania's Coffee Farmers and Investors**
