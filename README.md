@@ -133,10 +133,13 @@ Primary buttons are designed with sufficient contrast for visibility.
 
 ## Contact Information
 
-**Tanzania Coffee Board**
-- Email: info@coffeechain.go.tz
-- Phone: +255 28 222 1234
-- Location: Tanzania
+**Project Participants and Contributions**
+- Victor Asel Kabugumila - Backend Developer & Blockchain integration (TEAM LEAD)
+- Maxmillian Kayombo - Frontend Developer & UI/UX 
+- Sirili Ammi - Backend Developer & Co-System Architect
+- Joshua Mbwilo - Database designer & System Architect
+- Phone: +255 745 979 712
+- Location: Dar es Salaam, Tanzania
 
 ---
 
