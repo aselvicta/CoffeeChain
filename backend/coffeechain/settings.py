@@ -173,3 +173,26 @@ RETAILER_MINISTRY_DISCOUNT_PERCENT = int(os.getenv("RETAILER_MINISTRY_DISCOUNT_P
 INTEGRITY_WATCHER_ENABLED = os.getenv("INTEGRITY_WATCHER_ENABLED", "true").lower() == "true"
 INTEGRITY_WATCHER_INTERVAL_SECONDS = int(os.getenv("INTEGRITY_WATCHER_INTERVAL_SECONDS", "30"))
 INTEGRITY_WATCHER_FULL_SCAN_EVERY = int(os.getenv("INTEGRITY_WATCHER_FULL_SCAN_EVERY", "4"))
+
+# ── Email (registration decisions + dispatch receipts) ───────────────────────
+# Local default: print emails to the Django console. Set EMAIL_BACKEND=smtp and
+# EMAIL_HOST_* for real delivery (Gmail, Brevo, Mailgun, etc.).
+_default_email_backend = (
+    "django.core.mail.backends.console.EmailBackend"
+    if DEBUG
+    else "django.core.mail.backends.smtp.EmailBackend"
+)
+EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", _default_email_backend)
+EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "true").lower() == "true"
+EMAIL_USE_SSL = os.getenv("EMAIL_USE_SSL", "false").lower() == "true"
+DEFAULT_FROM_EMAIL = os.getenv(
+    "DEFAULT_FROM_EMAIL",
+    EMAIL_HOST_USER or "CoffeeChain <noreply@coffeechain.local>",
+)
+SERVER_EMAIL = os.getenv("SERVER_EMAIL", DEFAULT_FROM_EMAIL)
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", "20"))

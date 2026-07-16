@@ -131,6 +131,13 @@ def notify_for_transfer_pending(transfer: Transfer, actor=None):
             metadata={"transfer_id": transfer.id, "tab": "dispatched"},
         )
 
+    try:
+        from supply_chain.services.email import email_transfer_pending
+
+        email_transfer_pending(transfer)
+    except Exception:
+        logger.exception("Failed to email warehouse managers for transfer #%s", transfer.id)
+
 
 def notify_for_transfer_rejected(transfer: Transfer, message: str, actor=None):
     transfer = (
@@ -156,6 +163,13 @@ def notify_for_transfer_rejected(transfer: Transfer, message: str, actor=None):
         metadata={"transfer_id": transfer.id, "tab": "dispatched", "rejected": True},
     )
 
+    try:
+        from supply_chain.services.email import email_transfer_rejected
+
+        email_transfer_rejected(transfer)
+    except Exception:
+        logger.exception("Failed to email supplier for rejected transfer #%s", transfer.id)
+
 
 def notify_for_transfer_created(transfer: Transfer, actor=None):
     transfer = (
@@ -180,6 +194,24 @@ def notify_for_transfer_created(transfer: Transfer, actor=None):
         )
         branch_name = transfer.to_branch.name if transfer.to_branch else "Branch"
         branch_user = _branch_user(transfer.to_branch)
+
+        # Persist receiver contact from the destination branch when missing
+        update_fields = []
+        if transfer.to_branch:
+            if not transfer.receiver_email and branch_user and branch_user.email:
+                transfer.receiver_email = branch_user.email.strip()
+                update_fields.append("receiver_email")
+            if not transfer.receiver_name:
+                transfer.receiver_name = branch_name
+                update_fields.append("receiver_name")
+            if not transfer.receiver_organisation:
+                transfer.receiver_organisation = branch_name
+                update_fields.append("receiver_organisation")
+            if not transfer.receiver_phone and transfer.to_branch.contact_phone:
+                transfer.receiver_phone = transfer.to_branch.contact_phone
+                update_fields.append("receiver_phone")
+            if update_fields:
+                transfer.save(update_fields=update_fields)
 
         _create(
             branch_user,
@@ -216,6 +248,13 @@ def notify_for_transfer_created(transfer: Transfer, actor=None):
             priority=Notification.PRIORITY_LOW,
             transfer=transfer,
         )
+
+        try:
+            from supply_chain.services.email import email_transfer_dispatched
+
+            email_transfer_dispatched(transfer)
+        except Exception:
+            logger.exception("Failed to email dispatch receipt for transfer #%s", transfer.id)
         return
 
     if transfer.transfer_type == Transfer.BRANCH_TO_FARMER:
@@ -310,6 +349,13 @@ def notify_for_transfer_received(transfer: Transfer, actor=None):
         priority=Notification.PRIORITY_LOW,
         transfer=transfer,
     )
+
+    try:
+        from supply_chain.services.email import email_transfer_received
+
+        email_transfer_received(transfer)
+    except Exception:
+        logger.exception("Failed to email delivery confirmation for transfer #%s", transfer.id)
 
 
 def notify_for_otp_sent(transfer: Transfer):

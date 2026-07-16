@@ -1,0 +1,20 @@
+{% extends "email/base.html" %}
+{% block content %}
+  <p style="margin:0 0 12px;font-size:16px;font-weight:600;">Warehouse approval needed</p>
+  <p style="margin:0 0 16px;font-size:14px;line-height:1.6;color:#374151;">
+    <strong>{{ supplier_name }}</strong> submitted a dispatch that needs your approval before it leaves the warehouse.
+  </p>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e5e7eb;border-radius:8px;margin-bottom:16px;">
+    <tr><td style="padding:12px 14px;font-size:13px;border-bottom:1px solid #e5e7eb;"><strong>Transfer ID</strong></td><td style="padding:12px 14px;font-size:13px;border-bottom:1px solid #e5e7eb;">#{{ transfer_id }}</td></tr>
+    <tr><td style="padding:12px 14px;font-size:13px;border-bottom:1px solid #e5e7eb;"><strong>Batch</strong></td><td style="padding:12px 14px;font-size:13px;border-bottom:1px solid #e5e7eb;">{{ batch_code }} — {{ fertilizer_type }}</td></tr>
+    <tr><td style="padding:12px 14px;font-size:13px;border-bottom:1px solid #e5e7eb;"><strong>Quantity</strong></td><td style="padding:12px 14px;font-size:13px;border-bottom:1px solid #e5e7eb;">{{ quantity_bags }} bags</td></tr>
+    <tr><td style="padding:12px 14px;font-size:13px;border-bottom:1px solid #e5e7eb;"><strong>Warehouse</strong></td><td style="padding:12px 14px;font-size:13px;border-bottom:1px solid #e5e7eb;">{{ warehouse_name }}</td></tr>
+    <tr><td style="padding:12px 14px;font-size:13px;"><strong>Destination</strong></td><td style="padding:12px 14px;font-size:13px;">{{ branch_name }} ({{ branch_type }})</td></tr>
+  </table>
+  <p style="margin:0 0 16px;font-size:14px;line-height:1.6;color:#374151;">
+    Log in to approve or reject this dispatch.
+  </p>
+  <a href="{{ login_url }}" style="display:inline-block;background:#15803d;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;padding:10px 18px;border-radius:8px;">
+    Open CoffeeChain
+  </a>
+{% endblock %}

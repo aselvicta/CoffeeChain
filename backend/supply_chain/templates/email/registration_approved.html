@@ -1,0 +1,22 @@
+{% extends "email/base.html" %}
+{% block content %}
+  <p style="margin:0 0 12px;font-size:16px;font-weight:600;">Habari {{ name }},</p>
+  <p style="margin:0 0 16px;font-size:14px;line-height:1.6;color:#374151;">
+    Good news — your CoffeeChain account has been <strong style="color:#15803d;">approved and activated</strong>.
+  </p>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;margin-bottom:20px;">
+    <tr>
+      <td style="padding:14px 16px;font-size:13px;line-height:1.7;color:#14532d;">
+        <strong>Username:</strong> {{ username }}<br />
+        <strong>Organisation:</strong> {{ organisation }}<br />
+        <strong>Role:</strong> {{ role }}
+      </td>
+    </tr>
+  </table>
+  <p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#374151;">
+    Sign in with the username and password you chose during registration.
+  </p>
+  <a href="{{ login_url }}" style="display:inline-block;background:#15803d;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;padding:10px 18px;border-radius:8px;">
+    Sign in to CoffeeChain
+  </a>
+{% endblock %}

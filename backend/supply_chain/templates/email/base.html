@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ subject|default:app_name }}</title>
+</head>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#111827;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f3f4f6;padding:24px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
+          <tr>
+            <td style="background:#15803d;padding:20px 24px;">
+              <p style="margin:0;font-size:18px;font-weight:700;color:#ffffff;letter-spacing:0.02em;">{{ app_name }}</p>
+              <p style="margin:4px 0 0;font-size:12px;color:#bbf7d0;">Tanzania fertilizer supply chain</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:24px;">
+              {% block content %}{% endblock %}
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:16px 24px;background:#f9fafb;border-top:1px solid #e5e7eb;">
+              <p style="margin:0;font-size:11px;color:#6b7280;line-height:1.5;">
+                This is an automated message from {{ app_name }}.
+                {% if login_url %}Sign in at <a href="{{ login_url }}" style="color:#15803d;">{{ login_url }}</a>.{% endif %}
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

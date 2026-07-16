@@ -3,7 +3,6 @@ import re
 from django.conf import settings
 from django.shortcuts import get_object_or_404
 from django.contrib.auth.models import Group, User
-from django.core.mail import send_mail
 from django.db import transaction
 from django.db.models import F, Q, Sum
 from django.utils import timezone
@@ -703,7 +702,7 @@ class PublicRegisterView(APIView):
             "cooperative": "Cooperative (AMCOS)",
         }.get(data["role"], data["role"].capitalize())
 
-        PendingRegistration.objects.create(
+        registration = PendingRegistration.objects.create(
             username=data["username"],
             email=data.get("email", ""),
             first_name=first_name,
@@ -749,6 +748,14 @@ class PublicRegisterView(APIView):
                     )
             except Exception:
                 logger.exception("Failed to send registration SMS to %s", phone)
+
+        # Email confirmation — non-fatal if it fails
+        try:
+            from .services.email import email_registration_received
+
+            email_registration_received(registration)
+        except Exception:
+            logger.exception("Failed to send registration received email")
 
         return Response(
             {"detail": "Registration submitted successfully. An administrator will review and activate your account."},
@@ -838,6 +845,31 @@ class PendingRegistrationViewSet(viewsets.ViewSet):
                 details={"username": reg.username, "role": reg.role},
             )
 
+        # Notify applicant by email (and SMS if phone present) — non-fatal
+        try:
+            from .services.email import email_registration_approved
+
+            email_registration_approved(reg)
+        except Exception:
+            logger.exception("Failed to send registration approval email to %s", reg.email)
+
+        if reg.contact_phone:
+            try:
+                from .services.briq import send_sms
+
+                name = reg.first_name or reg.organisation_name or reg.username
+                send_sms(
+                    reg.contact_phone,
+                    (
+                        f"Habari {name}, akaunti yako ya CoffeeChain imeidhinishwa. "
+                        f"Ingia kwa jina la mtumiaji: {reg.username}."
+                    )[:160],
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to send registration approval SMS to %s", reg.contact_phone
+                )
+
         return Response(
             {"detail": f"Account for {reg.username} has been approved and activated.", "user_id": user.id},
             status=status.HTTP_200_OK,
@@ -890,6 +922,13 @@ class PendingRegistrationViewSet(viewsets.ViewSet):
                     )
             except Exception:
                 logger.exception("Failed to send rejection SMS to %s", reg.contact_phone)
+
+        try:
+            from .services.email import email_registration_rejected
+
+            email_registration_rejected(reg)
+        except Exception:
+            logger.exception("Failed to send registration rejection email to %s", reg.email)
 
         return Response({"detail": f"Registration for {reg.username} has been rejected."})
 
@@ -1878,6 +1917,8 @@ class TransferViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="notify-receiver")
     def notify_receiver(self, request):
+        from .services.email import email_dispatch_summary
+
         to_branch_id = request.data.get("to_branch_id")
         receiver_email = (request.data.get("receiver_email") or "").strip()
         receiver_name = (request.data.get("receiver_name") or "").strip()
@@ -1912,42 +1953,19 @@ class TransferViewSet(viewsets.ModelViewSet):
                 }
             )
 
-        transfer_id_text = ", ".join(str(transfer.id) for transfer in transfers)
-        subject = f"Fertilizer Dispatch from {supplier_name} — Transfer IDs: {transfer_id_text}"
-        body_lines = [
-            f"Supplier: {supplier_name}",
-            f"Receiver: {receiver_name}",
-            f"Transfer IDs: {transfer_id_text}",
-            "",
-            "Dispatch summary:",
-        ]
-        for row in table_rows:
-            body_lines.append(
-                f"- {row['batch_code']} | {row['fertilizer_type']} | {row['quantity_bags']} bags | {row['delivery_address'] or '—'}"
-            )
-        body_lines.extend(
-            [
-                "",
-                "To confirm receipt of each delivery, log into CoffeeChain and use the Transfer ID(s) above in the Receive Batches section.",
-            ]
+        transfer_id_list = [transfer.id for transfer in transfers]
+        email_sent = email_dispatch_summary(
+            receiver_email=receiver_email,
+            receiver_name=receiver_name,
+            supplier_name=supplier_name,
+            transfer_rows=table_rows,
+            transfer_ids=transfer_id_list,
         )
-
-        email_sent = False
-        try:
-            send_mail(
-                subject,
-                "\n".join(body_lines),
-                getattr(settings, "DEFAULT_FROM_EMAIL", None),
-                [receiver_email],
-                fail_silently=False,
-            )
-            email_sent = True
-        except Exception:
-            logger.exception("Failed to send dispatch notification email")
 
         in_app_sent = False
         branch = Branch.objects.select_related("user").filter(id=to_branch_id).first()
         if branch and branch.user:
+            transfer_id_text = ", ".join(str(tid) for tid in transfer_id_list)
             notification_body = (
                 f"{sum(row['quantity_bags'] for row in table_rows)} bag(s) of fertilizer dispatched to your branch. "
                 f"Transfer IDs: {transfer_id_text}. Tap to view and confirm receipt."
@@ -1961,7 +1979,7 @@ class TransferViewSet(viewsets.ModelViewSet):
                 priority=Notification.PRIORITY_HIGH,
                 transfer=transfers[0],
                 metadata={
-                    "transfer_ids": [transfer.id for transfer in transfers],
+                    "transfer_ids": transfer_id_list,
                     "tab": "receive",
                 },
             )

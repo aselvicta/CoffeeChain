@@ -1,0 +1,18 @@
+{% extends "email/base.html" %}
+{% block content %}
+  <p style="margin:0 0 12px;font-size:16px;font-weight:600;">Habari {{ name }},</p>
+  <p style="margin:0 0 16px;font-size:14px;line-height:1.6;color:#374151;">
+    Your CoffeeChain registration request for <strong>{{ organisation }}</strong> (username <strong>{{ username }}</strong>) was not approved.
+  </p>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;margin-bottom:16px;">
+    <tr>
+      <td style="padding:14px 16px;font-size:13px;line-height:1.7;color:#7f1d1d;">
+        <strong>Reason:</strong><br />
+        {{ reason }}
+      </td>
+    </tr>
+  </table>
+  <p style="margin:0;font-size:14px;line-height:1.6;color:#374151;">
+    You may submit a new registration with corrected details, or contact a CoffeeChain administrator for help.
+  </p>
+{% endblock %}

@@ -1,0 +1,15 @@
+{% extends "email/base.html" %}
+{% block content %}
+  <p style="margin:0 0 12px;font-size:16px;font-weight:600;">Delivery confirmed</p>
+  <p style="margin:0 0 16px;font-size:14px;line-height:1.6;color:#374151;">
+    <strong>{{ branch_name }}</strong> confirmed receipt of dispatch <strong>#{{ transfer_id }}</strong>
+    from <strong>{{ supplier_name }}</strong>.
+  </p>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e5e7eb;border-radius:8px;margin-bottom:16px;">
+    <tr><td style="padding:12px 14px;font-size:13px;border-bottom:1px solid #e5e7eb;background:#f0fdf4;"><strong>Status</strong></td><td style="padding:12px 14px;font-size:13px;border-bottom:1px solid #e5e7eb;background:#f0fdf4;color:#15803d;font-weight:600;">Received</td></tr>
+    <tr><td style="padding:12px 14px;font-size:13px;border-bottom:1px solid #e5e7eb;"><strong>Batch</strong></td><td style="padding:12px 14px;font-size:13px;border-bottom:1px solid #e5e7eb;">{{ batch_code }} — {{ fertilizer_type }}</td></tr>
+    <tr><td style="padding:12px 14px;font-size:13px;border-bottom:1px solid #e5e7eb;"><strong>Quantity</strong></td><td style="padding:12px 14px;font-size:13px;border-bottom:1px solid #e5e7eb;">{{ quantity_bags }} bags</td></tr>
+    <tr><td style="padding:12px 14px;font-size:13px;"><strong>Warehouse</strong></td><td style="padding:12px 14px;font-size:13px;">{{ warehouse_name }}</td></tr>
+  </table>
+  <p style="margin:0;font-size:13px;color:#6b7280;">This closes the supplier → warehouse → branch handoff for this transfer.</p>
+{% endblock %}
