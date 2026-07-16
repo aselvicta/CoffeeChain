@@ -697,13 +697,16 @@ class PendingRegistrationViewSet(viewsets.ViewSet):
 
     def list(self, request):
         status_filter = request.query_params.get("status", PendingRegistration.PENDING)
-        qs = PendingRegistration.objects.order_by("-created_at")
+        qs = PendingRegistration.objects.select_related("reviewed_by").order_by("-created_at")
         if status_filter and status_filter != "all":
             qs = qs.filter(status=status_filter)
         return Response(PendingRegistrationSerializer(qs, many=True).data)
 
     def retrieve(self, request, pk=None):
-        reg = get_object_or_404(PendingRegistration, pk=pk)
+        reg = get_object_or_404(
+            PendingRegistration.objects.select_related("reviewed_by"),
+            pk=pk,
+        )
         return Response(PendingRegistrationSerializer(reg).data)
 
     @action(detail=True, methods=["post"])

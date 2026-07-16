@@ -512,6 +512,10 @@ export function fetchPendingRegistrations(statusFilter = 'PENDING') {
   return apiFetch(`/api/registrations/${params}`);
 }
 
+export function fetchPendingRegistration(id) {
+  return apiFetch(`/api/registrations/${id}/`);
+}
+
 export function approvePendingRegistration(id) {
   return apiFetch(`/api/registrations/${id}/approve/`, { method: 'POST' });
 }

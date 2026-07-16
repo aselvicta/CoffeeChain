@@ -151,14 +151,24 @@ class BranchSerializer(serializers.ModelSerializer):
 
 
 class PendingRegistrationSerializer(serializers.ModelSerializer):
+    reviewed_by_username = serializers.SerializerMethodField()
+
     class Meta:
         model = PendingRegistration
         fields = [
             "id", "username", "email", "first_name", "last_name",
             "role", "organisation_name", "contact_phone", "region", "district",
             "status", "rejection_reason", "created_at", "reviewed_at",
+            "reviewed_by_username",
         ]
         read_only_fields = ["status", "rejection_reason", "created_at", "reviewed_at"]
+
+    def get_reviewed_by_username(self, obj):
+        if not obj.reviewed_by_id:
+            return None
+        reviewer = obj.reviewed_by
+        full = reviewer.get_full_name().strip()
+        return full or reviewer.username
 
 
 class PublicRegisterSerializer(serializers.Serializer):

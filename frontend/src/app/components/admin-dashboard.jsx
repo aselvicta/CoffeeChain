@@ -13,7 +13,7 @@ import {
 } from 'recharts';
 import { createUser, fetchAuditReport, fetchBatches, fetchBranches, fetchSuppliers,
   fetchTransfers, fetchUser, fetchUsers, updateUser, deleteUser, toggleUserActive,
-  fetchPendingRegistrations, approvePendingRegistration, rejectPendingRegistration,
+  fetchPendingRegistrations, fetchPendingRegistration, approvePendingRegistration, rejectPendingRegistration,
   fetchWarehouses, updateMyProfile, fetchProfile,
 } from '../api/client';
 import { NotificationBell } from './notification-bell';
@@ -759,6 +759,188 @@ function RoleUserTable({ role, users, suppliers, warehouses, onRefresh, readOnly
   );
 }
 
+// ─── Registration Detail Modal ───────────────────────────────────────────────
+
+const REG_STATUS_STYLE = {
+  PENDING: 'bg-amber-100 text-amber-800',
+  APPROVED: 'bg-green-100 text-green-700',
+  REJECTED: 'bg-red-100 text-red-700',
+};
+
+function formatRegDate(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value.slice(0, 10);
+  return date.toLocaleString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function RegistrationDetailModal({
+  registrationId,
+  onClose,
+  onApprove,
+  onReject,
+  readOnly = false,
+  actioning = false,
+}) {
+  const [reg, setReg] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setError('');
+      try {
+        const data = await fetchPendingRegistration(registrationId);
+        if (!cancelled) setReg(data);
+      } catch (err) {
+        if (!cancelled) setError(getUserMessage(err, 'Failed to load registration details.'));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [registrationId]);
+
+  const fullName = [reg?.first_name, reg?.last_name].filter(Boolean).join(' ');
+  const roleLabel = reg ? getRoleLabel(reg.role) : '';
+  const roleColor = reg ? (getRoleColor(reg.role) || 'bg-gray-100 text-gray-700') : '';
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl shadow-xl w-full max-w-xl max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between p-6 border-b border-gray-100">
+          <div className="flex items-center gap-4">
+            <div className="h-14 w-14 rounded-xl bg-green-100 flex items-center justify-center shrink-0">
+              <User className="h-7 w-7 text-green-700" />
+            </div>
+            <div>
+              <p className="text-lg font-bold text-gray-900">
+                {loading ? 'Loading…' : (reg?.organisation_name || reg?.username || 'Registration')}
+              </p>
+              {!loading && reg && (
+                <>
+                  <p className="text-sm text-gray-500">@{reg.username}</p>
+                  <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold ${roleColor}`}>
+                      <Shield className="h-3 w-3" /> {roleLabel}
+                    </span>
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold ${REG_STATUS_STYLE[reg.status] || 'bg-gray-100 text-gray-700'}`}>
+                      {reg.status.charAt(0) + reg.status.slice(1).toLowerCase()}
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-5">
+          {loading && (
+            <p className="text-sm text-gray-400 text-center py-8">Loading account details…</p>
+          )}
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">{error}</div>
+          )}
+          {!loading && reg && !error && (
+            <>
+              <section>
+                <p className="text-xs font-bold text-green-700 uppercase tracking-widest mb-3">Account</p>
+                <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                  <DetailRow label="Username" value={reg.username} />
+                  <DetailRow label="Email" value={reg.email || '—'} />
+                  <DetailRow label="First name" value={reg.first_name || '—'} />
+                  <DetailRow label="Last name" value={reg.last_name || '—'} />
+                  {fullName && <DetailRow label="Full name" value={fullName} span />}
+                </div>
+              </section>
+
+              <div className="border-t border-gray-100" />
+              <section>
+                <p className="text-xs font-bold text-green-700 uppercase tracking-widest mb-3">Organisation</p>
+                <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                  <DetailRow label="Organisation name" value={reg.organisation_name || '—'} span />
+                  <DetailRow label="Contact phone" value={reg.contact_phone || '—'} />
+                  <DetailRow label="Region" value={reg.region || '—'} />
+                  <DetailRow label="District" value={reg.district || '—'} />
+                </div>
+              </section>
+
+              <div className="border-t border-gray-100" />
+              <section>
+                <p className="text-xs font-bold text-green-700 uppercase tracking-widest mb-3">Submission</p>
+                <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                  <DetailRow label="Submitted" value={formatRegDate(reg.created_at)} span />
+                  {reg.reviewed_at && (
+                    <DetailRow label="Reviewed" value={formatRegDate(reg.reviewed_at)} span />
+                  )}
+                  {reg.reviewed_by_username && (
+                    <DetailRow label="Reviewed by" value={reg.reviewed_by_username} span />
+                  )}
+                  {reg.rejection_reason && (
+                    <DetailRow label="Rejection reason" value={reg.rejection_reason} span />
+                  )}
+                </div>
+              </section>
+            </>
+          )}
+        </div>
+
+        {!loading && reg && reg.status === 'PENDING' && !readOnly && (
+          <div className="flex gap-3 p-6 border-t border-gray-100 bg-gray-50 rounded-b-2xl">
+            <button
+              onClick={onClose}
+              className="flex-1 border border-gray-300 rounded-lg py-2.5 text-sm font-medium text-gray-600 hover:bg-white"
+            >
+              Close
+            </button>
+            <button
+              onClick={() => onReject(reg.id)}
+              disabled={actioning}
+              className="flex-1 flex items-center justify-center gap-1.5 border border-red-300 text-red-600 rounded-lg py-2.5 text-sm font-semibold hover:bg-red-50 disabled:opacity-50"
+            >
+              <UserX className="h-4 w-4" />
+              Reject
+            </button>
+            <button
+              onClick={() => onApprove(reg.id)}
+              disabled={actioning}
+              className="flex-1 flex items-center justify-center gap-1.5 bg-green-700 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-green-800 disabled:opacity-50"
+            >
+              <UserCheck className="h-4 w-4" />
+              {actioning ? 'Processing…' : 'Approve'}
+            </button>
+          </div>
+        )}
+
+        {(!reg || reg.status !== 'PENDING' || readOnly) && !loading && (
+          <div className="p-6 border-t border-gray-100 bg-gray-50 rounded-b-2xl">
+            <button
+              onClick={onClose}
+              className="w-full border border-gray-300 rounded-lg py-2.5 text-sm font-medium text-gray-600 hover:bg-white"
+            >
+              Close
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Pending Registrations Tab ───────────────────────────────────────────────
 
 function PendingRegistrationsPanel({ readOnly = false }) {
@@ -769,6 +951,7 @@ function PendingRegistrationsPanel({ readOnly = false }) {
   const [actioning, setActioning] = useState(null);
   const [rejectModalId, setRejectModalId] = useState(null);
   const [rejectReason, setRejectReason] = useState('');
+  const [detailRegId, setDetailRegId] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -788,6 +971,7 @@ function PendingRegistrationsPanel({ readOnly = false }) {
     setActioning(id);
     try {
       await approvePendingRegistration(id);
+      setDetailRegId(null);
       toast.success('Registration approved — account is now active.');
       load();
     } catch (err) {
@@ -802,6 +986,7 @@ function PendingRegistrationsPanel({ readOnly = false }) {
     try {
       await rejectPendingRegistration(rejectModalId, rejectReason);
       setRejectModalId(null);
+      setDetailRegId(null);
       setRejectReason('');
       toast.success('Registration rejected successfully.');
       load();
@@ -878,35 +1063,55 @@ function PendingRegistrationsPanel({ readOnly = false }) {
                   )}
                 </div>
 
-                {reg.status === 'PENDING' && !readOnly && (
-                  <div className="flex gap-2 shrink-0">
-                    <button
-                      onClick={() => handleApprove(reg.id)}
-                      disabled={actioning === reg.id}
-                      className="flex items-center gap-1.5 bg-green-700 text-white rounded-lg px-3 py-1.5 text-sm font-semibold hover:bg-green-800 disabled:opacity-50"
-                    >
-                      <UserCheck className="h-3.5 w-3.5" />
-                      Approve
-                    </button>
-                    <button
-                      onClick={() => { setRejectModalId(reg.id); setRejectReason(''); }}
-                      disabled={actioning === reg.id}
-                      className="flex items-center gap-1.5 border border-red-300 text-red-600 rounded-lg px-3 py-1.5 text-sm font-semibold hover:bg-red-50 disabled:opacity-50"
-                    >
-                      <UserX className="h-3.5 w-3.5" />
-                      Reject
-                    </button>
-                  </div>
-                )}
-                {reg.status === 'PENDING' && readOnly && (
-                  <span className="shrink-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800">
-                    Awaiting admin review
-                  </span>
-                )}
+                <div className="flex gap-2 shrink-0">
+                  <button
+                    onClick={() => setDetailRegId(reg.id)}
+                    className="flex items-center gap-1.5 border border-gray-300 text-gray-700 rounded-lg px-3 py-1.5 text-sm font-semibold hover:bg-gray-50"
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                    Review
+                  </button>
+                  {reg.status === 'PENDING' && !readOnly && (
+                    <>
+                      <button
+                        onClick={() => handleApprove(reg.id)}
+                        disabled={actioning === reg.id}
+                        className="flex items-center gap-1.5 bg-green-700 text-white rounded-lg px-3 py-1.5 text-sm font-semibold hover:bg-green-800 disabled:opacity-50"
+                      >
+                        <UserCheck className="h-3.5 w-3.5" />
+                        Approve
+                      </button>
+                      <button
+                        onClick={() => { setRejectModalId(reg.id); setRejectReason(''); }}
+                        disabled={actioning === reg.id}
+                        className="flex items-center gap-1.5 border border-red-300 text-red-600 rounded-lg px-3 py-1.5 text-sm font-semibold hover:bg-red-50 disabled:opacity-50"
+                      >
+                        <UserX className="h-3.5 w-3.5" />
+                        Reject
+                      </button>
+                    </>
+                  )}
+                  {reg.status === 'PENDING' && readOnly && (
+                    <span className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800">
+                      Awaiting admin review
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
           ))}
         </div>
+      )}
+
+      {detailRegId && (
+        <RegistrationDetailModal
+          registrationId={detailRegId}
+          onClose={() => setDetailRegId(null)}
+          onApprove={handleApprove}
+          onReject={(id) => { setRejectModalId(id); setRejectReason(''); }}
+          readOnly={readOnly}
+          actioning={Boolean(actioning)}
+        />
       )}
 
       {/* Reject modal */}
