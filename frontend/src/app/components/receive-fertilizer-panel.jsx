@@ -293,7 +293,7 @@ export function ReceiveFertilizerPanel({ inboundTransfers, onRefresh, highlightT
               <PanelOutlineButton
                 icon={issueBusy ? Loader2 : AlertCircle}
                 type="submit"
-                disabled={issueBusy}
+                disabled={issueBusy || !issueForm.summary.trim() || !issueForm.description.trim()}
                 className={issueBusy ? '[&_svg]:animate-spin' : ''}
               >
                 {issueBusy ? 'Submitting issue' : 'Submit issue'}

@@ -572,7 +572,18 @@ export function RegulatorCompliancePanel({ initialDraft = null, onDraftConsumed 
             </div>
             <div className="flex gap-2 border-t border-gray-200 px-6 py-4">
               <button type="button" onClick={closeCreateModal} className="flex-1 rounded-lg border border-gray-300 py-2 text-sm text-gray-700 hover:bg-gray-50">Cancel</button>
-              <button type="button" disabled={submitting} onClick={submitFlag} className="flex-1 rounded-lg bg-green-700 py-2 text-sm font-semibold text-white hover:bg-green-800 disabled:opacity-60">
+              <button
+                type="button"
+                disabled={
+                  submitting ||
+                  !form.target_id ||
+                  Number(form.target_id) <= 0 ||
+                  !form.reason.trim() ||
+                  !form.description.trim()
+                }
+                onClick={submitFlag}
+                className="flex-1 rounded-lg bg-green-700 py-2 text-sm font-semibold text-white hover:bg-green-800 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
                 {submitting ? 'Raising…' : 'Raise Flag'}
               </button>
             </div>

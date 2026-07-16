@@ -2,16 +2,17 @@ import { useMemo, useState } from 'react';
 import { Download, MapPin, Package, Pencil, Phone, Plus, Search, User, Warehouse, X } from 'lucide-react';
 import { updateWarehouse } from '../api/client';
 import { getUserMessage } from '../utils/user-messages';
+import {
+  ensureTanzaniaPhonePrefix,
+  formatTanzaniaPhone,
+  isValidTanzaniaPhone,
+  sanitizeTanzaniaPhoneInput,
+  TZ_PHONE_PLACEHOLDER,
+  TZ_PHONE_PREFIX,
+} from '../utils/form-validation';
 import { PanelOutlineButton, PanelPrimaryButton } from './ui/dashboard-ui';
 import { StockInModal } from './stock-in-modal';
 import { REGION_LIST, TANZANIA_REGIONS } from '../data/tanzania-locations';
-
-const PHONE_PREFIX = '+255 ';
-
-function ensurePrefix(val) {
-  if (!val) return PHONE_PREFIX;
-  return val.startsWith('+255') ? val : PHONE_PREFIX + val.replace(/^0/, '');
-}
 
 function buildDetailsForm(warehouse) {
   return {
@@ -19,7 +20,7 @@ function buildDetailsForm(warehouse) {
     region: warehouse?.region || '',
     district: warehouse?.district || '',
     contact_name: warehouse?.contact_name || warehouse?.contactName || '',
-    contact_phone: ensurePrefix(warehouse?.contact_phone || warehouse?.contactPhone || ''),
+    contact_phone: ensureTanzaniaPhonePrefix(warehouse?.contact_phone || warehouse?.contactPhone || ''),
     notes: warehouse?.notes || '',
   };
 }
@@ -291,8 +292,12 @@ export function WarehouseModal({
   const handleSaveDetails = async (event) => {
     event?.preventDefault?.();
     const { address, region, district, contact_name, contact_phone } = detailsForm;
-    if (!address.trim() || !region || !district || !contact_name.trim() || contact_phone.trim() === PHONE_PREFIX.trim()) {
+    if (!address.trim() || !region || !district || !contact_name.trim()) {
       setDetailsError('Please fill in all required fields.');
+      return;
+    }
+    if (!isValidTanzaniaPhone(contact_phone)) {
+      setDetailsError('Enter a valid Tanzania mobile number (+255 6XX/7XX…).');
       return;
     }
     setIsSavingDetails(true);
@@ -303,7 +308,7 @@ export function WarehouseModal({
         region: detailsForm.region,
         district: detailsForm.district,
         contact_name: detailsForm.contact_name.trim(),
-        contact_phone: detailsForm.contact_phone.trim(),
+        contact_phone: formatTanzaniaPhone(detailsForm.contact_phone),
         notes: detailsForm.notes.trim(),
       });
       closeDetailsForm();
@@ -562,15 +567,26 @@ export function WarehouseModal({
                     type="tel"
                     value={detailsForm.contact_phone}
                     onChange={(e) => {
-                      const val = e.target.value;
-                      if (!val.startsWith('+255')) return;
-                      setDetailsForm({ ...detailsForm, contact_phone: val });
+                      setDetailsForm({
+                        ...detailsForm,
+                        contact_phone: sanitizeTanzaniaPhoneInput(e.target.value),
+                      });
                     }}
-                    onFocus={(e) => { if (!detailsForm.contact_phone) setDetailsForm({ ...detailsForm, contact_phone: PHONE_PREFIX }); e.target.setSelectionRange(e.target.value.length, e.target.value.length); }}
+                    onFocus={(e) => {
+                      if (!detailsForm.contact_phone) {
+                        setDetailsForm({ ...detailsForm, contact_phone: TZ_PHONE_PREFIX });
+                      }
+                      e.target.setSelectionRange(e.target.value.length, e.target.value.length);
+                    }}
                     disabled={isSavingDetails}
-                    placeholder="+255 7XX XXX XXX"
+                    placeholder={TZ_PHONE_PLACEHOLDER}
                     className={inputClass}
+                    required
                   />
+                  {detailsForm.contact_phone.trim() !== TZ_PHONE_PREFIX.trim() &&
+                    !isValidTanzaniaPhone(detailsForm.contact_phone) && (
+                    <p className="mt-1 text-xs text-red-500">Enter a valid Tanzania mobile (+255 6XX/7XX…).</p>
+                  )}
                 </div>
               </div>
               <div>

@@ -21,6 +21,20 @@ import { useNotifications } from '../hooks/use-notifications';
 import { REGION_LIST, TANZANIA_REGIONS } from '../data/tanzania-locations';
 import { buildDashboardPath, resolveDashboardTab } from '../utils/dashboard-routing';
 import { getUserMessage } from '../utils/user-messages';
+import {
+  emailError,
+  ensureTanzaniaPhonePrefix,
+  formatTanzaniaPhone,
+  isStrongPassword,
+  isValidEmail,
+  isValidTanzaniaPhone,
+  passwordConfirmError,
+  passwordError,
+  sanitizeTanzaniaPhoneInput,
+  TZ_PHONE_PLACEHOLDER,
+  TZ_PHONE_PREFIX,
+  usernameError,
+} from '../utils/form-validation';
 import { HISTORY_PAGE_SIZE } from '../utils/list-limits';
 import { usePaginatedList } from '../hooks/use-paginated-list';
 import { PaginationBar } from './ui/pagination-bar';
@@ -28,6 +42,7 @@ import { ConfirmDialog } from './ui/confirm-dialog';
 import { IntegrityPanel } from './integrity-panel';
 import { getRoleLabel, getRoleColor } from '../utils/role-labels';
 import { ReportsPanel } from './reports-panel';
+import { PasswordRequirements } from './password-requirements';
 import {
   AdminCompliancePanel,
   ComplianceStatusPill,
@@ -109,7 +124,7 @@ const ROLE_TABS = [
   { key: 'regulator', label: 'Regulators', icon: Shield, color: 'text-rose-600' },
 ];
 
-const PHONE_PREFIX = '+255 ';
+const PHONE_PREFIX = TZ_PHONE_PREFIX;
 
 function emptyFormForRole(role) {
   const base = { username: '', password: '', first_name: '', last_name: '', email: '' };
@@ -208,7 +223,7 @@ function UserFormModal({ role, editingUser, suppliers, warehouses, onClose, onSa
         supplier_name: s?.name || '',
         supplier_region: s?.region || '',
         organization: p.organization || b?.name || wm?.supplier?.name || '',
-        contact_phone: phoneRaw && !phoneRaw.startsWith('+255') ? PHONE_PREFIX + phoneRaw.replace(/^0/, '') : (phoneRaw || PHONE_PREFIX),
+        contact_phone: phoneRaw ? ensureTanzaniaPhonePrefix(phoneRaw) : PHONE_PREFIX,
         supplier_id: wm?.supplier?.id ? String(wm.supplier.id) : '',
         warehouse_id: wm?.assigned_warehouse_id ? String(wm.assigned_warehouse_id) : '',
         branch_name: b?.name || p.organization || '',
@@ -223,32 +238,44 @@ function UserFormModal({ role, editingUser, suppliers, warehouses, onClose, onSa
   const [error, setError] = useState('');
 
   const set = (field) => (e) => setForm((p) => ({ ...p, [field]: e.target.value }));
+  const setPhone = (e) => setForm((p) => ({ ...p, contact_phone: sanitizeTanzaniaPhoneInput(e.target.value) }));
 
-  const commonRequired = form.first_name.trim() && form.last_name.trim() && form.email.trim();
+  const emailOk = isValidEmail(form.email);
+  const phoneOk = isValidTanzaniaPhone(form.contact_phone);
+  const passwordOk = isEditing
+    ? (!form.password || isStrongPassword(form.password))
+    : isStrongPassword(form.password);
+  const usernameOk = isEditing || !usernameError(form.username);
+
+  const commonRequired = form.first_name.trim() && form.last_name.trim() && emailOk;
 
   const roleFieldsOk = (() => {
     if (role === 'supplier') {
-      return form.supplier_name.trim() && form.contact_phone.trim() && form.supplier_region;
+      return form.supplier_name.trim() && phoneOk && form.supplier_region;
     }
     if (role === 'retailer' || role === 'cooperative' || role === 'regulator') {
-      return form.branch_name.trim() && form.contact_phone.trim() && form.region && form.district;
+      return form.branch_name.trim() && phoneOk && form.region && form.district;
     }
     if (role === 'warehouse_manager') {
-      return !!form.supplier_id && form.contact_phone.trim() && form.region;
+      return !!form.supplier_id && phoneOk && form.region;
     }
     return true;
   })();
 
   const canSubmit = isEditing
-    ? !!(commonRequired && roleFieldsOk)
-    : !!(form.username.trim().length >= 3 && form.password.length >= 1 && commonRequired && roleFieldsOk);
+    ? !!(commonRequired && roleFieldsOk && passwordOk)
+    : !!(usernameOk && passwordOk && commonRequired && roleFieldsOk);
 
   const handleSubmit = async () => {
     setError('');
+    if (!canSubmit) {
+      setError('Please complete all required fields correctly before saving.');
+      return;
+    }
     setLoading(true);
     try {
       if (isEditing) {
-        const payload = { ...form };
+        const payload = { ...form, contact_phone: formatTanzaniaPhone(form.contact_phone) };
         delete payload.username;
         if (!payload.password) delete payload.password;
         if (payload.supplier_id) payload.supplier_id = Number(payload.supplier_id);
@@ -257,7 +284,11 @@ function UserFormModal({ role, editingUser, suppliers, warehouses, onClose, onSa
         onSaved(updated, true);
         toast.success(`User "${form.username}" updated successfully.`);
       } else {
-        const payload = { ...form, role };
+        const payload = {
+          ...form,
+          role,
+          contact_phone: formatTanzaniaPhone(form.contact_phone),
+        };
         if (payload.supplier_id) payload.supplier_id = Number(payload.supplier_id);
         if (!payload.warehouse_id) delete payload.warehouse_id;
         const created = await createUser(payload);
@@ -296,8 +327,13 @@ function UserFormModal({ role, editingUser, suppliers, warehouses, onClose, onSa
               type="password"
               value={form.password}
               onChange={set('password')}
-              placeholder={isEditing ? 'Leave blank to keep current' : 'Set password'}
+              placeholder={isEditing ? 'Leave blank to keep current' : 'Strong password'}
+              autoComplete="new-password"
             />
+            {(form.password || !isEditing) && <PasswordRequirements password={form.password} />}
+            {form.password && passwordError(form.password) && (
+              <p className="text-xs text-red-500">{passwordError(form.password)}</p>
+            )}
           </div>
 
           {/* Personal */}
@@ -308,6 +344,9 @@ function UserFormModal({ role, editingUser, suppliers, warehouses, onClose, onSa
               <FormInput label="Last name" required value={form.last_name} onChange={set('last_name')} placeholder="Last" />
             </div>
             <FormInput label="Email" required type="email" value={form.email} onChange={set('email')} placeholder="email@example.com" />
+            {form.email.trim() && emailError(form.email) && (
+              <p className="text-xs text-red-500">{emailError(form.email)}</p>
+            )}
           </div>
 
           {/* Role-specific */}
@@ -315,7 +354,10 @@ function UserFormModal({ role, editingUser, suppliers, warehouses, onClose, onSa
             <div className="space-y-3">
               <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Supplier Details</p>
               <FormInput label="Company name" required value={form.supplier_name} onChange={set('supplier_name')} placeholder="Organisation name" />
-              <FormInput label="Contact phone" required value={form.contact_phone} onChange={(e) => { if (e.target.value.startsWith('+255')) set('contact_phone')(e); }} placeholder="+255 7XX XXX XXX" />
+              <FormInput label="Contact phone" required value={form.contact_phone} onChange={setPhone} placeholder={TZ_PHONE_PLACEHOLDER} type="tel" />
+              {form.contact_phone.trim() !== PHONE_PREFIX.trim() && !phoneOk && (
+                <p className="text-xs text-red-500">Enter a valid Tanzania mobile (+255 6XX/7XX…).</p>
+              )}
               <FormSelect label="Region" required value={form.supplier_region} onChange={set('supplier_region')}>
                 <option value="">Select region…</option>
                 {REGION_LIST.map((r) => <option key={r} value={r}>{r}</option>)}
@@ -333,7 +375,10 @@ function UserFormModal({ role, editingUser, suppliers, warehouses, onClose, onSa
                 onChange={set('branch_name')}
                 placeholder={role === 'cooperative' ? 'e.g. Mbinga Central AMCOS' : 'e.g. Ruvuma Agri Shop'}
               />
-              <FormInput label="Contact phone" required value={form.contact_phone} onChange={(e) => { if (e.target.value.startsWith('+255')) set('contact_phone')(e); }} placeholder="+255 7XX XXX XXX" />
+              <FormInput label="Contact phone" required value={form.contact_phone} onChange={setPhone} placeholder={TZ_PHONE_PLACEHOLDER} type="tel" />
+              {form.contact_phone.trim() !== PHONE_PREFIX.trim() && !phoneOk && (
+                <p className="text-xs text-red-500">Enter a valid Tanzania mobile (+255 6XX/7XX…).</p>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <FormSelect label="Region" required value={form.region} onChange={(e) => setForm((p) => ({ ...p, region: e.target.value, district: '' }))}>
                   <option value="">Select region…</option>
@@ -369,9 +414,13 @@ function UserFormModal({ role, editingUser, suppliers, warehouses, onClose, onSa
                 label="Contact phone"
                 required
                 value={form.contact_phone}
-                onChange={(e) => { if (e.target.value.startsWith('+255')) set('contact_phone')(e); }}
-                placeholder="+255 7XX XXX XXX"
+                onChange={setPhone}
+                placeholder={TZ_PHONE_PLACEHOLDER}
+                type="tel"
               />
+              {form.contact_phone.trim() !== PHONE_PREFIX.trim() && !phoneOk && (
+                <p className="text-xs text-red-500">Enter a valid Tanzania mobile (+255 6XX/7XX…).</p>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <FormSelect label="Region" required value={form.region} onChange={(e) => setForm((p) => ({ ...p, region: e.target.value, district: '' }))}>
                   <option value="">Select region…</option>
@@ -1230,18 +1279,13 @@ function PendingRegistrationsPanel({ readOnly = false }) {
 
 // ─── Admin Profile Panel ─────────────────────────────────────────────────────
 
-function ensurePhonePrefix(val) {
-  const v = val || '';
-  return v.startsWith(PHONE_PREFIX) ? v : PHONE_PREFIX + v.replace(/^\+255\s?/, '');
-}
-
 function AdminProfilePanel({ userProfile }) {
   const [form, setForm] = useState({
     first_name: userProfile?.firstName || '',
     last_name: userProfile?.lastName || '',
     email: userProfile?.email || '',
     username: userProfile?.username || '',
-    contact_phone: userProfile?.contactPhone ? ensurePhonePrefix(userProfile.contactPhone) : PHONE_PREFIX,
+    contact_phone: userProfile?.contactPhone ? ensureTanzaniaPhonePrefix(userProfile.contactPhone) : PHONE_PREFIX,
     organization: userProfile?.organization || 'CoffeeChain Enterprises',
   });
   const [pwForm, setPwForm] = useState({ current_password: '', new_password: '', confirm_password: '' });
@@ -1257,7 +1301,7 @@ function AdminProfilePanel({ userProfile }) {
         last_name: data.user?.last_name || '',
         email: data.user?.email || '',
         username: data.user?.username || '',
-        contact_phone: data.contact_phone ? ensurePhonePrefix(data.contact_phone) : PHONE_PREFIX,
+        contact_phone: data.contact_phone ? ensureTanzaniaPhonePrefix(data.contact_phone) : PHONE_PREFIX,
         organization: data.organization || 'CoffeeChain Enterprises',
       });
     }).catch(() => {});
@@ -1270,22 +1314,29 @@ function AdminProfilePanel({ userProfile }) {
   const setPw = (k) => (e) => setPwForm((f) => ({ ...f, [k]: e.target.value }));
 
   const handlePhoneChange = (e) => {
-    const val = e.target.value;
-    setForm((f) => ({ ...f, contact_phone: val.startsWith(PHONE_PREFIX) ? val : PHONE_PREFIX }));
+    setForm((f) => ({ ...f, contact_phone: sanitizeTanzaniaPhoneInput(e.target.value) }));
   };
+
+  const profileValid =
+    !usernameError(form.username) &&
+    form.first_name.trim() &&
+    form.last_name.trim() &&
+    isValidEmail(form.email) &&
+    isValidTanzaniaPhone(form.contact_phone) &&
+    form.organization.trim();
 
   const handleSaveInfo = async (e) => {
     e.preventDefault();
-    if (!form.username.trim() || form.username.trim().length < 3) {
-      toast.error('Username must be at least 3 characters.');
+    const uErr = usernameError(form.username);
+    if (uErr) { toast.error(uErr); return; }
+    if (!form.first_name.trim() || !form.last_name.trim()) {
+      toast.error('First name and last name are required.');
       return;
     }
-    if (!form.first_name.trim() || !form.last_name.trim() || !form.email.trim()) {
-      toast.error('First name, last name, and email are required.');
-      return;
-    }
-    if (!form.contact_phone.trim() || form.contact_phone.trim() === PHONE_PREFIX.trim()) {
-      toast.error('Phone number is required.');
+    const eErr = emailError(form.email);
+    if (eErr) { toast.error(eErr); return; }
+    if (!isValidTanzaniaPhone(form.contact_phone)) {
+      toast.error('Enter a valid Tanzania mobile number (+255 6XX/7XX…).');
       return;
     }
     if (!form.organization.trim()) {
@@ -1301,7 +1352,7 @@ function AdminProfilePanel({ userProfile }) {
         first_name: form.first_name.trim(),
         last_name: form.last_name.trim(),
         email: form.email.trim(),
-        contact_phone: form.contact_phone.trim(),
+        contact_phone: formatTanzaniaPhone(form.contact_phone),
         organization: form.organization.trim(),
       });
       // Sync form from server response so values are always fresh
@@ -1311,7 +1362,7 @@ function AdminProfilePanel({ userProfile }) {
           last_name: result.user.last_name || '',
           email: result.user.email || '',
           username: result.user.username || '',
-          contact_phone: result.contact_phone ? ensurePhonePrefix(result.contact_phone) : PHONE_PREFIX,
+          contact_phone: result.contact_phone ? ensureTanzaniaPhonePrefix(result.contact_phone) : PHONE_PREFIX,
           organization: result.organization || 'CoffeeChain Enterprises',
         });
       }
@@ -1327,8 +1378,10 @@ function AdminProfilePanel({ userProfile }) {
     e.preventDefault();
     setPwError('');
     if (!pwForm.current_password) { setPwError('Enter your current password.'); return; }
-    if (pwForm.new_password.length < 6) { setPwError('New password must be at least 6 characters.'); return; }
-    if (pwForm.new_password !== pwForm.confirm_password) { setPwError('Passwords do not match.'); return; }
+    const pErr = passwordError(pwForm.new_password);
+    if (pErr) { setPwError(pErr); return; }
+    const cErr = passwordConfirmError(pwForm.new_password, pwForm.confirm_password);
+    if (cErr) { setPwError(cErr); return; }
     setSavingPw(true);
     await new Promise((r) => setTimeout(r, 400));
     try {
@@ -1378,16 +1431,19 @@ function AdminProfilePanel({ userProfile }) {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={labelCls}>First Name <span className="text-red-500">*</span></label>
-                <input className={inputCls} value={form.first_name} onChange={setF('first_name')} placeholder="First name" />
+                <input className={inputCls} value={form.first_name} onChange={setF('first_name')} placeholder="First name" required />
               </div>
               <div>
                 <label className={labelCls}>Last Name <span className="text-red-500">*</span></label>
-                <input className={inputCls} value={form.last_name} onChange={setF('last_name')} placeholder="Last name" />
+                <input className={inputCls} value={form.last_name} onChange={setF('last_name')} placeholder="Last name" required />
               </div>
             </div>
             <div>
               <label className={labelCls}>Email Address <span className="text-red-500">*</span></label>
-              <input className={inputCls} type="email" value={form.email} onChange={setF('email')} placeholder="admin@example.com" />
+              <input className={inputCls} type="email" value={form.email} onChange={setF('email')} placeholder="admin@example.com" required />
+              {form.email.trim() && emailError(form.email) && (
+                <p className="text-xs text-red-500 mt-1">{emailError(form.email)}</p>
+              )}
             </div>
             <div>
               <label className={labelCls}>Phone Number <span className="text-red-500">*</span></label>
@@ -1396,21 +1452,25 @@ function AdminProfilePanel({ userProfile }) {
                 type="tel"
                 value={form.contact_phone}
                 onChange={handlePhoneChange}
-                placeholder="+255 7XX XXX XXX"
+                placeholder={TZ_PHONE_PLACEHOLDER}
+                required
               />
+              {form.contact_phone.trim() !== PHONE_PREFIX.trim() && !isValidTanzaniaPhone(form.contact_phone) && (
+                <p className="text-xs text-red-500 mt-1">Enter a valid Tanzania mobile (+255 6XX/7XX…).</p>
+              )}
             </div>
             <div>
               <label className={labelCls}>Username <span className="text-red-500">*</span></label>
-              <input className={inputCls} value={form.username} onChange={setF('username')} placeholder="username" />
+              <input className={inputCls} value={form.username} onChange={setF('username')} placeholder="username" required />
             </div>
             <div>
               <label className={labelCls}>Organization <span className="text-red-500">*</span></label>
-              <input className={inputCls} value={form.organization} onChange={setF('organization')} placeholder="e.g. CoffeeChain Enterprises" />
+              <input className={inputCls} value={form.organization} onChange={setF('organization')} placeholder="e.g. CoffeeChain Enterprises" required />
             </div>
             <div className="pt-1">
               <button
                 type="submit"
-                disabled={saving}
+                disabled={saving || !profileValid}
                 className="flex items-center gap-2 px-5 py-2.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 disabled:opacity-60 transition-colors"
               >
                 {saving && (
@@ -1434,21 +1494,27 @@ function AdminProfilePanel({ userProfile }) {
           <form onSubmit={handleChangePassword} className="space-y-4">
             <div>
               <label className={labelCls}>Current Password <span className="text-red-500">*</span></label>
-              <input className={inputCls} type="password" value={pwForm.current_password} onChange={setPw('current_password')} placeholder="Enter current password" />
+              <input className={inputCls} type="password" value={pwForm.current_password} onChange={setPw('current_password')} placeholder="Enter current password" required autoComplete="current-password" />
             </div>
             <div>
               <label className={labelCls}>New Password <span className="text-red-500">*</span></label>
-              <input className={inputCls} type="password" value={pwForm.new_password} onChange={setPw('new_password')} placeholder="Min. 6 characters" />
+              <input className={inputCls} type="password" value={pwForm.new_password} onChange={setPw('new_password')} placeholder="Strong password" required autoComplete="new-password" />
+              <PasswordRequirements password={pwForm.new_password} />
             </div>
             <div>
               <label className={labelCls}>Confirm New Password <span className="text-red-500">*</span></label>
-              <input className={inputCls} type="password" value={pwForm.confirm_password} onChange={setPw('confirm_password')} placeholder="Repeat new password" />
+              <input className={inputCls} type="password" value={pwForm.confirm_password} onChange={setPw('confirm_password')} placeholder="Repeat new password" required autoComplete="new-password" />
             </div>
             {pwError && <p className="text-sm text-red-600">{pwError}</p>}
             <div className="pt-1">
               <button
                 type="submit"
-                disabled={savingPw}
+                disabled={
+                  savingPw ||
+                  !pwForm.current_password ||
+                  !isStrongPassword(pwForm.new_password) ||
+                  pwForm.new_password !== pwForm.confirm_password
+                }
                 className="flex items-center gap-2 px-5 py-2.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 disabled:opacity-60 transition-colors"
               >
                 {savingPw && (

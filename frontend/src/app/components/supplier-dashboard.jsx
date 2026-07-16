@@ -16,6 +16,14 @@ import { buildDashboardPath, resolveDashboardTab } from '../utils/dashboard-rout
 import { REGION_LIST, TANZANIA_REGIONS } from '../data/tanzania-locations';
 import { buildMonthlyTrend } from '../utils/chart-trends';
 import { getUserMessage } from '../utils/user-messages';
+import {
+  formatTanzaniaPhone,
+  isValidTanzaniaPhone,
+  sanitizeTanzaniaPhoneInput,
+  tanzaniaPhoneError,
+  TZ_PHONE_PLACEHOLDER,
+  TZ_PHONE_PREFIX,
+} from '../utils/form-validation';
 import { sortByDateDesc, HISTORY_PAGE_SIZE } from '../utils/list-limits';
 import { exportAnalyticsPdf, exportAnalyticsCsv } from '../utils/analytics-export';
 import { AnalyticsExportBar, filterByDateRange } from './ui/analytics-export-bar';
@@ -88,7 +96,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
   const [showWarehouseForm, setShowWarehouseForm] = useState(false);
   const [warehouseFormError, setWarehouseFormError] = useState('');
   const [selectedWarehouse, setSelectedWarehouse] = useState(null);
-  const [newWarehouse, setNewWarehouse] = useState({ name: '', section: '', capacity: '', contact_name: '', contact_phone: '+255 ', address: '', region: '', district: '' });
+  const [newWarehouse, setNewWarehouse] = useState({ name: '', section: '', capacity: '', contact_name: '', contact_phone: TZ_PHONE_PREFIX, address: '', region: '', district: '' });
   const [incomingOrders, setIncomingOrders] = useState([]);
   const [statusMessage, setStatusMessage] = useState('');
   const [confirmDialog, setConfirmDialog] = useState(null);
@@ -400,7 +408,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
   const dispatchedPagination = usePaginatedList(filteredDispatchedTransfers, HISTORY_PAGE_SIZE);
 
   const openWarehouseForm = () => {
-    setNewWarehouse({ name: '', section: '', capacity: '' });
+    setNewWarehouse({ name: '', section: '', capacity: '', contact_name: '', contact_phone: TZ_PHONE_PREFIX, address: '', region: '', district: '' });
     setWarehouseFormError('');
     setShowWarehouseForm(true);
   };
@@ -408,7 +416,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
   const closeWarehouseForm = () => {
     setShowWarehouseForm(false);
     setWarehouseFormError('');
-    setNewWarehouse({ name: '', section: '', capacity: '', contact_name: '', contact_phone: '+255 ', address: '', region: '', district: '' });
+    setNewWarehouse({ name: '', section: '', capacity: '', contact_name: '', contact_phone: TZ_PHONE_PREFIX, address: '', region: '', district: '' });
   };
 
   const handleRegisterWarehouse = async (event) => {
@@ -417,16 +425,28 @@ export function SupplierDashboard({ userProfile, onLogout }) {
       setWarehouseFormError('Name, section, and capacity are required.');
       return;
     }
+    const capacityNum = Number(newWarehouse.capacity);
+    if (!capacityNum || Number.isNaN(capacityNum) || capacityNum <= 0) {
+      setWarehouseFormError('Capacity must be greater than zero.');
+      return;
+    }
+    const phoneErr = tanzaniaPhoneError(newWarehouse.contact_phone, { required: false });
+    if (phoneErr) {
+      setWarehouseFormError(phoneErr);
+      return;
+    }
     setIsSaving(true);
     setWarehouseFormError('');
     try {
+      const phoneDigits = String(newWarehouse.contact_phone || '').replace(/\D/g, '');
+      const hasPhone = phoneDigits.length > 3;
       await createWarehouse({
         name: newWarehouse.name.trim(),
         section: newWarehouse.section.trim(),
-        capacity_bags: Number(newWarehouse.capacity),
+        capacity_bags: capacityNum,
         current_bags: 0,
         contact_name: newWarehouse.contact_name.trim(),
-        contact_phone: newWarehouse.contact_phone.trim(),
+        contact_phone: hasPhone ? formatTanzaniaPhone(newWarehouse.contact_phone) : '',
         address: newWarehouse.address.trim(),
         region: newWarehouse.region,
         district: newWarehouse.district,
@@ -1536,13 +1556,20 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                   <label className="mb-1 block text-xs font-semibold text-gray-600">Contact phone <span className="text-gray-400 font-normal">(optional)</span></label>
                   <input
                     type="tel"
-                    placeholder="+255 7XX XXX XXX"
+                    placeholder={TZ_PHONE_PLACEHOLDER}
                     value={newWarehouse.contact_phone}
-                    onChange={(e) => { if (e.target.value.startsWith('+255')) setNewWarehouse({ ...newWarehouse, contact_phone: e.target.value }); }}
-                    onFocus={(e) => { if (!newWarehouse.contact_phone) setNewWarehouse({ ...newWarehouse, contact_phone: '+255 ' }); e.target.setSelectionRange(e.target.value.length, e.target.value.length); }}
+                    onChange={(e) => setNewWarehouse({ ...newWarehouse, contact_phone: sanitizeTanzaniaPhoneInput(e.target.value) })}
+                    onFocus={(e) => {
+                      if (!newWarehouse.contact_phone) setNewWarehouse({ ...newWarehouse, contact_phone: TZ_PHONE_PREFIX });
+                      e.target.setSelectionRange(e.target.value.length, e.target.value.length);
+                    }}
                     disabled={isSaving}
                     className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-transparent focus:ring-2 focus:ring-green-500 disabled:bg-gray-100"
                   />
+                  {newWarehouse.contact_phone.trim() !== TZ_PHONE_PREFIX.trim() &&
+                    !isValidTanzaniaPhone(newWarehouse.contact_phone) && (
+                    <p className="mt-1 text-xs text-red-500">Enter a valid Tanzania mobile (+255 6XX/7XX…).</p>
+                  )}
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-semibold text-gray-600">Region <span className="text-gray-400 font-normal">(optional)</span></label>

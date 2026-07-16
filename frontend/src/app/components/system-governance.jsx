@@ -3,16 +3,27 @@ import { Users, Plus, Edit, Trash2, Shield, UserCog, Building2, MapPin } from 'l
 import { useLanguage } from './language-context';
 import { TrustSeal } from './trust-seal';
 import { ConfirmDialog } from './ui/confirm-dialog';
+import {
+  emailError,
+  formatTanzaniaPhone,
+  isValidEmail,
+  isValidTanzaniaPhone,
+  sanitizeTanzaniaPhoneInput,
+  TZ_PHONE_PLACEHOLDER,
+  TZ_PHONE_PREFIX,
+  usernameError,
+} from '../utils/form-validation';
 
 export function SystemGovernance() {
   const { t, language } = useLanguage();
   const [showAddForm, setShowAddForm] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState(null);
+  const [formError, setFormError] = useState('');
   const [formData, setFormData] = useState({
     username: '',
     fullName: '',
     email: '',
-    phone: '',
+    phone: TZ_PHONE_PREFIX,
     role: '',
     region: '',
     office: '',
@@ -104,15 +115,35 @@ export function SystemGovernance() {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    
+    setFormError('');
+
+    const uErr = usernameError(formData.username);
+    if (uErr) { setFormError(uErr); return; }
+    if (!formData.fullName.trim()) {
+      setFormError(language === 'en' ? 'Full name is required.' : 'Jina kamili linahitajika.');
+      return;
+    }
+    const eErr = emailError(formData.email);
+    if (eErr) { setFormError(eErr); return; }
+    if (!isValidTanzaniaPhone(formData.phone)) {
+      setFormError(language === 'en'
+        ? 'Enter a valid Tanzania mobile (+255 6XX/7XX…).'
+        : 'Weka namba sahihi ya Tanzania (+255 6XX/7XX…).');
+      return;
+    }
+    if (!formData.role || !formData.region || !formData.office.trim()) {
+      setFormError(language === 'en' ? 'Role, region, and office are required.' : 'Jukumu, mkoa na ofisi zinahitajika.');
+      return;
+    }
+
     const newUser = {
       id: `USR-${String(users.length + 1).padStart(3, '0')}`,
-      username: formData.username,
-      fullName: formData.fullName,
-      email: formData.email,
-      phone: formData.phone,
+      username: formData.username.trim(),
+      fullName: formData.fullName.trim(),
+      email: formData.email.trim(),
+      phone: formatTanzaniaPhone(formData.phone),
       role: formData.role,
-      office: formData.office,
+      office: formData.office.trim(),
       region: formData.region,
       isAdmin: false,
       status: 'active',
@@ -126,7 +157,7 @@ export function SystemGovernance() {
       username: '',
       fullName: '',
       email: '',
-      phone: '',
+      phone: TZ_PHONE_PREFIX,
       role: '',
       region: '',
       office: '',
@@ -262,6 +293,11 @@ export function SystemGovernance() {
           </div>
           
           <form onSubmit={handleSubmit} className="p-6 space-y-4">
+            {formError && (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {formError}
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -303,6 +339,9 @@ export function SystemGovernance() {
                   placeholder="email@example.com"
                   required
                 />
+                {formData.email.trim() && !isValidEmail(formData.email) && (
+                  <p className="mt-1 text-xs text-red-500">Enter a valid email address.</p>
+                )}
               </div>
 
               <div>
@@ -312,11 +351,14 @@ export function SystemGovernance() {
                 <input
                   type="tel"
                   value={formData.phone}
-                  onChange={(e) => setFormData({...formData, phone: e.target.value})}
+                  onChange={(e) => setFormData({...formData, phone: sanitizeTanzaniaPhoneInput(e.target.value)})}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                  placeholder="+255 7XX XXX XXX"
+                  placeholder={TZ_PHONE_PLACEHOLDER}
                   required
                 />
+                {formData.phone.trim() !== TZ_PHONE_PREFIX.trim() && !isValidTanzaniaPhone(formData.phone) && (
+                  <p className="mt-1 text-xs text-red-500">Enter a valid Tanzania mobile (+255 6XX/7XX…).</p>
+                )}
               </div>
 
               <div>
@@ -382,7 +424,16 @@ export function SystemGovernance() {
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                disabled={
+                  !formData.username.trim() ||
+                  !formData.fullName.trim() ||
+                  !isValidEmail(formData.email) ||
+                  !isValidTanzaniaPhone(formData.phone) ||
+                  !formData.role ||
+                  !formData.region ||
+                  !formData.office.trim()
+                }
+                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {language === 'en' ? 'Create User' : 'Tengeneza Mtumiaji'}
               </button>

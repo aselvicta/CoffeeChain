@@ -6,7 +6,22 @@ import {
 } from 'lucide-react';
 import { registerPublic } from '../api/client';
 import { REGION_LIST, TANZANIA_REGIONS } from '../data/tanzania-locations';
+import {
+  emailError,
+  formatTanzaniaPhone,
+  isStrongPassword,
+  isValidEmail,
+  isValidTanzaniaPhone,
+  passwordConfirmError,
+  passwordError,
+  requiredError,
+  sanitizeTanzaniaPhoneInput,
+  TZ_PHONE_PLACEHOLDER,
+  TZ_PHONE_PREFIX,
+  usernameError,
+} from '../utils/form-validation';
 import { ImageWithFallback } from './figma/ImageWithFallback';
+import { PasswordRequirements } from './password-requirements';
 
 const bgTopLeft       = new URL('../../assets/coffee_farmers.jpg',         import.meta.url).href;
 const bgBottomRight   = new URL('../../assets/distribution_truck.jpeg',    import.meta.url).href;
@@ -87,7 +102,7 @@ export function SignupPage() {
     first_name: '',
     last_name: '',
     organisation_name: '',
-    contact_phone: '+255 ',
+    contact_phone: TZ_PHONE_PREFIX,
     region: '',
     district: '',
   });
@@ -98,21 +113,42 @@ export function SignupPage() {
   const canProceedStep1 = !!form.role;
 
   const passwordsMatch = confirmPassword.length === 0 || form.password === confirmPassword;
-  const passwordConfirmed = form.password.length >= 6 && confirmPassword === form.password;
+  const passwordConfirmed = isStrongPassword(form.password) && confirmPassword === form.password;
+
+  const fieldErrors = {
+    username: usernameError(form.username),
+    password: passwordError(form.password),
+    confirm: passwordConfirmError(form.password, confirmPassword),
+    first_name: requiredError(form.first_name, 'First name'),
+    last_name: requiredError(form.last_name, 'Last name'),
+    email: emailError(form.email),
+    organisation_name: form.organisation_name.trim().length >= 2
+      ? ''
+      : 'Organisation name must be at least 2 characters.',
+    contact_phone: form.contact_phone.trim() === TZ_PHONE_PREFIX.trim()
+      ? 'Phone number is required.'
+      : (isValidTanzaniaPhone(form.contact_phone) ? '' : 'Enter a valid Tanzania mobile (+255 6XX/7XX…).'),
+    region: requiredError(form.region, 'Region'),
+    district: requiredError(form.district, 'District'),
+  };
 
   const canProceedStep2 =
-    form.username.trim().length >= 3 &&
+    !fieldErrors.username &&
     passwordConfirmed &&
-    form.first_name.trim().length >= 1 &&
-    form.last_name.trim().length >= 1 &&
-    form.email.trim().includes('@') &&
-    form.organisation_name.trim().length >= 2 &&
-    form.contact_phone.trim().length >= 9 &&
-    form.region.trim().length > 0 &&
-    form.district.trim().length > 0;
+    !fieldErrors.first_name &&
+    !fieldErrors.last_name &&
+    isValidEmail(form.email) &&
+    !fieldErrors.organisation_name &&
+    isValidTanzaniaPhone(form.contact_phone) &&
+    !fieldErrors.region &&
+    !fieldErrors.district;
 
   const handleSubmit = async () => {
     setError('');
+    if (!canProceedStep2) {
+      setError('Please complete all required fields correctly before submitting.');
+      return;
+    }
     setLoading(true);
     try {
       await registerPublic({
@@ -123,7 +159,7 @@ export function SignupPage() {
         last_name: form.last_name.trim(),
         role: form.role,
         organisation_name: form.organisation_name.trim(),
-        contact_phone: form.contact_phone.trim(),
+        contact_phone: formatTanzaniaPhone(form.contact_phone),
         region: form.region,
         district: form.district.trim(),
       });
@@ -337,9 +373,10 @@ export function SignupPage() {
                           type={showPassword ? 'text' : 'password'}
                           value={form.password}
                           onChange={set('password')}
-                          placeholder="At least 6 characters"
-                          minLength={6}
+                          placeholder="Strong password"
+                          minLength={8}
                           className="pr-9"
+                          autoComplete="new-password"
                         />
                         <button
                           type="button"
@@ -349,9 +386,7 @@ export function SignupPage() {
                           {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                         </button>
                       </div>
-                      {form.password.length > 0 && form.password.length < 6 && (
-                        <p className="text-xs text-red-500 mt-0.5">Minimum 6 characters</p>
-                      )}
+                      <PasswordRequirements password={form.password} />
                     </div>
                     <div>
                       <FieldLabel required>Confirm Password</FieldLabel>
@@ -363,6 +398,7 @@ export function SignupPage() {
                           onChange={(e) => setConfirmPassword(e.target.value)}
                           placeholder="Re-enter your password"
                           className={`pr-9 ${!passwordsMatch ? 'border-red-400 focus:ring-red-400' : confirmPassword && passwordsMatch ? 'border-green-500 focus:ring-green-500' : ''}`}
+                          autoComplete="new-password"
                         />
                         <button
                           type="button"
@@ -372,7 +408,7 @@ export function SignupPage() {
                           {showConfirm ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                         </button>
                       </div>
-                      {!passwordsMatch && (
+                      {confirmPassword && !passwordsMatch && (
                         <p className="text-xs text-red-500 mt-0.5">Passwords do not match</p>
                       )}
                       {passwordsMatch && passwordConfirmed && (
@@ -403,18 +439,32 @@ export function SignupPage() {
                         type="tel"
                         value={form.contact_phone}
                         onChange={(e) => {
-                          const val = e.target.value;
                           setForm((p) => ({
                             ...p,
-                            contact_phone: val.startsWith('+255') ? val : '+255 ',
+                            contact_phone: sanitizeTanzaniaPhoneInput(e.target.value),
                           }));
                         }}
-                        placeholder="+255 7XX XXX XXX"
+                        placeholder={TZ_PHONE_PLACEHOLDER}
+                        inputMode="tel"
+                        autoComplete="tel"
                       />
+                      {form.contact_phone.trim() !== TZ_PHONE_PREFIX.trim() && fieldErrors.contact_phone && (
+                        <p className="text-xs text-red-500 mt-0.5">{fieldErrors.contact_phone}</p>
+                      )}
                     </div>
                     <div className="col-span-3">
                       <FieldLabel required>Email Address</FieldLabel>
-                      <TextInput icon={Mail} type="email" value={form.email} onChange={set('email')} placeholder="you@example.com" />
+                      <TextInput
+                        icon={Mail}
+                        type="email"
+                        value={form.email}
+                        onChange={set('email')}
+                        placeholder="you@example.com"
+                        autoComplete="email"
+                      />
+                      {form.email.trim() && fieldErrors.email && (
+                        <p className="text-xs text-red-500 mt-0.5">{fieldErrors.email}</p>
+                      )}
                     </div>
                   </div>
                 </div>

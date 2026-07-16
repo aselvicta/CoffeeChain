@@ -15,13 +15,26 @@ export function Login({ onLogin }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  const canSubmit = credentials.username.trim().length > 0 && credentials.password.length > 0;
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    if (!credentials.username.trim() || !credentials.password) {
+      setError(
+        language === 'en'
+          ? 'Username and password are required.'
+          : 'Jina la mtumiaji na nywila zinahitajika.'
+      );
+      return;
+    }
     setLoading(true);
 
     try {
-      await onLogin(credentials);
+      await onLogin({
+        username: credentials.username.trim(),
+        password: credentials.password,
+      });
     } catch (err) {
       setError(
         getUserMessage(
@@ -123,7 +136,7 @@ export function Login({ onLogin }) {
 
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || !canSubmit}
                 className="w-full flex items-center justify-center gap-2 bg-green-600 text-white py-3 rounded-lg font-medium hover:bg-green-700 transition-colors shadow-md hover:shadow-lg disabled:opacity-70 disabled:cursor-not-allowed"
               >
                 {loading && <Loader2 className="h-5 w-5 animate-spin" />}

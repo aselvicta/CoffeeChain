@@ -1,3 +1,5 @@
+import { isValidTanzaniaPhone } from './form-validation';
+
 /**
  * OTP is sent on transfer create when Briq succeeds.
  * Otherwise explicitly calls POST /api/transfers/{id}/send_otp/.
@@ -38,11 +40,7 @@ export async function resolveDistributionOtp(transfer, sendOtpFn) {
 }
 
 export function farmerHasValidPhone(farmer) {
-  const raw = String(farmer?.phone || farmer?.phone_number || '').replace(/\D/g, '');
-  if (!raw) return false;
-  if (raw.startsWith('255')) return raw.length >= 12;
-  if (raw.startsWith('0')) return raw.length >= 10;
-  return raw.length >= 9;
+  return isValidTanzaniaPhone(farmer?.phone || farmer?.phone_number || '');
 }
 
 const METHOD_LABELS = {

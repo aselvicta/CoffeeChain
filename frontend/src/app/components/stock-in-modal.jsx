@@ -338,7 +338,14 @@ export function StockInModal({ isOpen, warehouse, supplierId, existingBatches = 
             </button>
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={
+                isSubmitting ||
+                !batchCode ||
+                !fertilizerType ||
+                quantityBags <= 0 ||
+                !formData.dateReceived ||
+                (exceedsCapacity && !formData.confirmOverCapacity)
+              }
               className="rounded-lg bg-green-600 px-5 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isSubmitting ? 'Saving…' : 'Record Stock'}

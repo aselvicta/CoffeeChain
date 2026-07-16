@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Warehouse, X } from 'lucide-react';
 import { getUserMessage } from '../utils/user-messages';
+import {
+  ensureTanzaniaPhonePrefix,
+  formatTanzaniaPhone,
+  sanitizeTanzaniaPhoneInput,
+  tanzaniaPhoneError,
+  TZ_PHONE_PLACEHOLDER,
+  TZ_PHONE_PREFIX,
+} from '../utils/form-validation';
 
 const REGION_OPTIONS = [
   'Kagera', 'Mbeya', 'Mwanza', 'Arusha', 'Kilimanjaro',
@@ -16,7 +24,7 @@ function buildInitialForm(warehouse) {
     region: warehouse?.region || '',
     capacityBags: warehouse?.capacity_bags ?? warehouse?.capacity ?? '',
     contactName: warehouse?.contact_name || warehouse?.contactName || '',
-    contactPhone: warehouse?.contact_phone || warehouse?.contactPhone || '',
+    contactPhone: ensureTanzaniaPhonePrefix(warehouse?.contact_phone || warehouse?.contactPhone || ''),
     notes: warehouse?.notes || '',
   };
 }
@@ -51,9 +59,13 @@ export function RegisterWarehouseModal({ isOpen, warehouse, onClose, onSubmit })
     if (!trimmedCapacity || Number.isNaN(trimmedCapacity) || trimmedCapacity <= 0) {
       setErrorMessage('Capacity must be greater than zero.'); return;
     }
+    const phoneErr = tanzaniaPhoneError(formData.contactPhone, { required: false });
+    if (phoneErr) { setErrorMessage(phoneErr); return; }
     setIsSubmitting(true);
     setErrorMessage('');
     try {
+      const phoneDigits = String(formData.contactPhone || '').replace(/\D/g, '');
+      const hasPhone = phoneDigits.length > 3;
       await onSubmit({
         name: trimmedName,
         section: formData.section.trim(),
@@ -61,7 +73,7 @@ export function RegisterWarehouseModal({ isOpen, warehouse, onClose, onSubmit })
         region: formData.region.trim(),
         capacity_bags: trimmedCapacity,
         contact_name: formData.contactName.trim(),
-        contact_phone: formData.contactPhone.trim(),
+        contact_phone: hasPhone ? formatTanzaniaPhone(formData.contactPhone) : '',
         notes: formData.notes.trim(),
       });
     } catch (error) {
@@ -112,7 +124,7 @@ export function RegisterWarehouseModal({ isOpen, warehouse, onClose, onSubmit })
               {/* Warehouse name — full width */}
               <label className={`${label} col-span-2`}>
                 <span className={labelText}>Warehouse name <span className="text-rose-500">*</span></span>
-                <input type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className={field} placeholder="Bukoba Central Store" />
+                <input type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className={field} placeholder="Bukoba Central Store" required />
               </label>
 
               {/* Section and Region side by side */}
@@ -138,7 +150,7 @@ export function RegisterWarehouseModal({ isOpen, warehouse, onClose, onSubmit })
               {/* Capacity, Contact name, Contact phone — three in a row on md */}
               <label className={label}>
                 <span className={labelText}>Capacity (bags) <span className="text-rose-500">*</span></span>
-                <input type="number" min="1" value={formData.capacityBags} onChange={(e) => setFormData({ ...formData, capacityBags: e.target.value })} className={field} placeholder="1000" />
+                <input type="number" min="1" value={formData.capacityBags} onChange={(e) => setFormData({ ...formData, capacityBags: e.target.value })} className={field} placeholder="1000" required />
               </label>
 
               <label className={label}>
@@ -148,7 +160,17 @@ export function RegisterWarehouseModal({ isOpen, warehouse, onClose, onSubmit })
 
               <label className={`${label} col-span-2`}>
                 <span className={labelText}>Contact phone</span>
-                <input type="tel" value={formData.contactPhone} onChange={(e) => setFormData({ ...formData, contactPhone: e.target.value })} className={field} placeholder="+255 754 000 001" />
+                <input
+                  type="tel"
+                  value={formData.contactPhone}
+                  onChange={(e) => setFormData({ ...formData, contactPhone: sanitizeTanzaniaPhoneInput(e.target.value) })}
+                  onFocus={(e) => {
+                    if (!formData.contactPhone) setFormData({ ...formData, contactPhone: TZ_PHONE_PREFIX });
+                    e.target.setSelectionRange(e.target.value.length, e.target.value.length);
+                  }}
+                  className={field}
+                  placeholder={TZ_PHONE_PLACEHOLDER}
+                />
               </label>
 
               {/* Notes — full width, smaller */}

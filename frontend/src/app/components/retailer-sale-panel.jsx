@@ -12,6 +12,13 @@ import {
 import { lookupMinistryFarmer, resolveRetailerBuyer } from '../api/client';
 import { PanelOutlineButton, PanelPrimaryButton, QuickActionCard } from './ui/dashboard-ui';
 import { getUserMessage } from '../utils/user-messages';
+import {
+  formatTanzaniaPhone,
+  isValidTanzaniaPhone,
+  sanitizeTanzaniaPhoneInput,
+  TZ_PHONE_PLACEHOLDER,
+  TZ_PHONE_PREFIX,
+} from '../utils/form-validation';
 
 const emptyBuyer = {
   farmerId: null,
@@ -136,7 +143,7 @@ export function RetailerSalePanel({ onBuyerResolved, onClear }) {
   const [mode, setMode] = useState('ministry');
   const [ministryIdInput, setMinistryIdInput] = useState('');
   const [walkInName, setWalkInName] = useState('');
-  const [walkInPhone, setWalkInPhone] = useState('');
+  const [walkInPhone, setWalkInPhone] = useState(TZ_PHONE_PREFIX);
   const [buyer, setBuyer] = useState(emptyBuyer);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -149,7 +156,7 @@ export function RetailerSalePanel({ onBuyerResolved, onClear }) {
     setError('');
     setMinistryIdInput('');
     setWalkInName('');
-    setWalkInPhone('');
+    setWalkInPhone(TZ_PHONE_PREFIX);
     onClear?.();
   };
 
@@ -214,8 +221,12 @@ export function RetailerSalePanel({ onBuyerResolved, onClear }) {
 
   const handleWalkIn = async (event) => {
     event?.preventDefault?.();
-    if (!walkInName.trim() || !walkInPhone.trim()) {
-      setError('Name and phone are required for walk-in customers.');
+    if (!walkInName.trim()) {
+      setError('Customer name is required for walk-in customers.');
+      return;
+    }
+    if (!isValidTanzaniaPhone(walkInPhone)) {
+      setError('Enter a valid Tanzania mobile number (+255 6XX/7XX…).');
       return;
     }
     setIsLoading(true);
@@ -223,7 +234,7 @@ export function RetailerSalePanel({ onBuyerResolved, onClear }) {
     try {
       const data = await resolveRetailerBuyer({
         name: walkInName.trim(),
-        phone_number: walkInPhone.trim(),
+        phone_number: formatTanzaniaPhone(walkInPhone),
       });
       applyResolved(data);
     } catch (err) {
@@ -329,6 +340,7 @@ export function RetailerSalePanel({ onBuyerResolved, onClear }) {
                 onChange={(e) => setWalkInName(e.target.value)}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg"
                 placeholder="Full name"
+                required
               />
             </div>
             <div>
@@ -339,17 +351,21 @@ export function RetailerSalePanel({ onBuyerResolved, onClear }) {
               <input
                 type="tel"
                 value={walkInPhone}
-                onChange={(e) => setWalkInPhone(e.target.value)}
+                onChange={(e) => setWalkInPhone(sanitizeTanzaniaPhoneInput(e.target.value))}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg"
-                placeholder="07XXXXXXXX"
+                placeholder={TZ_PHONE_PLACEHOLDER}
+                required
               />
+              {walkInPhone.trim() !== TZ_PHONE_PREFIX.trim() && !isValidTanzaniaPhone(walkInPhone) && (
+                <p className="mt-1 text-xs text-red-500">Enter a valid Tanzania mobile (+255 6XX/7XX…).</p>
+              )}
             </div>
           </div>
           <PanelOutlineButton
             type="submit"
             icon={User}
             tone="slate"
-            disabled={isLoading}
+            disabled={isLoading || !walkInName.trim() || !isValidTanzaniaPhone(walkInPhone)}
           >
             {isLoading ? 'Saving…' : 'Record walk-in customer'}
           </PanelOutlineButton>
