@@ -134,6 +134,31 @@ function FlagDetailModal({
             )}
           </div>
 
+          <div className="rounded-lg border border-dashed border-gray-300 bg-white px-4 py-3 text-sm text-gray-600">
+            Status flow: <span className="font-medium text-gray-900">open</span>
+            {' → '}
+            <span className="font-medium text-gray-900">under review</span>
+            {' → '}
+            <span className="font-medium text-gray-900">escalated</span>
+            {' (via Recommend Action) → '}
+            <span className="font-medium text-gray-900">resolved</span>
+            {' (admin decision)'}
+          </div>
+
+          {flag.recommendation && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm">
+              <p className="font-semibold text-amber-900 mb-1">Recommendation to admin</p>
+              <p className="text-amber-900">
+                {(flag.recommendation.recommended_action || '').replace(/_/g, ' ')}
+                {' · '}
+                Decision: {(flag.recommendation.admin_decision || 'pending').replace(/_/g, ' ')}
+              </p>
+              {flag.recommendation.justification && (
+                <p className="mt-2 text-amber-800 whitespace-pre-wrap">{flag.recommendation.justification}</p>
+              )}
+            </div>
+          )}
+
           {canMoveToReview && flag.status === 'open' && (
             <button
               type="button"
@@ -170,7 +195,7 @@ function FlagDetailModal({
             </div>
           )}
 
-          {canRecommend && !flag.recommendation && (
+          {canRecommend && !flag.recommendation && ['open', 'under_review'].includes(flag.status) && (
             <div className="rounded-lg border border-gray-200 p-4 space-y-2">
               <p className="text-sm font-semibold text-gray-900">Recommend Action to Admin</p>
               <select
@@ -211,7 +236,7 @@ function FlagDetailModal({
   );
 }
 
-export function RegulatorCompliancePanel({ initialDraft = null }) {
+export function RegulatorCompliancePanel({ initialDraft = null, onDraftConsumed }) {
   const [flags, setFlags] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [branches, setBranches] = useState([]);
@@ -231,14 +256,31 @@ export function RegulatorCompliancePanel({ initialDraft = null }) {
     evidence_ref: '',
   });
 
-  useEffect(() => {
+  const emptyForm = {
+    target_type: 'transfer',
+    target_id: '',
+    flagged_organisation_type: 'supplier',
+    flagged_organisation_id: '',
+    reason: '',
+    description: '',
+    evidence_ref: '',
+  };
+
+  const openCreateModal = () => {
     if (initialDraft) {
       setForm((prev) => ({ ...prev, ...initialDraft }));
-      setShowCreate(true);
-      setStatusFilter('all');
-      setOrgTypeFilter('all');
+      onDraftConsumed?.();
+    } else {
+      setForm(emptyForm);
     }
-  }, [initialDraft]);
+    setShowCreate(true);
+  };
+
+  const closeCreateModal = () => {
+    setShowCreate(false);
+    setForm(emptyForm);
+    onDraftConsumed?.();
+  };
 
   const loadFlags = async () => {
     const flagData = await fetchComplianceFlags();
@@ -313,16 +355,7 @@ export function RegulatorCompliancePanel({ initialDraft = null }) {
     try {
       const created = await createComplianceFlag(payload);
       toast.success('Compliance flag raised.');
-      setShowCreate(false);
-      setForm({
-        target_type: 'transfer',
-        target_id: '',
-        flagged_organisation_type: 'supplier',
-        flagged_organisation_id: '',
-        reason: '',
-        description: '',
-        evidence_ref: '',
-      });
+      closeCreateModal();
       setStatusFilter('all');
       setOrgTypeFilter('all');
       if (created?.id) {
@@ -336,12 +369,25 @@ export function RegulatorCompliancePanel({ initialDraft = null }) {
     }
   };
 
+  const syncFlagInList = (updated) => {
+    if (!updated?.id) return;
+    setFlags((prev) => {
+      const exists = prev.some((row) => row.id === updated.id);
+      if (!exists) return [updated, ...prev];
+      return prev.map((row) => (row.id === updated.id ? { ...row, ...updated } : row));
+    });
+    if (updated.status) {
+      setStatusFilter(updated.status);
+    }
+  };
+
   const handleRecommend = async (flag, payload) => {
     try {
       await recommendComplianceAction(flag.id, payload);
       toast.success('Recommendation sent to admin.');
       const detail = await fetchComplianceFlag(flag.id);
       setDetailFlag(detail);
+      syncFlagInList(detail);
       await loadFlags();
     } catch (error) {
       toast.error(getUserMessage(error, 'Failed to submit recommendation.'));
@@ -350,10 +396,10 @@ export function RegulatorCompliancePanel({ initialDraft = null }) {
 
   const handleMoveToReview = async (flag) => {
     try {
-      await updateComplianceFlag(flag.id, { status: 'under_review' });
+      const updated = await updateComplianceFlag(flag.id, { status: 'under_review' });
       toast.success('Flag moved to under review.');
-      const detail = await fetchComplianceFlag(flag.id);
-      setDetailFlag(detail);
+      setDetailFlag(updated);
+      syncFlagInList(updated);
       await loadFlags();
     } catch (error) {
       toast.error(getUserMessage(error, 'Failed to update flag status.'));
@@ -369,7 +415,7 @@ export function RegulatorCompliancePanel({ initialDraft = null }) {
         </div>
         <button
           type="button"
-          onClick={() => setShowCreate(true)}
+          onClick={openCreateModal}
           className="sm:ml-auto inline-flex items-center gap-2 rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800"
         >
           <Plus className="h-4 w-4" />
@@ -377,17 +423,24 @@ export function RegulatorCompliancePanel({ initialDraft = null }) {
         </button>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {['all', 'open', 'under_review', 'resolved', 'escalated'].map((status) => (
-          <button
-            key={status}
-            type="button"
-            onClick={() => setStatusFilter(status)}
-            className={`rounded-lg px-3 py-1.5 text-sm font-medium ${statusFilter === status ? 'bg-green-700 text-white' : 'bg-gray-100 text-gray-700'}`}
-          >
-            {status.replace(/_/g, ' ')}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 mr-1">Filter</span>
+        {['all', 'open', 'under_review', 'resolved', 'escalated'].map((status) => {
+          const count = status === 'all'
+            ? flags.length
+            : flags.filter((flag) => flag.status === status).length;
+          return (
+            <button
+              key={status}
+              type="button"
+              onClick={() => setStatusFilter(status)}
+              className={`rounded-lg px-3 py-1.5 text-sm font-medium ${statusFilter === status ? 'bg-green-700 text-white' : 'bg-gray-100 text-gray-700'}`}
+            >
+              {status.replace(/_/g, ' ')}
+              <span className={`ml-1.5 text-xs ${statusFilter === status ? 'text-green-100' : 'text-gray-500'}`}>({count})</span>
+            </button>
+          );
+        })}
         <select
           value={orgTypeFilter}
           onChange={(event) => setOrgTypeFilter(event.target.value)}
@@ -398,6 +451,13 @@ export function RegulatorCompliancePanel({ initialDraft = null }) {
           <option value="RETAILER">Retailer</option>
           <option value="COOPERATIVE">AMCOS / Cooperative</option>
         </select>
+        <button
+          type="button"
+          onClick={() => load()}
+          className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+        >
+          Refresh
+        </button>
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
@@ -442,7 +502,7 @@ export function RegulatorCompliancePanel({ initialDraft = null }) {
       </div>
 
       {showCreate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowCreate(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={closeCreateModal}>
           <div className="w-full max-w-xl rounded-xl bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
             <div className="border-b border-gray-200 px-6 py-4">
               <h3 className="text-lg font-bold text-gray-900">Raise Compliance Flag</h3>
@@ -511,7 +571,7 @@ export function RegulatorCompliancePanel({ initialDraft = null }) {
               />
             </div>
             <div className="flex gap-2 border-t border-gray-200 px-6 py-4">
-              <button type="button" onClick={() => setShowCreate(false)} className="flex-1 rounded-lg border border-gray-300 py-2 text-sm text-gray-700 hover:bg-gray-50">Cancel</button>
+              <button type="button" onClick={closeCreateModal} className="flex-1 rounded-lg border border-gray-300 py-2 text-sm text-gray-700 hover:bg-gray-50">Cancel</button>
               <button type="button" disabled={submitting} onClick={submitFlag} className="flex-1 rounded-lg bg-green-700 py-2 text-sm font-semibold text-white hover:bg-green-800 disabled:opacity-60">
                 {submitting ? 'Raising…' : 'Raise Flag'}
               </button>
@@ -1125,14 +1185,8 @@ export function RegulatorCertificatesPanel() {
   );
 }
 
-export function RegulatorComplianceHub({ initialDraft = null }) {
+export function RegulatorComplianceHub({ initialDraft = null, onDraftConsumed }) {
   const [section, setSection] = useState('flags');
-
-  useEffect(() => {
-    if (initialDraft) {
-      setSection('flags');
-    }
-  }, [initialDraft]);
 
   return (
     <div className="space-y-5">
@@ -1153,7 +1207,7 @@ export function RegulatorComplianceHub({ initialDraft = null }) {
         </button>
       </div>
       {section === 'flags' ? (
-        <RegulatorCompliancePanel initialDraft={initialDraft} />
+        <RegulatorCompliancePanel initialDraft={initialDraft} onDraftConsumed={onDraftConsumed} />
       ) : (
         <RegulatorCertificatesPanel />
       )}

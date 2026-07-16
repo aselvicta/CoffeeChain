@@ -114,15 +114,29 @@ class ComplianceFlagViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixi
         serializer.is_valid(raise_exception=True)
 
         next_status = serializer.validated_data.get("status")
-        if next_status and not (
-            flag.status == ComplianceFlag.Status.OPEN and next_status == ComplianceFlag.Status.UNDER_REVIEW
-        ):
-            return Response(
-                {"detail": "Regulators can only move status from open to under_review."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        allowed_transitions = {
+            ComplianceFlag.Status.OPEN: {ComplianceFlag.Status.UNDER_REVIEW},
+            ComplianceFlag.Status.UNDER_REVIEW: {
+                ComplianceFlag.Status.OPEN,
+                ComplianceFlag.Status.ESCALATED,
+            },
+            ComplianceFlag.Status.ESCALATED: {ComplianceFlag.Status.UNDER_REVIEW},
+        }
+        if next_status and next_status != flag.status:
+            allowed = allowed_transitions.get(flag.status, set())
+            if next_status not in allowed:
+                return Response(
+                    {
+                        "detail": (
+                            f"Cannot change status from '{flag.status}' to '{next_status}'. "
+                            "Use Recommend Action to escalate, or wait for admin decision to resolve."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         serializer.save()
+        flag.refresh_from_db()
         AuditLog.objects.create(
             action="compliance_flag_status_updated",
             user=request.user,

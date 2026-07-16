@@ -1508,6 +1508,9 @@ export function AdminDashboard({ userProfile, onLogout }) {
 
   const goToTab = (tab) => {
     const next = dashboardTabs.includes(tab) ? tab : 'overview';
+    if (activeTab === 'compliance' && next !== 'compliance') {
+      setComplianceDraft(null);
+    }
     setActiveTab(next);
     navigate(buildDashboardPath(dashboardRole, next));
   };
@@ -1867,13 +1870,17 @@ export function AdminDashboard({ userProfile, onLogout }) {
                     : '',
                 });
                 goToTab('compliance');
+                toast.message('Open Raise Flag to finish — transfer details are ready to submit.');
               }}
             />
           )}
 
           {activeTab === 'compliance' && (
             readOnly ? (
-              <RegulatorComplianceHub initialDraft={complianceDraft} />
+              <RegulatorComplianceHub
+                initialDraft={complianceDraft}
+                onDraftConsumed={() => setComplianceDraft(null)}
+              />
             ) : (
               <AdminCompliancePanel />
             )
