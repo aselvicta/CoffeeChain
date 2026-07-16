@@ -282,9 +282,21 @@ export function RegulatorCompliancePanel({ initialDraft = null, onDraftConsumed 
     onDraftConsumed?.();
   };
 
-  const loadFlags = async () => {
+  const refreshFlagsFromServer = async (preferDetail = null) => {
     const flagData = await fetchComplianceFlags();
-    setFlags(Array.isArray(flagData) ? flagData : (flagData?.results || []));
+    let list = Array.isArray(flagData) ? flagData : (flagData?.results || []);
+    if (preferDetail?.id) {
+      const exists = list.some((row) => row.id === preferDetail.id);
+      list = exists
+        ? list.map((row) => (row.id === preferDetail.id ? { ...row, ...preferDetail } : row))
+        : [preferDetail, ...list];
+    }
+    setFlags(list);
+    return list;
+  };
+
+  const loadFlags = async () => {
+    await refreshFlagsFromServer();
   };
 
   const load = async () => {
@@ -308,6 +320,19 @@ export function RegulatorCompliancePanel({ initialDraft = null, onDraftConsumed 
     load();
   }, []);
 
+  // Pick up admin decisions / other session changes when returning to this tab.
+  useEffect(() => {
+    const onFocus = () => {
+      refreshFlagsFromServer().catch(() => {});
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
+    };
+  }, []);
+
   const filteredFlags = useMemo(() => {
     return flags.filter((flag) => {
       if (statusFilter !== 'all' && flag.status !== statusFilter) return false;
@@ -320,10 +345,33 @@ export function RegulatorCompliancePanel({ initialDraft = null, onDraftConsumed 
     ? suppliers.map((supplier) => ({ value: supplier.id, label: supplier.name }))
     : branches.map((branch) => ({ value: branch.id, label: `${branch.name} (${branch.branch_type})` }));
 
+  const applyFlagUpdate = (updated, { alignFilter = false } = {}) => {
+    if (!updated?.id) return;
+    setFlags((prev) => {
+      const exists = prev.some((row) => row.id === updated.id);
+      if (!exists) return [updated, ...prev];
+      return prev.map((row) => (row.id === updated.id ? { ...row, ...updated } : row));
+    });
+    if (!updated.status) return;
+    if (alignFilter) {
+      setStatusFilter(updated.status);
+      return;
+    }
+    setStatusFilter((current) => {
+      if (current === 'all' || current === updated.status) return current;
+      return updated.status;
+    });
+  };
+
   const openDetail = async (flagId) => {
     try {
       const detail = await fetchComplianceFlag(flagId);
       setDetailFlag(detail);
+      await refreshFlagsFromServer(detail);
+      setStatusFilter((current) => {
+        if (current === 'all' || current === detail.status) return current;
+        return detail.status;
+      });
     } catch (error) {
       toast.error(getUserMessage(error, 'Failed to load flag details.'));
     }
@@ -370,15 +418,7 @@ export function RegulatorCompliancePanel({ initialDraft = null, onDraftConsumed 
   };
 
   const syncFlagInList = (updated) => {
-    if (!updated?.id) return;
-    setFlags((prev) => {
-      const exists = prev.some((row) => row.id === updated.id);
-      if (!exists) return [updated, ...prev];
-      return prev.map((row) => (row.id === updated.id ? { ...row, ...updated } : row));
-    });
-    if (updated.status) {
-      setStatusFilter(updated.status);
-    }
+    applyFlagUpdate(updated, { alignFilter: true });
   };
 
   const handleRecommend = async (flag, payload) => {
@@ -389,6 +429,7 @@ export function RegulatorCompliancePanel({ initialDraft = null, onDraftConsumed 
       setDetailFlag(detail);
       syncFlagInList(detail);
       await loadFlags();
+      applyFlagUpdate(detail, { alignFilter: true });
     } catch (error) {
       toast.error(getUserMessage(error, 'Failed to submit recommendation.'));
     }
@@ -401,6 +442,7 @@ export function RegulatorCompliancePanel({ initialDraft = null, onDraftConsumed 
       setDetailFlag(updated);
       syncFlagInList(updated);
       await loadFlags();
+      applyFlagUpdate(updated, { alignFilter: true });
     } catch (error) {
       toast.error(getUserMessage(error, 'Failed to update flag status.'));
     }
@@ -771,10 +813,22 @@ export function ActorCompliancePanel({ roleLabel = 'actor' }) {
     load();
   }, []);
 
+  const syncActorFlag = (updated) => {
+    if (!updated?.id) return;
+    setFlags((prev) => {
+      const exists = prev.some((row) => row.id === updated.id);
+      if (!exists) return [updated, ...prev];
+      return prev.map((row) => (row.id === updated.id ? { ...row, ...updated } : row));
+    });
+  };
+
   const openDetail = async (flagId) => {
     try {
       const detail = await fetchComplianceFlag(flagId);
       setDetailFlag(detail);
+      syncActorFlag(detail);
+      await load();
+      syncActorFlag(detail);
     } catch (error) {
       toast.error(getUserMessage(error, 'Failed to load flag details.'));
     }
@@ -786,7 +840,9 @@ export function ActorCompliancePanel({ roleLabel = 'actor' }) {
       toast.success('Response submitted.');
       const detail = await fetchComplianceFlag(flag.id);
       setDetailFlag(detail);
+      syncActorFlag(detail);
       await load();
+      syncActorFlag(detail);
     } catch (error) {
       toast.error(getUserMessage(error, 'Failed to submit response.'));
     }

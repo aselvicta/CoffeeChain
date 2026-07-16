@@ -192,13 +192,20 @@ class ComplianceFlagViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixi
             flag.status = ComplianceFlag.Status.ESCALATED
             flag.save(update_fields=["status", "updated_at"])
 
+        flag.refresh_from_db()
         notify_recommendation_submitted(recommendation)
         AuditLog.objects.create(
             action="compliance_recommendation_created",
             user=request.user,
-            details={"flag_id": flag.id, "recommendation_id": recommendation.id},
+            details={
+                "flag_id": flag.id,
+                "recommendation_id": recommendation.id,
+                "flag_status": flag.status,
+            },
         )
-        return Response(AdminRecommendationSerializer(recommendation).data, status=status.HTTP_201_CREATED)
+        payload = AdminRecommendationSerializer(recommendation).data
+        payload["flag_status"] = flag.status
+        return Response(payload, status=status.HTTP_201_CREATED)
 
 
 class AdminRecommendationViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.RetrieveModelMixin):
@@ -265,6 +272,9 @@ class AdminRecommendationViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
                 flag.status = ComplianceFlag.Status.RESOLVED
                 flag.save(update_fields=["status", "updated_at"])
 
+            flag.refresh_from_db()
+            recommendation.refresh_from_db()
+
             AuditLog.objects.create(
                 action="compliance_recommendation_decided",
                 user=request.user,
@@ -273,11 +283,14 @@ class AdminRecommendationViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
                     "flag_id": flag.id,
                     "decision": recommendation.admin_decision,
                     "recommended_action": recommendation.recommended_action,
+                    "flag_status": flag.status,
                 },
             )
 
         notify_admin_decision(recommendation)
-        return Response(AdminRecommendationSerializer(recommendation).data)
+        payload = AdminRecommendationSerializer(recommendation).data
+        payload["flag_status"] = recommendation.flag.status
+        return Response(payload)
 
 
 class OrganisationComplianceStatusView(APIView):

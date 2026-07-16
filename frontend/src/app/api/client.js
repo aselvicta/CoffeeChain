@@ -109,6 +109,7 @@ async function apiFetch(path, options = {}, retryOnUnauthorized = true) {
     headers.Authorization = `Bearer ${token}`;
   }
   const response = await fetch(`${API_BASE}${path}`, {
+    cache: 'no-store',
     ...options,
     headers,
   });
