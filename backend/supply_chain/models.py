@@ -553,6 +553,8 @@ class UserProfile(models.Model):
     )
     contact_phone = models.CharField(max_length=50, blank=True, default="")
     organization = models.CharField(max_length=200, blank=True, default="")
+    region = models.CharField(max_length=100, blank=True, default="")
+    district = models.CharField(max_length=100, blank=True, default="")
 
     def __str__(self):
         return f"Profile({self.user.username})"

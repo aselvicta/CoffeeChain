@@ -682,10 +682,9 @@ def _send_integrity_sms(
     change_lines: list[str],
     issue_summary: str,
 ) -> None:
-    """Send an SMS alert to every admin who has a phone number configured."""
+    """Send SMS + WhatsApp alerts to every admin with a phone number (independent channels)."""
     try:
-        from supply_chain.models import UserProfile
-        from .briq import send_sms, normalize_phone_digits
+        from .briq import send_integrity_alert, normalize_phone_digits
 
         admin_users = User.objects.filter(is_staff=True)
         all_changes = "; ".join(change_lines) if change_lines else issue_summary
@@ -694,8 +693,17 @@ def _send_integrity_sms(
             + (f" ({batch_code})" if batch_code else "")
             + f". {all_changes}. Login to review."
         )
-        # Truncate to 160 chars
         sms_body = sms_body[:160]
+
+        title = (
+            f"Transfer #{transfer_id}"
+            + (f" ({batch_code})" if batch_code else "")
+            + (f" @ {branch_name}" if branch_name else "")
+        )
+        whatsapp_variables = {
+            "1": title[:200],
+            "2": (all_changes or "Data mismatch detected.")[:500],
+        }
 
         for admin in admin_users:
             phone = ""
@@ -706,15 +714,20 @@ def _send_integrity_sms(
                 pass
             if not phone or phone.strip("+").strip().replace(" ", "") in ("255", ""):
                 continue
-            result = send_sms(phone, sms_body)
+            result = send_integrity_alert(
+                phone,
+                sms_body=sms_body,
+                whatsapp_variables=whatsapp_variables,
+            )
             logger.info(
-                "[Integrity] SMS alert to admin %s (%s): delivered=%s",
+                "[Integrity] Alert to admin %s (%s): sms=%s whatsapp=%s",
                 admin.username,
                 normalize_phone_digits(phone),
-                result.get("delivered"),
+                result.get("sms", {}).get("delivered"),
+                result.get("whatsapp", {}).get("delivered"),
             )
     except Exception:
-        logger.exception("[Integrity] Failed to send integrity SMS to admins")
+        logger.exception("[Integrity] Failed to send integrity alerts to admins")
 
 
 def _send_integrity_restored_sms(
@@ -723,9 +736,9 @@ def _send_integrity_restored_sms(
     batch_code: str,
     summary: str,
 ) -> None:
-    """Send a positive SMS when transfer data is restored to match the receipt."""
+    """Send SMS + WhatsApp when transfer data is restored to match the receipt."""
     try:
-        from .briq import send_sms, normalize_phone_digits
+        from .briq import send_integrity_alert, normalize_phone_digits
 
         admin_users = User.objects.filter(is_staff=True)
         sms_body = (
@@ -734,6 +747,10 @@ def _send_integrity_restored_sms(
             + f" restored. {summary}. Data matches receipt."
         )
         sms_body = sms_body[:160]
+        whatsapp_variables = {
+            "1": f"Transfer #{transfer_id}" + (f" ({batch_code})" if batch_code else ""),
+            "2": (summary or "Data restored to match receipt.")[:500],
+        }
 
         for admin in admin_users:
             phone = ""
@@ -744,12 +761,17 @@ def _send_integrity_restored_sms(
                 pass
             if not phone or phone.strip("+").strip().replace(" ", "") in ("255", ""):
                 continue
-            result = send_sms(phone, sms_body)
+            result = send_integrity_alert(
+                phone,
+                sms_body=sms_body,
+                whatsapp_variables=whatsapp_variables,
+            )
             logger.info(
-                "[Integrity] Restore SMS to admin %s (%s): delivered=%s",
+                "[Integrity] Restore alert to admin %s (%s): sms=%s whatsapp=%s",
                 admin.username,
                 normalize_phone_digits(phone),
-                result.get("delivered"),
+                result.get("sms", {}).get("delivered"),
+                result.get("whatsapp", {}).get("delivered"),
             )
     except Exception:
-        logger.exception("[Integrity] Failed to send restore SMS to admins")
+        logger.exception("[Integrity] Failed to send restore alerts to admins")

@@ -160,6 +160,10 @@ BRIQ_OTP_PRIMARY_METHOD = os.getenv("BRIQ_OTP_PRIMARY_METHOD", "sms")  # sms | c
 BRIQ_OTP_RESEND_METHOD = os.getenv("BRIQ_OTP_RESEND_METHOD", "call")  # alternate channel on resend
 BRIQ_OTP_LOCAL_FALLBACK = os.getenv("BRIQ_OTP_LOCAL_FALLBACK", "false").lower() == "true"
 BRIQ_REQUEST_TIMEOUT = int(os.getenv("BRIQ_REQUEST_TIMEOUT", "45"))
+# Integrity tamper alerts — SMS + optional WhatsApp template (independent channels).
+BRIQ_INTEGRITY_ALERT_WHATSAPP = os.getenv("BRIQ_INTEGRITY_ALERT_WHATSAPP", "true").lower() == "true"
+BRIQ_INTEGRITY_WHATSAPP_TEMPLATE = os.getenv("BRIQ_INTEGRITY_WHATSAPP_TEMPLATE", "").strip()
+BRIQ_WHATSAPP_SENDER = os.getenv("BRIQ_WHATSAPP_SENDER", "").strip()
 
 # Retailer POS: discount for buyers verified against the Ministry registry
 RETAILER_MINISTRY_DISCOUNT_PERCENT = int(os.getenv("RETAILER_MINISTRY_DISCOUNT_PERCENT", "10"))

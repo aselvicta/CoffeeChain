@@ -511,6 +511,115 @@ def send_sms(phone_number: str, message: str) -> dict[str, Any]:
         return {"delivered": False, "error": str(exc)}
 
 
+def send_whatsapp_template(
+    phone_number: str,
+    template_name: str,
+    variables: dict[str, str] | None = None,
+    *,
+    sender: str = "",
+) -> dict[str, Any]:
+    """Send an approved WhatsApp template via POST /v1/whatsapp/messages/template."""
+    api_key = getattr(settings, "BRIQ_API_KEY", "")
+    msisdn = normalize_phone_digits(phone_number or "")
+
+    if not api_key:
+        logger.warning("[Briq] send_whatsapp_template skipped — BRIQ_API_KEY not configured")
+        return {"delivered": False, "error": "WhatsApp not configured."}
+
+    if not template_name:
+        return {"delivered": False, "error": "WhatsApp template name not configured."}
+
+    if not msisdn or len(msisdn) < 9:
+        logger.warning("[Briq] send_whatsapp_template skipped — invalid phone: %s", phone_number)
+        return {"delivered": False, "error": "Invalid phone number."}
+
+    body: dict[str, Any] = {
+        "to": msisdn,
+        "template_name": template_name,
+    }
+    if variables:
+        body["variables"] = {str(k): str(v)[:500] for k, v in variables.items()}
+    wa_sender = (sender or getattr(settings, "BRIQ_WHATSAPP_SENDER", "") or "").strip()
+    if wa_sender:
+        body["sender"] = wa_sender
+
+    timeout = int(getattr(settings, "BRIQ_REQUEST_TIMEOUT", 45))
+    try:
+        response = requests.post(
+            f"{_base_url()}/v1/whatsapp/messages/template",
+            headers=_api_headers(),
+            json=body,
+            timeout=timeout,
+        )
+        data: dict[str, Any] = {}
+        try:
+            data = response.json()
+        except ValueError:
+            pass
+
+        delivered = response.status_code in {200, 202} and bool(data.get("success", False))
+        message_id = (data.get("data") or {}).get("message_id")
+        logger.info(
+            "[Briq] send_whatsapp_template to=%s template=%s http=%s delivered=%s message_id=%s",
+            msisdn,
+            template_name,
+            response.status_code,
+            delivered,
+            message_id,
+        )
+        if delivered:
+            return {
+                "delivered": True,
+                "phone_number": msisdn,
+                "channel": "whatsapp",
+                "message_id": message_id,
+            }
+        errors = data.get("errors") or []
+        error_msg = (
+            errors[0].get("message") if errors else data.get("message") or f"HTTP {response.status_code}"
+        )
+        return {"delivered": False, "phone_number": msisdn, "error": str(error_msg)}
+    except requests.Timeout:
+        logger.warning("[Briq] send_whatsapp_template timed out for %s", msisdn)
+        return {"delivered": False, "error": "WhatsApp request timed out."}
+    except requests.RequestException as exc:
+        logger.exception("[Briq] send_whatsapp_template failed")
+        return {"delivered": False, "error": str(exc)}
+
+
+def send_integrity_alert(
+    phone_number: str,
+    *,
+    sms_body: str,
+    whatsapp_variables: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Send integrity alert on SMS and WhatsApp independently (either can fail)."""
+    sms_result = send_sms(phone_number, sms_body)
+
+    whatsapp_result: dict[str, Any] = {"delivered": False, "skipped": True}
+    if getattr(settings, "BRIQ_INTEGRITY_ALERT_WHATSAPP", True):
+        template = (getattr(settings, "BRIQ_INTEGRITY_WHATSAPP_TEMPLATE", "") or "").strip()
+        if template:
+            whatsapp_result = send_whatsapp_template(
+                phone_number,
+                template,
+                whatsapp_variables or {"1": sms_body[:200]},
+            )
+            whatsapp_result.pop("skipped", None)
+        else:
+            whatsapp_result = {
+                "delivered": False,
+                "skipped": True,
+                "error": "BRIQ_INTEGRITY_WHATSAPP_TEMPLATE not set.",
+            }
+
+    return {
+        "sms": sms_result,
+        "whatsapp": whatsapp_result,
+        "delivered": bool(sms_result.get("delivered") or whatsapp_result.get("delivered")),
+    }
+
+
 def verify_otp(phone_number: str, code: str) -> dict[str, Any]:
     """Verify a farmer-submitted code with Briq. Returns verified + error details."""
     api_key = getattr(settings, "BRIQ_API_KEY", "")

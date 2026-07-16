@@ -53,6 +53,7 @@ class AdminUserCreateSerializer(serializers.Serializer):
     district = serializers.CharField(required=False, allow_blank=True)
     region = serializers.CharField(required=False, allow_blank=True)
     warehouse_id = serializers.IntegerField(required=False)
+    organization = serializers.CharField(required=False, allow_blank=True)
 
 
 class AdminUserUpdateSerializer(serializers.Serializer):
@@ -71,6 +72,7 @@ class AdminUserUpdateSerializer(serializers.Serializer):
     district = serializers.CharField(required=False, allow_blank=True)
     region = serializers.CharField(required=False, allow_blank=True)
     warehouse_id = serializers.IntegerField(required=False, allow_null=True)
+    organization = serializers.CharField(required=False, allow_blank=True)
 
 
 class SupplierSerializer(serializers.ModelSerializer):

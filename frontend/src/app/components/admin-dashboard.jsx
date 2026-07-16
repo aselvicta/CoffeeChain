@@ -108,7 +108,17 @@ const PHONE_PREFIX = '+255 ';
 function emptyFormForRole(role) {
   const base = { username: '', password: '', first_name: '', last_name: '', email: '' };
   if (role === 'supplier') return { ...base, supplier_name: '', supplier_region: '', contact_phone: PHONE_PREFIX };
-  if (role === 'warehouse_manager') return { ...base, supplier_id: '', warehouse_id: '' };
+  if (role === 'warehouse_manager') {
+    return {
+      ...base,
+      supplier_id: '',
+      warehouse_id: '',
+      organization: '',
+      contact_phone: PHONE_PREFIX,
+      region: '',
+      district: '',
+    };
+  }
   if (role === 'retailer') return { ...base, branch_name: '', branch_type: 'RETAILER', district: '', region: '', contact_phone: PHONE_PREFIX };
   if (role === 'cooperative') return { ...base, branch_name: '', branch_type: 'COOPERATIVE', district: '', region: '', contact_phone: PHONE_PREFIX };
   if (role === 'regulator') return { ...base, branch_name: '', branch_type: 'REGULATOR', district: '', region: '', contact_phone: PHONE_PREFIX };
@@ -181,6 +191,8 @@ function UserFormModal({ role, editingUser, suppliers, warehouses, onClose, onSa
       const s = editingUser.supplier;
       const b = editingUser.branch;
       const wm = editingUser.warehouse_manager;
+      const p = editingUser.profile || {};
+      const phoneRaw = s?.contact_phone || b?.contact_phone || p.contact_phone || '';
       return {
         username: u.username || '',
         password: '',
@@ -189,13 +201,14 @@ function UserFormModal({ role, editingUser, suppliers, warehouses, onClose, onSa
         email: u.email || '',
         supplier_name: s?.name || '',
         supplier_region: s?.region || '',
-        contact_phone: (() => { const p = s?.contact_phone || b?.contact_phone || ''; return p && !p.startsWith('+255') ? PHONE_PREFIX + p.replace(/^0/, '') : (p || PHONE_PREFIX); })(),
+        organization: p.organization || b?.name || wm?.supplier?.name || '',
+        contact_phone: phoneRaw && !phoneRaw.startsWith('+255') ? PHONE_PREFIX + phoneRaw.replace(/^0/, '') : (phoneRaw || PHONE_PREFIX),
         supplier_id: wm?.supplier?.id ? String(wm.supplier.id) : '',
         warehouse_id: wm?.assigned_warehouse_id ? String(wm.assigned_warehouse_id) : '',
-        branch_name: b?.name || '',
+        branch_name: b?.name || p.organization || '',
         branch_type: b?.branch_type || (role === 'retailer' ? 'RETAILER' : role === 'cooperative' ? 'COOPERATIVE' : 'REGULATOR'),
-        district: b?.district || '',
-        region: b?.region || s?.region || '',
+        district: b?.district || p.district || '',
+        region: b?.region || s?.region || p.region || '',
       };
     }
     return emptyFormForRole(role);
@@ -215,7 +228,7 @@ function UserFormModal({ role, editingUser, suppliers, warehouses, onClose, onSa
       return form.branch_name.trim() && form.contact_phone.trim() && form.region && form.district;
     }
     if (role === 'warehouse_manager') {
-      return !!form.supplier_id;
+      return !!form.supplier_id && form.contact_phone.trim() && form.region;
     }
     return true;
   })();
@@ -339,6 +352,30 @@ function UserFormModal({ role, editingUser, suppliers, warehouses, onClose, onSa
                 <option value="">Select warehouse…</option>
                 {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name} {w.section ? `(${w.section})` : ''}</option>)}
               </FormSelect>
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-wide pt-1">Contact Details</p>
+              <FormInput
+                label="Organisation"
+                value={form.organization}
+                onChange={set('organization')}
+                placeholder="e.g. Mbeya Fertilizers Ltd"
+              />
+              <FormInput
+                label="Contact phone"
+                required
+                value={form.contact_phone}
+                onChange={(e) => { if (e.target.value.startsWith('+255')) set('contact_phone')(e); }}
+                placeholder="+255 7XX XXX XXX"
+              />
+              <div className="grid grid-cols-2 gap-3">
+                <FormSelect label="Region" required value={form.region} onChange={(e) => setForm((p) => ({ ...p, region: e.target.value, district: '' }))}>
+                  <option value="">Select region…</option>
+                  {REGION_LIST.map((r) => <option key={r} value={r}>{r}</option>)}
+                </FormSelect>
+                <FormSelect label="District" value={form.district} onChange={set('district')} disabled={!form.region}>
+                  <option value="">Select district…</option>
+                  {districtOptions.map((d) => <option key={d} value={d}>{d}</option>)}
+                </FormSelect>
+              </div>
             </div>
           )}
 
@@ -374,15 +411,20 @@ function UserFormModal({ role, editingUser, suppliers, warehouses, onClose, onSa
 
 function UserDetailModal({ record, onClose, onEdit, readOnly = false }) {
   if (!record) return null;
-  const { user, role, supplier, branch, warehouse_manager } = record;
+  const { user, role, supplier, branch, warehouse_manager, profile } = record;
   const entity = supplier || branch;
   const roleColor = getRoleColor(role);
   const roleLabel = getRoleLabel(role);
 
   const imageUrl = supplier?.store_image_url || branch?.shop_image_url;
-  const phone = supplier?.contact_phone || branch?.contact_phone;
-  const region = supplier?.region || branch?.region;
-  const district = branch?.district;
+  const phone = supplier?.contact_phone || branch?.contact_phone || profile?.contact_phone;
+  const region = supplier?.region || branch?.region || profile?.region;
+  const district = branch?.district || profile?.district;
+  const organisation =
+    profile?.organization ||
+    supplier?.name ||
+    branch?.name ||
+    warehouse_manager?.supplier?.name;
   const lat = supplier?.location_lat || branch?.location_lat;
   const lng = supplier?.location_lng || branch?.location_lng;
   const fullName = [user?.first_name, user?.last_name].filter(Boolean).join(' ');
@@ -448,14 +490,14 @@ function UserDetailModal({ record, onClose, onEdit, readOnly = false }) {
             </div>
           </section>
 
-          {/* Organisation */}
-          {entity && (
+          {/* Organisation / contact */}
+          {(entity || organisation || phone || region) && (
             <>
               <div className="border-t border-gray-100" />
               <section>
                 <p className="text-xs font-bold text-green-700 uppercase tracking-widest mb-3">Organisation</p>
                 <div className="grid grid-cols-2 gap-x-8 gap-y-3">
-                  <DetailRow label="Name" value={entity.name} span />
+                  <DetailRow label="Name" value={organisation || entity?.name || '—'} span />
                   {phone && <DetailRow label="Phone" value={phone} />}
                   {region && <DetailRow label="Region" value={region} />}
                   {district && <DetailRow label="District" value={district} />}
@@ -661,9 +703,23 @@ function RoleUserTable({ role, users, suppliers, warehouses, onRefresh, readOnly
             )}
             {pageItems.map((record) => {
               const u = record.user || {};
-              const org = record.supplier?.name || record.branch?.name || record.warehouse_manager?.supplier?.name || '—';
-              const phone = record.supplier?.contact_phone || record.branch?.contact_phone || '—';
-              const region = record.supplier?.region || record.branch?.region || '—';
+              const p = record.profile || {};
+              const org =
+                p.organization ||
+                record.supplier?.name ||
+                record.branch?.name ||
+                record.warehouse_manager?.supplier?.name ||
+                '—';
+              const phone =
+                record.supplier?.contact_phone ||
+                record.branch?.contact_phone ||
+                p.contact_phone ||
+                '—';
+              const region =
+                record.supplier?.region ||
+                record.branch?.region ||
+                p.region ||
+                '—';
               return (
                 <tr key={u.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                   <td className="py-3 px-4 font-medium text-gray-900">{u.username}</td>

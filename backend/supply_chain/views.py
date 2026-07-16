@@ -170,9 +170,17 @@ def build_user_payload(user):
     warehouse_manager = (
         WarehouseManager.objects.filter(user=user).select_related("supplier").first()
     )
+    up = getattr(user, "profile", None)
+    profile = {
+        "contact_phone": up.contact_phone if up else "",
+        "organization": up.organization if up else "",
+        "region": up.region if up else "",
+        "district": up.district if up else "",
+    }
     return {
         "user": UserSerializer(user).data,
         "role": role,
+        "profile": profile,
         "supplier": SupplierSerializer(supplier).data if supplier else None,
         "branch": BranchSerializer(branch).data if branch else None,
         "warehouse_manager": (
@@ -181,6 +189,56 @@ def build_user_payload(user):
             else None
         ),
     }
+
+
+def _upsert_user_profile(user, data: dict) -> None:
+    """Save contact/org/location on UserProfile (warehouse managers, etc.)."""
+    from .models import UserProfile
+
+    profile_fields = ("contact_phone", "organization", "region", "district")
+    if not any(field in data for field in profile_fields):
+        return
+    up, _ = UserProfile.objects.get_or_create(user=user)
+    for field in profile_fields:
+        if field in data:
+            setattr(up, field, data[field] or "")
+    up.save()
+
+
+def _branch_type_for_role(role: str) -> str:
+    return {
+        "retailer": Branch.RETAILER,
+        "cooperative": Branch.COOPERATIVE,
+        "regulator": Branch.REGULATOR,
+    }.get(role, Branch.RETAILER)
+
+
+def _upsert_user_branch(user, role: str, data: dict) -> None:
+    """Create or update branch record for retailer / cooperative / regulator."""
+    if role not in {"retailer", "cooperative", "regulator"}:
+        return
+    branch = Branch.objects.filter(user=user).first()
+    if not branch:
+        branch = Branch.objects.create(
+            user=user,
+            name=data.get("branch_name") or user.username,
+            branch_type=data.get("branch_type") or _branch_type_for_role(role),
+            district=data.get("district", ""),
+            region=data.get("region", ""),
+            contact_phone=data.get("contact_phone", ""),
+        )
+        return
+    if data.get("branch_name"):
+        branch.name = data["branch_name"]
+    if "branch_type" in data:
+        branch.branch_type = data["branch_type"]
+    if "region" in data:
+        branch.region = data["region"]
+    if "district" in data:
+        branch.district = data["district"]
+    if "contact_phone" in data:
+        branch.contact_phone = data["contact_phone"]
+    branch.save()
 
 
 def _get_supplier_for_user(user):
@@ -377,12 +435,14 @@ class AdminUserViewSet(viewsets.ViewSet):
                     )
                 supplier = get_object_or_404(Supplier, pk=supplier_id)
                 WarehouseManager.objects.create(user=user, supplier=supplier)
+                _upsert_user_profile(user, data)
             if role in {"retailer", "cooperative", "regulator"}:
                 Branch.objects.create(
                     name=data.get("branch_name") or user.username,
-                    branch_type=data.get("branch_type") or Branch.RETAILER,
+                    branch_type=data.get("branch_type") or _branch_type_for_role(role),
                     district=data.get("district", ""),
                     region=data.get("region", ""),
+                    contact_phone=data.get("contact_phone", ""),
                     user=user,
                 )
 
@@ -454,19 +514,7 @@ class AdminUserViewSet(viewsets.ViewSet):
                         supplier.contact_phone = data["contact_phone"]
                     supplier.save()
             elif role in {"retailer", "cooperative", "regulator"}:
-                branch = Branch.objects.filter(user=user).first()
-                if branch:
-                    if data.get("branch_name"):
-                        branch.name = data["branch_name"]
-                    if "branch_type" in data:
-                        branch.branch_type = data["branch_type"]
-                    if "region" in data:
-                        branch.region = data["region"]
-                    if "district" in data:
-                        branch.district = data["district"]
-                    if "contact_phone" in data:
-                        branch.contact_phone = data["contact_phone"]
-                    branch.save()
+                _upsert_user_branch(user, role, data)
             elif role == "warehouse_manager":
                 warehouse_id = data.get("warehouse_id")
                 if "warehouse_id" in data:
@@ -479,6 +527,7 @@ class AdminUserViewSet(viewsets.ViewSet):
                             if wh:
                                 wh.assigned_manager = manager
                                 wh.save(update_fields=["assigned_manager"])
+                _upsert_user_profile(user, data)
 
         return Response(build_user_payload(user))
 
