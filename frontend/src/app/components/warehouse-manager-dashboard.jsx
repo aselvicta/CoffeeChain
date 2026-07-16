@@ -51,6 +51,7 @@ import {
   PanelPrimaryButton,
   QuickActionCard,
 } from './ui/dashboard-ui';
+import { ActorCompliancePanel } from './compliance-panels';
 import {
   Dialog,
   DialogContent,
@@ -395,7 +396,7 @@ function TransferList({ items, busyId, onReview, emptyMessage }) {
 
 export function WarehouseManagerDashboard({ userProfile, onLogout }) {
   const dashboardRole = 'warehouse_manager';
-  const dashboardTabs = ['overview', 'orders', 'pending', 'inventory', 'history', 'analytics'];
+  const dashboardTabs = ['overview', 'orders', 'pending', 'inventory', 'compliance', 'history', 'analytics'];
   const [activeTab, setActiveTab] = useState('overview');
   const [transfers, setTransfers] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
@@ -591,6 +592,7 @@ export function WarehouseManagerDashboard({ userProfile, onLogout }) {
     { id: 'orders', label: 'Orders Queue', icon: ShoppingBag, badge: activeOrdersCount },
     { id: 'pending', label: 'Pending Approval', icon: Clock, badge: pendingTransfers.length },
     { id: 'inventory', label: 'Warehouse Inventory', icon: Warehouse },
+    { id: 'compliance', label: 'Compliance', icon: AlertCircle },
     { id: 'history', label: 'Dispatch History', icon: History },
     { id: 'analytics', label: 'Analytics', icon: TrendingUp },
   ];
@@ -644,6 +646,7 @@ export function WarehouseManagerDashboard({ userProfile, onLogout }) {
                 onMarkRead={markRead}
                 onMarkAllRead={markAllRead}
                 onDismiss={dismiss}
+                onNavigateTab={(tab) => goToTab(tab || 'overview')}
               />
               <button
                 type="button"
@@ -922,6 +925,11 @@ export function WarehouseManagerDashboard({ userProfile, onLogout }) {
               )}
             </div>
           )}
+
+          {activeTab === 'compliance' && (
+            <ActorCompliancePanel roleLabel="warehouse organisation" />
+          )}
+
           {activeTab === 'analytics' && (
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6">
               <AnalyticsExportBar

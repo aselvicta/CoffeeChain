@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router';
 import {
   AlertCircle, BarChart3, Building2, CheckCircle, ChevronRight, Clock,
   Eye, Lock, LogOut, Package, Pencil, Plus, Search, Shield, ShoppingCart,
-  Trash2, TrendingUp, User, Users, UserX, UserCheck, Warehouse, X, AlertTriangle,
+  Trash2, TrendingUp, User, Users, UserX, UserCheck, Warehouse, X, AlertTriangle, ShieldAlert,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Logo } from './logo';
@@ -14,7 +14,7 @@ import {
 import { createUser, fetchAuditReport, fetchBatches, fetchBranches, fetchSuppliers,
   fetchTransfers, fetchUser, fetchUsers, updateUser, deleteUser, toggleUserActive,
   fetchPendingRegistrations, fetchPendingRegistration, approvePendingRegistration, rejectPendingRegistration,
-  fetchWarehouses, updateMyProfile, fetchProfile,
+  fetchWarehouses, updateMyProfile, fetchProfile, fetchComplianceRecommendations,
 } from '../api/client';
 import { NotificationBell } from './notification-bell';
 import { useNotifications } from '../hooks/use-notifications';
@@ -28,6 +28,12 @@ import { ConfirmDialog } from './ui/confirm-dialog';
 import { IntegrityPanel } from './integrity-panel';
 import { getRoleLabel, getRoleColor } from '../utils/role-labels';
 import { ReportsPanel } from './reports-panel';
+import {
+  AdminCompliancePanel,
+  ComplianceStatusPill,
+  ComplianceSummaryCard,
+  RegulatorComplianceHub,
+} from './compliance-panels';
 
 const ANALYTICS_COLORS = ['#16a34a', '#84cc16', '#0f766e', '#22c55e', '#65a30d', '#15803d'];
 
@@ -572,6 +578,7 @@ function Row({ label, value, children }) {
 
 function RoleUserTable({ role, users, suppliers, warehouses, onRefresh, readOnly = false }) {
   const [search, setSearch] = useState('');
+  const [complianceFilter, setComplianceFilter] = useState('all');
   const [showForm, setShowForm] = useState(false);
   const [editingRecord, setEditingRecord] = useState(null);
   const [detailRecord, setDetailRecord] = useState(null);
@@ -586,9 +593,11 @@ function RoleUserTable({ role, users, suppliers, warehouses, onRefresh, readOnly
       if (r.role !== role) return false;
       const name = (r.user?.username || '').toLowerCase();
       const org = (r.supplier?.name || r.branch?.name || r.warehouse_manager?.supplier?.name || '').toLowerCase();
-      return !q || name.includes(q) || org.includes(q);
+      const status = r.compliance_status?.status || 'good_standing';
+      const statusMatch = complianceFilter === 'all' || status === complianceFilter;
+      return (!q || name.includes(q) || org.includes(q)) && statusMatch;
     });
-  }, [users, role, search]);
+  }, [users, role, search, complianceFilter]);
 
   const { page, pageItems, totalPages, setPage } = usePaginatedList(filtered, HISTORY_PAGE_SIZE);
 
@@ -668,6 +677,16 @@ function RoleUserTable({ role, users, suppliers, warehouses, onRefresh, readOnly
             className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
           />
         </div>
+        <select
+          value={complianceFilter}
+          onChange={(event) => setComplianceFilter(event.target.value)}
+          className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+        >
+          <option value="all">All compliance</option>
+          <option value="good_standing">Good standing</option>
+          <option value="under_review">Under review</option>
+          <option value="flagged">Flagged</option>
+        </select>
         {!readOnly && (
           <button
             onClick={openCreate}
@@ -689,6 +708,7 @@ function RoleUserTable({ role, users, suppliers, warehouses, onRefresh, readOnly
               <th className="text-left py-3 px-4 font-semibold text-gray-700">Organisation</th>
               <th className="text-left py-3 px-4 font-semibold text-gray-700">Contact</th>
               <th className="text-left py-3 px-4 font-semibold text-gray-700">Region</th>
+              <th className="text-left py-3 px-4 font-semibold text-gray-700">Compliance</th>
               <th className="text-left py-3 px-4 font-semibold text-gray-700">Status</th>
               <th className="text-left py-3 px-4 font-semibold text-gray-700">{readOnly ? 'View' : 'Actions'}</th>
             </tr>
@@ -696,7 +716,7 @@ function RoleUserTable({ role, users, suppliers, warehouses, onRefresh, readOnly
           <tbody>
             {pageItems.length === 0 && (
               <tr>
-                <td colSpan={7} className="py-10 text-center text-sm text-gray-400">
+                <td colSpan={8} className="py-10 text-center text-sm text-gray-400">
                   No {roleConf?.label || role} found.
                 </td>
               </tr>
@@ -729,6 +749,9 @@ function RoleUserTable({ role, users, suppliers, warehouses, onRefresh, readOnly
                   <td className="py-3 px-4 text-gray-700">{org}</td>
                   <td className="py-3 px-4 text-gray-600">{phone}</td>
                   <td className="py-3 px-4 text-gray-600">{region}</td>
+                  <td className="py-3 px-4">
+                    <ComplianceStatusPill status={record.compliance_status?.status} />
+                  </td>
                   <td className="py-3 px-4">
                     {u.is_active ? (
                       <span className="inline-flex items-center gap-1 text-xs bg-green-100 text-green-700 rounded-full px-2 py-0.5 font-medium">
@@ -1449,10 +1472,11 @@ function AdminProfilePanel({ userProfile }) {
 export function AdminDashboard({ userProfile, onLogout }) {
   const readOnly = Boolean(userProfile?.readOnly || userProfile?.role === 'regulator');
   const dashboardRole = readOnly ? 'regulator' : 'admin';
-  const dashboardTabs = ['overview', 'users', 'registrations', 'reports', 'integrity', 'profile'];
+  const dashboardTabs = ['overview', 'users', 'registrations', 'reports', 'integrity', 'compliance', 'profile'];
   const [activeTab, setActiveTab] = useState('overview');
   const [activeRoleTab, setActiveRoleTab] = useState('supplier');
   const [integrityHighlightId, setIntegrityHighlightId] = useState('');
+  const [complianceDraft, setComplianceDraft] = useState(null);
 
   const [suppliers, setSuppliers] = useState([]);
   const [retailers, setRetailers] = useState([]);
@@ -1461,6 +1485,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
   const [batches, setBatches] = useState([]);
   const [transferData, setTransferData] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
+  const [pendingRecommendationCount, setPendingRecommendationCount] = useState(0);
   const [audit, setAudit] = useState({ dispatched: 0, received: 0, verified: 0, gap: 0 });
   const [statusMessage, setStatusMessage] = useState('');
 
@@ -1489,7 +1514,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
 
   const loadData = async () => {
     try {
-      const [supplierData, branchData, auditData, transferRecords, userData, batchRecords, warehouseData] = await Promise.all([
+      const [supplierData, branchData, auditData, transferRecords, userData, batchRecords, warehouseData, recommendationData] = await Promise.all([
         fetchSuppliers(),
         fetchBranches(),
         fetchAuditReport(),
@@ -1497,6 +1522,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
         fetchUsers(),
         fetchBatches(),
         fetchWarehouses(),
+        fetchComplianceRecommendations({ decision: 'pending' }),
       ]);
       setTransferData(transferRecords);
       setBatches(batchRecords);
@@ -1531,6 +1557,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
       );
       setAudit(auditData);
       setUsers(userData);
+      setPendingRecommendationCount(Array.isArray(recommendationData) ? recommendationData.length : 0);
       await refreshNotifications();
     } catch (error) {
       setStatusMessage(getUserMessage(error));
@@ -1568,6 +1595,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
     { id: 'registrations', label: 'Registrations', icon: UserCheck },
     { id: 'reports', label: 'Reports', icon: TrendingUp },
     { id: 'integrity', label: 'Chain Integrity', icon: Shield },
+    { id: 'compliance', label: 'Compliance', icon: ShieldAlert },
     { id: 'profile', label: 'My Account', icon: User },
   ];
 
@@ -1578,6 +1606,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
         registrations: 'Registration Requests',
         reports: 'Reports',
         integrity: 'Chain Integrity',
+        compliance: 'Compliance & Certificates',
         profile: 'My Account',
       }
     : {
@@ -1586,6 +1615,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
         registrations: 'Registration Requests',
         reports: 'Reports',
         integrity: 'Chain Integrity',
+        compliance: 'Regulatory Recommendations',
         profile: 'My Account',
       };
 
@@ -1686,6 +1716,11 @@ export function AdminDashboard({ userProfile, onLogout }) {
                   </div>
                 ))}
               </div>
+              {!readOnly && (
+                <div className="max-w-sm">
+                  <ComplianceSummaryCard pendingCount={pendingRecommendationCount} onOpen={() => goToTab('compliance')} />
+                </div>
+              )}
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                 <div className="bg-white rounded-xl border border-gray-200 p-5">
@@ -1816,10 +1851,32 @@ export function AdminDashboard({ userProfile, onLogout }) {
           {/* Integrity */}
           {activeTab === 'integrity' && (
             <IntegrityPanel
-              userProfile={userProfile}
-              initialHighlightId={integrityHighlightId}
-              onClearHighlight={() => setIntegrityHighlightId('')}
+              highlightTransferId={integrityHighlightId}
+              onRaiseFlag={(item) => {
+                const branchId = item.from_branch_id || item.to_branch_id;
+                const supplierId = item.from_supplier_id;
+                setComplianceDraft({
+                  target_type: 'transfer',
+                  target_id: String(item.transfer_id || ''),
+                  evidence_ref: item.stored_hash || `Transfer #${item.transfer_id || ''}`,
+                  flagged_organisation_type: branchId ? 'branch' : 'supplier',
+                  flagged_organisation_id: String(branchId || supplierId || ''),
+                  reason: item.compare_status === 'mismatch' ? 'Integrity mismatch' : '',
+                  description: item.batch_code
+                    ? `Raised from Chain Integrity for batch ${item.batch_code}.`
+                    : '',
+                });
+                goToTab('compliance');
+              }}
             />
+          )}
+
+          {activeTab === 'compliance' && (
+            readOnly ? (
+              <RegulatorComplianceHub initialDraft={complianceDraft} />
+            ) : (
+              <AdminCompliancePanel />
+            )
           )}
 
           {activeTab === 'profile' && (

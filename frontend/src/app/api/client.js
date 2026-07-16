@@ -690,3 +690,120 @@ export function fetchSupplierCatalog(params = {}) {
   const suffix = query.toString() ? `?${query.toString()}` : '';
   return apiFetch(`/api/supplier-catalog/${suffix}`);
 }
+
+// ─── Compliance API ──────────────────────────────────────────────────────────
+
+export function fetchComplianceFlags(params = {}) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '') return;
+    query.set(key, String(value));
+  });
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  return apiFetch(`/api/compliance/flags/${suffix}`);
+}
+
+export function fetchComplianceFlag(id) {
+  return apiFetch(`/api/compliance/flags/${id}/`);
+}
+
+export function createComplianceFlag(payload) {
+  return apiFetch('/api/compliance/flags/', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateComplianceFlag(id, payload) {
+  return apiFetch(`/api/compliance/flags/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function respondToComplianceFlag(id, message) {
+  return apiFetch(`/api/compliance/flags/${id}/respond/`, {
+    method: 'POST',
+    body: JSON.stringify({ message }),
+  });
+}
+
+export function recommendComplianceAction(id, payload) {
+  return apiFetch(`/api/compliance/flags/${id}/recommend/`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchComplianceRecommendations(params = {}) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '') return;
+    query.set(key, String(value));
+  });
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  return apiFetch(`/api/compliance/recommendations/${suffix}`);
+}
+
+export function decideComplianceRecommendation(id, payload) {
+  return apiFetch(`/api/compliance/recommendations/${id}/decide/`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchOrganisationCertificates(params = {}) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '') return;
+    query.set(key, String(value));
+  });
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  return apiFetch(`/api/compliance/certificates/${suffix}`);
+}
+
+export async function uploadOrganisationCertificate(payload, retryOnUnauthorized = true) {
+  const token = getAccessToken();
+  const formData = new FormData();
+  formData.append('document_type', payload.document_type);
+  formData.append('certificate_number', payload.certificate_number || '');
+  formData.append('issuing_authority', payload.issuing_authority || '');
+  if (payload.issued_on) formData.append('issued_on', payload.issued_on);
+  formData.append('expires_on', payload.expires_on);
+  formData.append('notes', payload.notes || '');
+  if (payload.document) formData.append('document', payload.document);
+
+  const response = await fetch(`${API_BASE}/api/compliance/certificates/`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
+  });
+
+  if (response.status === 401 && retryOnUnauthorized) {
+    const refreshedToken = await refreshAccessToken();
+    if (refreshedToken) {
+      return uploadOrganisationCertificate(payload, false);
+    }
+    clearSession();
+    notifySessionExpired();
+    throw new AuthError('Your session has expired. Please sign in again.', 401);
+  }
+
+  if (!response.ok) {
+    let errorData = null;
+    try {
+      errorData = await response.json();
+    } catch {
+      // ignore
+    }
+    throw new Error(getUserMessage(errorData, 'Failed to upload certificate.'));
+  }
+  return response.json();
+}
+
+export function reviewOrganisationCertificate(id, payload) {
+  return apiFetch(`/api/compliance/certificates/${id}/review/`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}

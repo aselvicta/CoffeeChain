@@ -13,6 +13,7 @@ import { CooperativeHistoryPanel } from './cooperative-history-panel';
 import { VerificationTrustSeal } from './verification-trust-seal';
 import { SupplierCatalogPanel } from './supplier-catalog-panel';
 import { BranchOrdersPanel } from './branch-orders-panel';
+import { ActorCompliancePanel } from './compliance-panels';
 import {
   createTransfer,
   fetchOrders,
@@ -44,7 +45,7 @@ import { PaginationBar, RecentListNote } from './ui/pagination-bar';
 
 export function RetailerDashboard({ userProfile, onLogout }) {
   const dashboardRole = 'retailer';
-  const dashboardTabs = ['overview', 'catalog', 'orders', 'receive', 'distribute', 'customers', 'verification', 'history', 'analytics'];
+  const dashboardTabs = ['overview', 'catalog', 'orders', 'receive', 'distribute', 'customers', 'verification', 'compliance', 'history', 'analytics'];
   const [activeTab, setActiveTab] = useState('overview');
   const [inboundTransfers, setInboundTransfers] = useState([]);
   const [distributionForm, setDistributionForm] = useState({ batchId: '', bags: '' });
@@ -290,6 +291,7 @@ export function RetailerDashboard({ userProfile, onLogout }) {
             { id: 'distribute', label: 'Point of Sale', icon: Send },
             { id: 'customers', label: 'Customers', icon: Users },
             { id: 'verification', label: 'Verify Distribution', icon: ShieldCheck },
+            { id: 'compliance', label: 'Compliance', icon: ShieldCheck },
             { id: 'history', label: 'History', icon: History },
             { id: 'analytics', label: 'Analytics', icon: TrendingUp },
           ].map((item) => (
@@ -885,6 +887,10 @@ export function RetailerDashboard({ userProfile, onLogout }) {
                 {statusMessage && <p className="mt-3 text-sm text-red-600">{statusMessage}</p>}
               </div>
             </div>
+          )}
+
+          {activeTab === 'compliance' && (
+            <ActorCompliancePanel roleLabel="retailer branch" />
           )}
 
           {activeTab === 'history' && (

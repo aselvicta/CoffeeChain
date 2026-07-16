@@ -51,6 +51,7 @@ router.register("orders", OrderViewSet, basename="orders")
 
 urlpatterns = [
     path("", include(router.urls)),
+    path("compliance/", include("compliance.urls")),
     path("warehouse-catalog/", WarehouseCatalogView.as_view(), name="warehouse-catalog"),
     path("supplier-catalog/", SupplierCatalogView.as_view(), name="supplier-catalog"),
     path("fertilizer-types/", FertilizerTypeCatalogView.as_view(), name="fertilizer-types"),

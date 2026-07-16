@@ -10,6 +10,7 @@ import { StockInModal } from './stock-in-modal';
 import { createTransfer, createWarehouse, deleteWarehouse, fetchBatches, fetchBranches, fetchIssues, fetchOrders, fetchTransfers, fetchWarehouseCatalog, fetchWarehouses, resolveIssue } from '../api/client';
 import { IncomingOrdersPanel } from './incoming-orders-panel';
 import { QuickActionCard, PanelPrimaryButton, PanelOutlineButton } from './ui/dashboard-ui';
+import { ActorCompliancePanel } from './compliance-panels';
 import { ConfirmDialog } from './ui/confirm-dialog';
 import { buildDashboardPath, resolveDashboardTab } from '../utils/dashboard-routing';
 import { REGION_LIST, TANZANIA_REGIONS } from '../data/tanzania-locations';
@@ -57,7 +58,7 @@ function mapSupplierTransfer(transfer, getDispatchStatusMeta) {
 
 export function SupplierDashboard({ userProfile, onLogout }) {
   const dashboardRole = 'supplier';
-  const dashboardTabs = ['overview', 'orders', 'dispatch', 'dispatched', 'warehouse', 'issues', 'analytics', 'history'];
+  const dashboardTabs = ['overview', 'orders', 'dispatch', 'dispatched', 'warehouse', 'issues', 'compliance', 'analytics', 'history'];
   function createDispatchLineItem() {
     return {
       id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -586,6 +587,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
             { id: 'dispatched', label: 'Dispatched', icon: History },
             { id: 'warehouse', label: 'Warehouse', icon: Package },
             { id: 'issues', label: 'Issues', icon: AlertCircle },
+            { id: 'compliance', label: 'Compliance', icon: CheckCircle2 },
             { id: 'analytics', label: 'Analytics', icon: TrendingUp },
             { id: 'history', label: 'History', icon: History },
           ].map((item) => (
@@ -1355,6 +1357,10 @@ export function SupplierDashboard({ userProfile, onLogout }) {
                 </>
               )}
             </div>
+          )}
+
+          {activeTab === 'compliance' && (
+            <ActorCompliancePanel roleLabel="organisation" />
           )}
 
           {activeTab === 'analytics' && (

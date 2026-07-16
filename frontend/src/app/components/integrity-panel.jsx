@@ -360,7 +360,7 @@ function DetailModal({ item, onClose, initialView = 'compare' }) {
   );
 }
 
-export function IntegrityPanel({ highlightTransferId = '', onScanComplete }) {
+export function IntegrityPanel({ highlightTransferId = '', onScanComplete, onRaiseFlag }) {
   const [branches, setBranches] = useState([]);
   const [branchType, setBranchType] = useState('all');
   const [branchId, setBranchId] = useState('');
@@ -759,6 +759,16 @@ export function IntegrityPanel({ highlightTransferId = '', onScanComplete }) {
                               )}
                               Compare
                             </button>
+                            {onRaiseFlag && (
+                              <button
+                                type="button"
+                                onClick={() => onRaiseFlag(item)}
+                                className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100"
+                              >
+                                <AlertTriangle className="h-3.5 w-3.5" />
+                                Raise Flag
+                              </button>
+                            )}
                             {item.explorer_url && (
                               <a
                                 href={item.explorer_url}

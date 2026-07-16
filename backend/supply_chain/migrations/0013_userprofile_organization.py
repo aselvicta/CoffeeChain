@@ -1,10 +1,30 @@
 from django.db import migrations, models
 
 
+def add_organization_column(apps, schema_editor):
+    table_name = "supply_chain_userprofile"
+    column_name = "organization"
+
+    existing_columns = {
+        column.name
+        for column in schema_editor.connection.introspection.get_table_description(
+            schema_editor.connection.cursor(), table_name
+        )
+    }
+
+    if column_name in existing_columns:
+        return
+
+    schema_editor.execute(
+        "ALTER TABLE supply_chain_userprofile "
+        "ADD COLUMN organization varchar(200) NOT NULL DEFAULT '';"
+    )
+
+
 class Migration(migrations.Migration):
     """
     organization may already exist if 0012_userprofile was applied after the field
-    was folded into CreateModel; use IF NOT EXISTS so redeploys do not fail.
+    was folded into CreateModel; add the column only when missing.
     """
 
     dependencies = [
@@ -12,12 +32,10 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RunSQL(
-            sql=(
-                "ALTER TABLE supply_chain_userprofile "
-                "ADD COLUMN IF NOT EXISTS organization varchar(200) NOT NULL DEFAULT '';"
-            ),
-            reverse_sql=migrations.RunSQL.noop,
+        migrations.SeparateDatabaseAndState(
+            database_operations=[
+                migrations.RunPython(add_organization_column, migrations.RunPython.noop),
+            ],
             state_operations=[
                 migrations.AddField(
                     model_name="userprofile",

@@ -25,6 +25,7 @@ INSTALLED_APPS = [
     "rest_framework_simplejwt",
     "django_extensions",
     "supply_chain",
+    "compliance",
 ]
 
 MIDDLEWARE = [

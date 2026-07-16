@@ -14,27 +14,27 @@ import { Toaster } from 'sonner';
 const DASHBOARD_CONFIG = {
   admin: {
     defaultTab: 'overview',
-    validTabs: ['overview', 'users', 'registrations', 'reports', 'integrity', 'profile'],
+    validTabs: ['overview', 'users', 'registrations', 'reports', 'integrity', 'compliance', 'profile'],
   },
   regulator: {
     defaultTab: 'overview',
-    validTabs: ['overview', 'users', 'registrations', 'reports', 'integrity', 'profile'],
+    validTabs: ['overview', 'users', 'registrations', 'reports', 'integrity', 'compliance', 'profile'],
   },
   supplier: {
     defaultTab: 'overview',
-    validTabs: ['overview', 'orders', 'dispatch', 'dispatched', 'warehouse', 'issues', 'analytics', 'history'],
+    validTabs: ['overview', 'orders', 'dispatch', 'dispatched', 'warehouse', 'issues', 'compliance', 'analytics', 'history'],
   },
   retailer: {
     defaultTab: 'overview',
-    validTabs: ['overview', 'catalog', 'orders', 'receive', 'distribute', 'customers', 'verification', 'history', 'analytics'],
+    validTabs: ['overview', 'catalog', 'orders', 'receive', 'distribute', 'customers', 'verification', 'compliance', 'history', 'analytics'],
   },
   cooperative: {
     defaultTab: 'overview',
-    validTabs: ['overview', 'catalog', 'orders', 'farmers', 'fertilizer-in', 'fertilizer-out', 'verification', 'history', 'analytics'],
+    validTabs: ['overview', 'catalog', 'orders', 'farmers', 'fertilizer-in', 'fertilizer-out', 'verification', 'compliance', 'history', 'analytics'],
   },
   warehouse_manager: {
     defaultTab: 'overview',
-    validTabs: ['overview', 'orders', 'pending', 'inventory', 'history', 'analytics'],
+    validTabs: ['overview', 'orders', 'pending', 'inventory', 'compliance', 'history', 'analytics'],
   },
 };
 

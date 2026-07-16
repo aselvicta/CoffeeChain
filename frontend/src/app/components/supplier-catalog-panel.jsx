@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { fetchSupplierCatalog, createOrder, fetchFertilizerTypes } from '../api/client';
 import { TANZANIA_REGIONS } from '../data/tanzania-locations';
+import { ComplianceStatusPill } from './compliance-panels';
 
 const REGION_LIST = Object.keys(TANZANIA_REGIONS).sort();
 
@@ -39,6 +40,7 @@ export function SupplierCatalogPanel({ onOrderPlaced, userProfile }) {
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [regionFilter, setRegionFilter] = useState('');
+  const [complianceFilter, setComplianceFilter] = useState('all');
   const [showOrderModal, setShowOrderModal] = useState(false);
   const [form, setForm] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -86,7 +88,9 @@ export function SupplierCatalogPanel({ onOrderPlaced, userProfile }) {
     const matchRegion =
       !regionFilter ||
       s.region?.toLowerCase().includes(regionFilter.toLowerCase());
-    return matchSearch && matchRegion;
+    const status = s.compliance_status?.status || 'good_standing';
+    const matchCompliance = complianceFilter === 'all' || status === complianceFilter;
+    return matchSearch && matchRegion && matchCompliance;
   });
 
   function openOrderModal(supplier) {
@@ -246,6 +250,16 @@ export function SupplierCatalogPanel({ onOrderPlaced, userProfile }) {
             <option key={r} value={r}>{r}</option>
           ))}
         </select>
+        <select
+          value={complianceFilter}
+          onChange={(e) => setComplianceFilter(e.target.value)}
+          className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 sm:w-52"
+        >
+          <option value="all">All standing levels</option>
+          <option value="good_standing">Good standing</option>
+          <option value="under_review">Under review</option>
+          <option value="flagged">Flagged</option>
+        </select>
       </div>
 
       {/* Status */}
@@ -300,6 +314,7 @@ export function SupplierCatalogPanel({ onOrderPlaced, userProfile }) {
                       {supplier.available_fertilizer_types.length !== 1 ? 's' : ''} in stock
                     </span>
                   )}
+                  <ComplianceStatusPill status={supplier.compliance_status?.status} />
                   {supplier.available_fertilizer_types?.length === 0 && (
                     <span className="text-xs font-medium text-amber-600">No certified stock (custom orders only)</span>
                   )}

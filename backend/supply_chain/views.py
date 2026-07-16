@@ -163,7 +163,11 @@ def user_can_view_transfer_receipt(user, transfer) -> bool:
     return False
 
 
-def build_user_payload(user):
+def _default_compliance_status():
+    return {"status": "good_standing", "open_flags": 0, "escalated_flags": 0}
+
+
+def build_user_payload(user, compliance_maps=None):
     role = resolve_role(user)
     supplier = Supplier.objects.filter(user=user).first()
     branch = Branch.objects.filter(user=user).first()
@@ -177,12 +181,25 @@ def build_user_payload(user):
         "region": up.region if up else "",
         "district": up.district if up else "",
     }
+    maps = compliance_maps or {}
+    if supplier:
+        compliance_status = maps.get("supplier", {}).get(supplier.id) or _default_compliance_status()
+    elif branch:
+        compliance_status = maps.get("branch", {}).get(branch.id) or _default_compliance_status()
+    elif warehouse_manager and warehouse_manager.supplier_id:
+        compliance_status = (
+            maps.get("supplier", {}).get(warehouse_manager.supplier_id) or _default_compliance_status()
+        )
+    else:
+        compliance_status = _default_compliance_status()
+
     return {
         "user": UserSerializer(user).data,
         "role": role,
         "profile": profile,
         "supplier": SupplierSerializer(supplier).data if supplier else None,
         "branch": BranchSerializer(branch).data if branch else None,
+        "compliance_status": compliance_status,
         "warehouse_manager": (
             WarehouseManagerSerializer(warehouse_manager).data
             if warehouse_manager
@@ -382,7 +399,10 @@ class AdminUserViewSet(viewsets.ViewSet):
 
     def list(self, request):
         users = User.objects.all().order_by("username")
-        return Response([build_user_payload(user) for user in users])
+        from compliance.services import bulk_compliance_snapshots
+
+        compliance_maps = bulk_compliance_snapshots()
+        return Response([build_user_payload(user, compliance_maps=compliance_maps) for user in users])
 
     def create(self, request):
         serializer = AdminUserCreateSerializer(data=request.data)
@@ -1326,6 +1346,9 @@ class TransferViewSet(viewsets.ModelViewSet):
                 raise ValidationError({"from_branch_id": "from_branch is required."})
             if not farmer:
                 raise ValidationError({"farmer_id": "farmer is required."})
+            from compliance.services import require_active_certificate
+
+            require_active_certificate(branch=from_branch)
             if (
                 from_branch.branch_type == Branch.COOPERATIVE
                 and farmer.cooperative_id
@@ -1371,6 +1394,12 @@ class TransferViewSet(viewsets.ModelViewSet):
                 discount_percent=discount_percent,
             )
         else:
+            from compliance.services import require_active_certificate
+
+            supplier = serializer.validated_data.get("from_supplier") or batch.supplier
+            if supplier:
+                require_active_certificate(supplier=supplier)
+
             warehouse = serializer.validated_data.get("warehouse") or batch.storage_location
             if not warehouse:
                 raise ValidationError({"warehouse_id": "Select a warehouse for this dispatch."})
@@ -2602,6 +2631,9 @@ class OrderViewSet(viewsets.ModelViewSet):
         branch = Branch.objects.filter(user=user).first()
         if not branch:
             raise ValidationError("Only retailers or cooperatives can place orders.")
+        from compliance.services import require_active_certificate
+
+        require_active_certificate(branch=branch)
         order = serializer.save(branch=branch, created_by=user, status=Order.PENDING)
         _notify_order_event(order, "placed")
 
@@ -2712,6 +2744,10 @@ class OrderViewSet(viewsets.ModelViewSet):
         supplier = _get_supplier_for_user(request.user)
         if not supplier:
             return Response({"detail": "Supplier profile not found."}, status=status.HTTP_403_FORBIDDEN)
+
+        from compliance.services import require_active_certificate
+
+        require_active_certificate(supplier=supplier)
 
         if batch.supplier != supplier:
             return Response({"detail": "Batch does not belong to your inventory."}, status=status.HTTP_403_FORBIDDEN)
@@ -2831,9 +2867,12 @@ class SupplierCatalogView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        from compliance.services import bulk_compliance_snapshots
+
         supplier_id = request.query_params.get("supplier_id")
         fertilizer_type = request.query_params.get("fertilizer_type", "").strip()
         region = request.query_params.get("region", "").strip()
+        compliance_maps = bulk_compliance_snapshots()
 
         suppliers = Supplier.objects.all()
         if supplier_id:
@@ -2877,6 +2916,10 @@ class SupplierCatalogView(APIView):
                     "supplier_name": supplier.name,
                     "region": supplier.region,
                     "contact_phone": supplier.contact_phone,
+                    "compliance_status": compliance_maps.get("supplier", {}).get(
+                        supplier.id,
+                        {"status": "good_standing", "open_flags": 0, "escalated_flags": 0},
+                    ),
                     "store_image_url": (
                         request.build_absolute_uri(supplier.store_image.url)
                         if supplier.store_image

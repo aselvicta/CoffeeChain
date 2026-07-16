@@ -13,6 +13,7 @@ import { StockBatchPicker } from './stock-batch-picker';
 import { VerificationTrustSeal } from './verification-trust-seal';
 import { SupplierCatalogPanel } from './supplier-catalog-panel';
 import { BranchOrdersPanel } from './branch-orders-panel';
+import { ActorCompliancePanel } from './compliance-panels';
 import {
   createTransfer,
   fetchFarmers,
@@ -45,7 +46,7 @@ import {
 
 export function CooperativeDashboard({ userProfile, onLogout }) {
   const dashboardRole = 'cooperative';
-  const dashboardTabs = ['overview', 'catalog', 'orders', 'farmers', 'fertilizer-in', 'fertilizer-out', 'verification', 'history', 'analytics'];
+  const dashboardTabs = ['overview', 'catalog', 'orders', 'farmers', 'fertilizer-in', 'fertilizer-out', 'verification', 'compliance', 'history', 'analytics'];
   const [activeTab, setActiveTab] = useState('overview');
   const [inboundTransfers, setInboundTransfers] = useState([]);
   const [distributionForm, setDistributionForm] = useState({
@@ -260,6 +261,7 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
             { id: 'fertilizer-in', label: 'Receive Fertilizer', icon: Package },
             { id: 'fertilizer-out', label: 'Distribute Fertilizer', icon: Send },
             { id: 'verification', label: 'Verify Distribution', icon: ShieldCheck },
+            { id: 'compliance', label: 'Compliance', icon: ShieldCheck },
             { id: 'analytics', label: 'Analytics', icon: TrendingUp },
             { id: 'history', label: 'History', icon: History },
           ].map((item) => (
@@ -766,6 +768,10 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
                 )}
               </div>
             </div>
+          )}
+
+          {activeTab === 'compliance' && (
+            <ActorCompliancePanel roleLabel="AMCOS" />
           )}
 
           {activeTab === 'history' && (
