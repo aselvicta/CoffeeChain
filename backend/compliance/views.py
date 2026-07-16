@@ -97,7 +97,11 @@ class ComplianceFlagViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixi
             user=request.user,
             details={"flag_id": flag.id, "target_type": flag.target_type, "target_id": flag.target_id},
         )
-        notify_flag_created(flag)
+        try:
+            notify_flag_created(flag)
+        except Exception:
+            # Never block flag creation on notification delivery issues.
+            pass
 
         return Response(ComplianceFlagDetailSerializer(flag).data, status=status.HTTP_201_CREATED)
 

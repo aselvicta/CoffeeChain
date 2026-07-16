@@ -220,6 +220,7 @@ export function RegulatorCompliancePanel({ initialDraft = null }) {
   const [orgTypeFilter, setOrgTypeFilter] = useState('all');
   const [detailFlag, setDetailFlag] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     target_type: 'transfer',
     target_id: '',
@@ -234,18 +235,24 @@ export function RegulatorCompliancePanel({ initialDraft = null }) {
     if (initialDraft) {
       setForm((prev) => ({ ...prev, ...initialDraft }));
       setShowCreate(true);
+      setStatusFilter('all');
+      setOrgTypeFilter('all');
     }
   }, [initialDraft]);
+
+  const loadFlags = async () => {
+    const flagData = await fetchComplianceFlags();
+    setFlags(Array.isArray(flagData) ? flagData : (flagData?.results || []));
+  };
 
   const load = async () => {
     setLoading(true);
     try {
-      const [flagData, supplierData, branchData] = await Promise.all([
-        fetchComplianceFlags(),
-        fetchSuppliers(),
-        fetchBranches(),
+      await loadFlags();
+      const [supplierData, branchData] = await Promise.all([
+        fetchSuppliers().catch(() => []),
+        fetchBranches().catch(() => []),
       ]);
-      setFlags(Array.isArray(flagData) ? flagData : []);
       setSuppliers(Array.isArray(supplierData) ? supplierData : []);
       setBranches(Array.isArray(branchData) ? branchData : []);
     } catch (error) {
@@ -281,12 +288,30 @@ export function RegulatorCompliancePanel({ initialDraft = null }) {
   };
 
   const submitFlag = async () => {
+    if (!form.target_id || Number.isNaN(Number(form.target_id)) || Number(form.target_id) <= 0) {
+      toast.error('Enter a valid target ID (transfer, batch, or user).');
+      return;
+    }
+    if (!form.reason.trim() || !form.description.trim()) {
+      toast.error('Reason and description are required.');
+      return;
+    }
+
+    const payload = {
+      target_type: form.target_type,
+      target_id: Number(form.target_id),
+      reason: form.reason.trim(),
+      description: form.description.trim(),
+      evidence_ref: form.evidence_ref || '',
+    };
+    if (form.flagged_organisation_id) {
+      payload.flagged_organisation_type = form.flagged_organisation_type;
+      payload.flagged_organisation_id = Number(form.flagged_organisation_id);
+    }
+
+    setSubmitting(true);
     try {
-      await createComplianceFlag({
-        ...form,
-        target_id: Number(form.target_id),
-        flagged_organisation_id: Number(form.flagged_organisation_id),
-      });
+      const created = await createComplianceFlag(payload);
       toast.success('Compliance flag raised.');
       setShowCreate(false);
       setForm({
@@ -298,9 +323,16 @@ export function RegulatorCompliancePanel({ initialDraft = null }) {
         description: '',
         evidence_ref: '',
       });
-      await load();
+      setStatusFilter('all');
+      setOrgTypeFilter('all');
+      if (created?.id) {
+        setFlags((prev) => [created, ...prev.filter((row) => row.id !== created.id)]);
+      }
+      await loadFlags();
     } catch (error) {
       toast.error(getUserMessage(error, 'Failed to raise compliance flag.'));
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -310,7 +342,7 @@ export function RegulatorCompliancePanel({ initialDraft = null }) {
       toast.success('Recommendation sent to admin.');
       const detail = await fetchComplianceFlag(flag.id);
       setDetailFlag(detail);
-      await load();
+      await loadFlags();
     } catch (error) {
       toast.error(getUserMessage(error, 'Failed to submit recommendation.'));
     }
@@ -322,7 +354,7 @@ export function RegulatorCompliancePanel({ initialDraft = null }) {
       toast.success('Flag moved to under review.');
       const detail = await fetchComplianceFlag(flag.id);
       setDetailFlag(detail);
-      await load();
+      await loadFlags();
     } catch (error) {
       toast.error(getUserMessage(error, 'Failed to update flag status.'));
     }
@@ -449,12 +481,13 @@ export function RegulatorCompliancePanel({ initialDraft = null }) {
                   onChange={(event) => setForm((prev) => ({ ...prev, flagged_organisation_id: event.target.value }))}
                   className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
                 >
-                  <option value="">Select organisation</option>
+                  <option value="">Auto from target (or select)</option>
                   {orgOptions.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
                 </select>
               </div>
+              <p className="text-xs text-gray-500">Organisation is optional when the target transfer/batch already belongs to an org.</p>
               <input
                 type="text"
                 value={form.reason}
@@ -479,7 +512,9 @@ export function RegulatorCompliancePanel({ initialDraft = null }) {
             </div>
             <div className="flex gap-2 border-t border-gray-200 px-6 py-4">
               <button type="button" onClick={() => setShowCreate(false)} className="flex-1 rounded-lg border border-gray-300 py-2 text-sm text-gray-700 hover:bg-gray-50">Cancel</button>
-              <button type="button" onClick={submitFlag} className="flex-1 rounded-lg bg-green-700 py-2 text-sm font-semibold text-white hover:bg-green-800">Raise Flag</button>
+              <button type="button" disabled={submitting} onClick={submitFlag} className="flex-1 rounded-lg bg-green-700 py-2 text-sm font-semibold text-white hover:bg-green-800 disabled:opacity-60">
+                {submitting ? 'Raising…' : 'Raise Flag'}
+              </button>
             </div>
           </div>
         </div>
@@ -1092,6 +1127,13 @@ export function RegulatorCertificatesPanel() {
 
 export function RegulatorComplianceHub({ initialDraft = null }) {
   const [section, setSection] = useState('flags');
+
+  useEffect(() => {
+    if (initialDraft) {
+      setSection('flags');
+    }
+  }, [initialDraft]);
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap gap-2">

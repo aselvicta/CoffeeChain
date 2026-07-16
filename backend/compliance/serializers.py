@@ -113,8 +113,12 @@ class ComplianceFlagDetailSerializer(ComplianceFlagListSerializer):
 
 
 class ComplianceFlagWriteSerializer(serializers.ModelSerializer):
-    flagged_organisation_type = serializers.ChoiceField(choices=["supplier", "branch"], write_only=True)
-    flagged_organisation_id = serializers.IntegerField(write_only=True)
+    flagged_organisation_type = serializers.ChoiceField(
+        choices=["supplier", "branch"], write_only=True, required=False, allow_null=True
+    )
+    flagged_organisation_id = serializers.IntegerField(
+        write_only=True, required=False, allow_null=True
+    )
 
     class Meta:
         model = ComplianceFlag
@@ -128,28 +132,94 @@ class ComplianceFlagWriteSerializer(serializers.ModelSerializer):
             "flagged_organisation_id",
         ]
 
+    def _resolve_org_from_target(self, target_type, target_id):
+        from supply_chain.models import Branch, FertilizerBatch, Supplier, Transfer
+
+        if target_type in (ComplianceFlag.TargetType.TRANSFER, ComplianceFlag.TargetType.DISPATCH):
+            transfer = Transfer.objects.select_related("from_supplier", "from_branch", "to_branch", "batch").filter(pk=target_id).first()
+            if not transfer:
+                return None, None
+            if transfer.from_branch_id:
+                return "branch", transfer.from_branch
+            if transfer.to_branch_id:
+                return "branch", transfer.to_branch
+            if transfer.from_supplier_id:
+                return "supplier", transfer.from_supplier
+            if transfer.batch and transfer.batch.supplier_id:
+                return "supplier", transfer.batch.supplier
+            return None, None
+
+        if target_type == ComplianceFlag.TargetType.BATCH:
+            batch = FertilizerBatch.objects.select_related("supplier").filter(pk=target_id).first()
+            if batch and batch.supplier_id:
+                return "supplier", batch.supplier
+            return None, None
+
+        if target_type == ComplianceFlag.TargetType.USER_ACCOUNT:
+            from django.contrib.auth import get_user_model
+
+            user = get_user_model().objects.filter(pk=target_id).first()
+            if not user:
+                return None, None
+            supplier = Supplier.objects.filter(user=user).first()
+            if supplier:
+                return "supplier", supplier
+            branch = Branch.objects.filter(user=user).first()
+            if branch:
+                return "branch", branch
+            manager = getattr(user, "warehouse_manager_profile", None)
+            if manager and manager.supplier_id:
+                return "supplier", manager.supplier
+        return None, None
+
     def validate(self, attrs):
-        org_type = attrs.pop("flagged_organisation_type")
-        org_id = attrs.pop("flagged_organisation_id")
+        org_type = attrs.pop("flagged_organisation_type", None)
+        org_id = attrs.pop("flagged_organisation_id", None)
 
-        if org_type == "supplier":
-            from supply_chain.models import Supplier
+        # Treat empty/zero as missing so integrity drafts can omit org.
+        if org_id in (None, "", 0):
+            org_id = None
+            org_type = None
 
-            supplier = Supplier.objects.filter(pk=org_id).first()
-            if not supplier:
-                raise serializers.ValidationError({"flagged_organisation_id": "Supplier not found."})
-            attrs["flagged_supplier"] = supplier
+        if org_type and org_id:
+            if org_type == "supplier":
+                from supply_chain.models import Supplier
+
+                supplier = Supplier.objects.filter(pk=org_id).first()
+                if not supplier:
+                    raise serializers.ValidationError({"flagged_organisation_id": "Supplier not found."})
+                attrs["flagged_supplier"] = supplier
+                attrs["flagged_branch"] = None
+            else:
+                from supply_chain.models import Branch
+
+                branch = Branch.objects.filter(pk=org_id).first()
+                if not branch:
+                    raise serializers.ValidationError({"flagged_organisation_id": "Branch not found."})
+                attrs["flagged_branch"] = branch
+                attrs["flagged_supplier"] = None
+            return attrs
+
+        resolved_type, resolved_org = self._resolve_org_from_target(
+            attrs.get("target_type"), attrs.get("target_id")
+        )
+        if resolved_type == "supplier" and resolved_org is not None:
+            attrs["flagged_supplier"] = resolved_org
             attrs["flagged_branch"] = None
-        else:
-            from supply_chain.models import Branch
-
-            branch = Branch.objects.filter(pk=org_id).first()
-            if not branch:
-                raise serializers.ValidationError({"flagged_organisation_id": "Branch not found."})
-            attrs["flagged_branch"] = branch
+            return attrs
+        if resolved_type == "branch" and resolved_org is not None:
+            attrs["flagged_branch"] = resolved_org
             attrs["flagged_supplier"] = None
+            return attrs
 
-        return attrs
+        raise serializers.ValidationError(
+            {
+                "flagged_organisation_id": (
+                    "Select the organisation being flagged, or raise the flag against a transfer/batch "
+                    "that already belongs to an organisation."
+                )
+            }
+        )
 
 
 class ComplianceFlagStatusUpdateSerializer(serializers.ModelSerializer):
