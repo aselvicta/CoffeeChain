@@ -890,7 +890,7 @@ export function RetailerDashboard({ userProfile, onLogout }) {
           )}
 
           {activeTab === 'compliance' && (
-            <ActorCompliancePanel roleLabel="retailer branch" />
+            <ActorCompliancePanel />
           )}
 
           {activeTab === 'history' && (

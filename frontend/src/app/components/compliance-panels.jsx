@@ -11,7 +11,6 @@ import {
   fetchOrganisationCertificates,
   fetchSuppliers,
   recommendComplianceAction,
-  respondToComplianceFlag,
   reviewOrganisationCertificate,
   updateComplianceFlag,
   uploadOrganisationCertificate,
@@ -1055,11 +1054,9 @@ export function AdminCompliancePanel() {
   );
 }
 
-export function ActorCompliancePanel({ roleLabel = 'actor' }) {
-  const [flags, setFlags] = useState([]);
+export function ActorCompliancePanel() {
   const [certificates, setCertificates] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [detailFlag, setDetailFlag] = useState(null);
   const [showUpload, setShowUpload] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [form, setForm] = useState({
@@ -1075,14 +1072,10 @@ export function ActorCompliancePanel({ roleLabel = 'actor' }) {
   const load = async () => {
     setLoading(true);
     try {
-      const [flagData, certData] = await Promise.all([
-        fetchComplianceFlags(),
-        fetchOrganisationCertificates(),
-      ]);
-      setFlags(asList(flagData));
+      const certData = await fetchOrganisationCertificates();
       setCertificates(asList(certData));
     } catch (error) {
-      toast.error(getUserMessage(error, 'Failed to load compliance data.'));
+      toast.error(getUserMessage(error, 'Failed to load certificates.'));
     } finally {
       setLoading(false);
     }
@@ -1091,41 +1084,6 @@ export function ActorCompliancePanel({ roleLabel = 'actor' }) {
   useEffect(() => {
     load();
   }, []);
-
-  const syncActorFlag = (updated) => {
-    if (!updated?.id) return;
-    setFlags((prev) => {
-      const exists = prev.some((row) => row.id === updated.id);
-      if (!exists) return [updated, ...prev];
-      return prev.map((row) => (row.id === updated.id ? { ...row, ...updated } : row));
-    });
-  };
-
-  const openDetail = async (flagId) => {
-    try {
-      const detail = await fetchComplianceFlag(flagId);
-      setDetailFlag(detail);
-      syncActorFlag(detail);
-      await load();
-      syncActorFlag(detail);
-    } catch (error) {
-      toast.error(getUserMessage(error, 'Failed to load flag details.'));
-    }
-  };
-
-  const handleRespond = async (flag, message) => {
-    try {
-      await respondToComplianceFlag(flag.id, message);
-      toast.success('Response submitted.');
-      const detail = await fetchComplianceFlag(flag.id);
-      setDetailFlag(detail);
-      syncActorFlag(detail);
-      await load();
-      syncActorFlag(detail);
-    } catch (error) {
-      toast.error(getUserMessage(error, 'Failed to submit response.'));
-    }
-  };
 
   const submitUpload = async () => {
     if (!form.document || !form.expires_on) {
@@ -1157,8 +1115,7 @@ export function ActorCompliancePanel({ roleLabel = 'actor' }) {
   const activeCert = certificates.find((c) => c.status === 'verified' && c.is_active);
 
   return (
-    <div className="space-y-8">
-      <div className="space-y-5">
+    <div className="space-y-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <div>
             <h2 className="text-xl font-bold text-gray-900">Organisation licences</h2>
@@ -1225,54 +1182,6 @@ export function ActorCompliancePanel({ roleLabel = 'actor' }) {
             </tbody>
           </table>
         </div>
-      </div>
-
-      <div className="space-y-5">
-        <div>
-          <h2 className="text-xl font-bold text-gray-900">Compliance flags</h2>
-          <p className="text-sm text-gray-500">Flags raised against your {roleLabel}. Respond to help regulators close investigations.</p>
-        </div>
-
-        <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="px-4 py-3 text-left font-semibold text-gray-700">Target</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-700">Reason</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-700">Status</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-700">Raised</th>
-                <th className="px-4 py-3 text-right font-semibold text-gray-700">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading && <tr><td colSpan={5} className="px-4 py-10 text-center text-gray-500">Loading flags...</td></tr>}
-              {!loading && flags.length === 0 && <tr><td colSpan={5} className="px-4 py-10 text-center text-gray-500">No flags against your organisation.</td></tr>}
-              {!loading && flags.map((flag) => (
-                <tr key={flag.id} className="border-b border-gray-100 hover:bg-gray-50">
-                  <td className="px-4 py-3 text-gray-800">{flag.target_summary}</td>
-                  <td className="px-4 py-3 text-gray-700">{flag.reason}</td>
-                  <td className="px-4 py-3"><FlagBadge status={flag.status} /></td>
-                  <td className="px-4 py-3 text-gray-600">
-                    <div>{formatDateTime(flag.raised_at || flag.created_at)}</div>
-                    {flag.resolved_at && <div className="text-xs text-emerald-700">Resolved {formatDateTime(flag.resolved_at)}</div>}
-                    {!flag.resolved_at && flag.escalated_at && <div className="text-xs text-red-700">Escalated {formatDateTime(flag.escalated_at)}</div>}
-                    {!flag.resolved_at && !flag.escalated_at && flag.reviewed_at && <div className="text-xs text-blue-700">Reviewed {formatDateTime(flag.reviewed_at)}</div>}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <button
-                      type="button"
-                      onClick={() => openDetail(flag.id)}
-                      className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
-                    >
-                      View & Respond
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
 
       {showUpload && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowUpload(false)}>
@@ -1346,15 +1255,6 @@ export function ActorCompliancePanel({ roleLabel = 'actor' }) {
             </div>
           </div>
         </div>
-      )}
-
-      {detailFlag && (
-        <FlagDetailModal
-          flag={detailFlag}
-          onClose={() => setDetailFlag(null)}
-          canRespond
-          onRespond={handleRespond}
-        />
       )}
     </div>
   );

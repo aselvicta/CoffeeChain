@@ -1380,7 +1380,7 @@ export function SupplierDashboard({ userProfile, onLogout }) {
           )}
 
           {activeTab === 'compliance' && (
-            <ActorCompliancePanel roleLabel="organisation" />
+            <ActorCompliancePanel />
           )}
 
           {activeTab === 'analytics' && (

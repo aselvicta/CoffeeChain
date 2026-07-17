@@ -202,16 +202,7 @@ def _flagged_organisation_users(flag):
 
 def notify_flag_created(flag):
     org = serialize_flagged_organisation(flag) or {}
-    target = resolve_target_summary(flag.target_type, flag.target_id)
     org_name = org.get("name", "organisation")
-
-    _notify(
-        _flagged_organisation_users(flag),
-        title="Compliance flag raised",
-        message=f"A regulator flagged {org_name}: {flag.reason} ({target}).",
-        metadata={"tab": "compliance", "flag_id": flag.id},
-        priority=Notification.PRIORITY_HIGH,
-    )
 
     admin_users = User.objects.filter(is_staff=True)
     _notify(
@@ -247,11 +238,9 @@ def notify_recommendation_submitted(recommendation):
 
 def notify_admin_decision(recommendation):
     flag = recommendation.flag
-    recipients = [flag.raised_by]
-    recipients.extend(_flagged_organisation_users(flag))
     decision = recommendation.get_admin_decision_display().lower()
     _notify(
-        list({u.id: u for u in recipients if u}.values()),
+        [flag.raised_by],
         title="Compliance decision recorded",
         message=f"Admin {decision} recommendation for flag #{flag.id}.",
         metadata={"tab": "compliance", "recommendation_id": recommendation.id, "flag_id": flag.id},

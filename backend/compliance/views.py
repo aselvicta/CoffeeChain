@@ -9,7 +9,7 @@ from rest_framework.views import APIView
 
 from supply_chain.models import AuditLog, Branch, Supplier
 
-from .models import AdminRecommendation, ComplianceFlag, FlagResponse, OrganisationCertificate
+from .models import AdminRecommendation, ComplianceFlag, OrganisationCertificate
 from .permissions import is_admin, is_regulator
 from .serializers import (
     AdminRecommendationSerializer,
@@ -26,7 +26,6 @@ from .serializers import (
 )
 from .services import (
     apply_suspend_action_for_flag,
-    can_user_access_flag,
     certificates_due_for_renewal,
     compute_compliance_snapshot,
     get_user_organisation,
@@ -34,7 +33,6 @@ from .services import (
     notify_certificate_reviewed,
     notify_certificate_uploaded,
     notify_flag_created,
-    notify_flag_response,
     notify_recommendation_submitted,
     set_flag_status,
     sync_flag_status_with_recommendation,
@@ -55,22 +53,8 @@ class ComplianceFlagViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixi
         # .all() clones so each request re-hits the DB (class queryset caches after first eval).
         qs = self.queryset.all()
         user = self.request.user
-        if is_admin(user) or is_regulator(user):
-            pass
-        else:
-            supplier = Supplier.objects.filter(user=user).first()
-            if supplier:
-                qs = qs.filter(flagged_supplier=supplier)
-            else:
-                branch = Branch.objects.filter(user=user).first()
-                if branch:
-                    qs = qs.filter(flagged_branch=branch)
-                else:
-                    manager = user.warehouse_manager_profile if hasattr(user, "warehouse_manager_profile") else None
-                    if manager and manager.supplier_id:
-                        qs = qs.filter(flagged_supplier_id=manager.supplier_id)
-                    else:
-                        return qs.none()
+        if not (is_admin(user) or is_regulator(user)):
+            return qs.none()
 
         # Heal escalated flags that admin already decided.
         stale = list(
@@ -164,29 +148,10 @@ class ComplianceFlagViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixi
 
     @action(detail=True, methods=["post"])
     def respond(self, request, pk=None):
-        flag = self.get_object()
-        if is_admin(request.user) or is_regulator(request.user):
-            return Response(
-                {"detail": "Only flagged organisations can respond to a flag."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        if not can_user_access_flag(request.user, flag):
-            return Response({"detail": "You can only respond to your own organisation flags."}, status=status.HTTP_403_FORBIDDEN)
-
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        response_obj = FlagResponse.objects.create(
-            flag=flag,
-            responded_by=request.user,
-            message=serializer.validated_data["message"],
+        return Response(
+            {"detail": "Compliance flags are visible to regulators and administrators only."},
+            status=status.HTTP_403_FORBIDDEN,
         )
-        notify_flag_response(response_obj)
-        AuditLog.objects.create(
-            action="compliance_flag_responded",
-            user=request.user,
-            details={"flag_id": flag.id, "response_id": response_obj.id},
-        )
-        return Response(FlagResponseSerializer(response_obj).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"])
     def recommend(self, request, pk=None):

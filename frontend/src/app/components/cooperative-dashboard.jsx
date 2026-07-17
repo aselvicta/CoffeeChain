@@ -771,7 +771,7 @@ export function CooperativeDashboard({ userProfile, onLogout }) {
           )}
 
           {activeTab === 'compliance' && (
-            <ActorCompliancePanel roleLabel="AMCOS" />
+            <ActorCompliancePanel />
           )}
 
           {activeTab === 'history' && (

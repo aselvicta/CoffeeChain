@@ -927,7 +927,7 @@ export function WarehouseManagerDashboard({ userProfile, onLogout }) {
           )}
 
           {activeTab === 'compliance' && (
-            <ActorCompliancePanel roleLabel="warehouse organisation" />
+            <ActorCompliancePanel />
           )}
 
           {activeTab === 'analytics' && (
