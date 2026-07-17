@@ -378,7 +378,7 @@ def require_active_certificate(*, supplier=None, branch=None):
     raise ValidationError(
         {
             "detail": (
-                "Organisation licence/certificate is missing, expired, or not yet verified by a regulator. "
+                "Organisation licence/certificate is missing, expired, or not yet verified by an administrator. "
                 "Upload your document under Compliance and wait for verification before continuing."
             )
         }
@@ -453,9 +453,9 @@ def _certificate_org_users(cert):
 
 def notify_certificate_uploaded(cert):
     org = serialize_certificate_organisation(cert) or {}
-    regulators = User.objects.filter(groups__name="Regulator")
+    admins = User.objects.filter(is_staff=True)
     _notify(
-        regulators,
+        admins,
         title="Certificate pending review",
         message=f"{org.get('name', 'An organisation')} uploaded a {cert.get_document_type_display()} for verification.",
         metadata={"tab": "compliance", "certificate_id": cert.id, "section": "certificates"},

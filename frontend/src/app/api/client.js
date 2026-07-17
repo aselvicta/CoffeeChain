@@ -808,3 +808,29 @@ export function reviewOrganisationCertificate(id, payload) {
     body: JSON.stringify(payload),
   });
 }
+
+export async function openOrganisationCertificateDocument(certificateId, retryOnUnauthorized = true) {
+  const token = getAccessToken();
+  const response = await fetch(`${API_BASE}/api/compliance/certificates/${certificateId}/document/`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
+  if (response.status === 401 && retryOnUnauthorized) {
+    const refreshedToken = await refreshAccessToken();
+    if (refreshedToken) {
+      return openOrganisationCertificateDocument(certificateId, false);
+    }
+    clearSession();
+    notifySessionExpired();
+    throw new AuthError('Your session has expired. Please sign in again.', 401);
+  }
+
+  if (!response.ok) {
+    throw new Error('Failed to open certificate document.');
+  }
+
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  window.open(url, '_blank', 'noopener,noreferrer');
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}

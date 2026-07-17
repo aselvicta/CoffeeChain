@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, FileText, MessageSquare, Plus, ShieldAlert, Upload } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Eye, MessageSquare, Plus, ShieldAlert, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   createComplianceFlag,
@@ -14,6 +14,7 @@ import {
   reviewOrganisationCertificate,
   updateComplianceFlag,
   uploadOrganisationCertificate,
+  openOrganisationCertificateDocument,
 } from '../api/client';
 import { getUserMessage } from '../utils/user-messages';
 
@@ -87,6 +88,239 @@ function formatDateTime(value) {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+function CertificateDocumentButton({ certificateId, label = 'View document', className = '' }) {
+  const [opening, setOpening] = useState(false);
+
+  const handleOpen = async () => {
+    setOpening(true);
+    try {
+      await openOrganisationCertificateDocument(certificateId);
+    } catch (error) {
+      toast.error(getUserMessage(error, 'Failed to open document.'));
+    } finally {
+      setOpening(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleOpen}
+      disabled={opening}
+      className={className || 'inline-flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60'}
+    >
+      <Eye className="h-3.5 w-3.5" />
+      {opening ? 'Opening…' : label}
+    </button>
+  );
+}
+
+function CertificateReviewModal({ certificate, onClose, onSaved }) {
+  const [decision, setDecision] = useState('verified');
+  const [note, setNote] = useState('');
+  const [expiresOn, setExpiresOn] = useState(certificate?.expires_on || '');
+  const [saving, setSaving] = useState(false);
+
+  if (!certificate) return null;
+
+  const submitReview = async () => {
+    if (decision === 'rejected' && !note.trim()) {
+      toast.error('Rejection reason is required.');
+      return;
+    }
+    setSaving(true);
+    try {
+      await reviewOrganisationCertificate(certificate.id, {
+        decision,
+        review_note: note.trim(),
+        ...(expiresOn ? { expires_on: expiresOn } : {}),
+      });
+      toast.success(decision === 'verified' ? 'Certificate verified.' : 'Certificate rejected.');
+      onSaved?.();
+      onClose?.();
+    } catch (error) {
+      toast.error(getUserMessage(error, 'Failed to save review.'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="w-full max-w-lg rounded-xl bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
+        <div className="border-b border-gray-200 px-6 py-4">
+          <h3 className="text-lg font-bold text-gray-900">Review certificate #{certificate.id}</h3>
+          <p className="text-sm text-gray-600">{certificate.organisation?.name} · {certificate.document_type_display}</p>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm">
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-gray-600">
+              <span>Expires: <strong className="text-gray-900">{certificate.expires_on}</strong></span>
+              {certificate.certificate_number && (
+                <span>No.: <strong className="text-gray-900">{certificate.certificate_number}</strong></span>
+              )}
+            </div>
+            {(certificate.has_document || certificate.document_url) && (
+              <div className="mt-3">
+                <CertificateDocumentButton certificateId={certificate.id} label="Open uploaded file" />
+              </div>
+            )}
+          </div>
+          <select value={decision} onChange={(e) => setDecision(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+            <option value="verified">Verify / approve</option>
+            <option value="rejected">Reject</option>
+          </select>
+          {decision === 'verified' && (
+            <label className="block text-xs text-gray-500">
+              Confirm expiry date
+              <input
+                type="date"
+                value={expiresOn}
+                onChange={(e) => setExpiresOn(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+              />
+            </label>
+          )}
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={3}
+            placeholder={decision === 'rejected' ? 'Rejection reason (required)' : 'Review note (optional)'}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+          />
+        </div>
+        <div className="flex gap-2 border-t border-gray-200 px-6 py-4">
+          <button type="button" onClick={onClose} className="flex-1 rounded-lg border border-gray-300 py-2 text-sm text-gray-700 hover:bg-gray-50">Cancel</button>
+          <button type="button" disabled={saving} onClick={submitReview} className="flex-1 rounded-lg bg-green-700 py-2 text-sm font-semibold text-white hover:bg-green-800 disabled:opacity-60">
+            {saving ? 'Saving…' : 'Save decision'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OrganisationCertificatesPanel({
+  title,
+  description,
+  canReview = false,
+  readOnlyHint,
+  defaultFilter = 'pending_review',
+}) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState(defaultFilter);
+  const [reviewModal, setReviewModal] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const params = filter === 'due_soon' ? { due_soon: true } : filter === 'all' ? {} : { status: filter };
+      const data = await fetchOrganisationCertificates(params);
+      setRows(asList(data));
+    } catch (error) {
+      toast.error(getUserMessage(error, 'Failed to load certificates.'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, [filter]);
+
+  const filters = [
+    { id: 'pending_review', label: 'Pending review' },
+    { id: 'verified', label: 'Verified' },
+    { id: 'due_soon', label: 'Due within 30 days' },
+    { id: 'rejected', label: 'Rejected' },
+    { id: 'expired', label: 'Expired' },
+    { id: 'all', label: 'All' },
+  ];
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-xl font-bold text-gray-900">{title}</h2>
+        <p className="text-sm text-gray-500">{description}</p>
+        {readOnlyHint && (
+          <p className="mt-2 text-xs text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 inline-block">
+            {readOnlyHint}
+          </p>
+        )}
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {filters.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => setFilter(item.id)}
+            className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${filter === item.id ? 'bg-green-700 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid gap-3">
+        {loading && (
+          <div className="rounded-xl border border-gray-200 bg-white px-4 py-10 text-center text-sm text-gray-500">Loading certificates…</div>
+        )}
+        {!loading && rows.length === 0 && (
+          <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-4 py-10 text-center text-sm text-gray-500">No certificates in this view.</div>
+        )}
+        {!loading && rows.map((cert) => (
+          <div key={cert.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm hover:border-gray-300 transition-colors">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="font-semibold text-gray-900">{cert.organisation?.name || 'Organisation'}</h3>
+                  <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${CERT_STATUS_STYLE[cert.status] || 'bg-gray-100 text-gray-700'}`}>
+                    {(cert.status_display || cert.status || '').replace(/_/g, ' ')}
+                  </span>
+                </div>
+                <p className="mt-1 text-sm text-gray-600">{cert.document_type_display || cert.document_type}</p>
+                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+                  <span>Expires {cert.expires_on}</span>
+                  {cert.certificate_number && <span>No. {cert.certificate_number}</span>}
+                  {cert.issuing_authority && <span>{cert.issuing_authority}</span>}
+                  {cert.uploaded_by_username && <span>Uploaded by {cert.uploaded_by_username}</span>}
+                </div>
+                {cert.review_note && (
+                  <p className="mt-2 text-xs text-gray-600 bg-gray-50 rounded-lg px-2 py-1.5">{cert.review_note}</p>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                {(cert.has_document || cert.document_url) && (
+                  <CertificateDocumentButton certificateId={cert.id} />
+                )}
+                {canReview && (cert.status === 'pending_review' || cert.status === 'expired') && (
+                  <button
+                    type="button"
+                    onClick={() => setReviewModal(cert)}
+                    className="rounded-lg bg-green-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-800"
+                  >
+                    Review
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {canReview && reviewModal && (
+        <CertificateReviewModal
+          certificate={reviewModal}
+          onClose={() => setReviewModal(null)}
+          onSaved={load}
+        />
+      )}
+    </div>
+  );
 }
 
 function FlagTimeline({ flag }) {
@@ -1093,7 +1327,7 @@ export function ActorCompliancePanel() {
     setUploading(true);
     try {
       await uploadOrganisationCertificate(form);
-      toast.success('Certificate uploaded for regulator review.');
+      toast.success('Certificate submitted for admin review.');
       setShowUpload(false);
       setForm({
         document_type: 'business_license',
@@ -1120,13 +1354,13 @@ export function ActorCompliancePanel() {
           <div>
             <h2 className="text-xl font-bold text-gray-900">Organisation licences</h2>
             <p className="text-sm text-gray-500">
-              Upload your existing business/cooperative certificates. A regulator must verify them before key operations are unlocked.
+              Upload your business or cooperative certificates. An administrator will verify them before key operations are unlocked.
             </p>
           </div>
           <button
             type="button"
             onClick={() => setShowUpload(true)}
-            className="sm:ml-auto inline-flex items-center gap-2 rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800"
+            className="sm:ml-auto inline-flex items-center gap-2 rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800 shadow-sm"
           >
             <Upload className="h-4 w-4" />
             Upload certificate
@@ -1134,53 +1368,54 @@ export function ActorCompliancePanel() {
         </div>
 
         {activeCert ? (
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-            Verified {activeCert.document_type_display || activeCert.document_type} active until {activeCert.expires_on}.
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm text-emerald-900 flex items-start gap-3">
+            <CheckCircle2 className="h-5 w-5 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold">Verified licence active</p>
+              <p className="text-emerald-800">{activeCert.document_type_display || activeCert.document_type} valid until {activeCert.expires_on}.</p>
+            </div>
           </div>
         ) : (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            No verified certificate on file. Dispatches/orders may be blocked until a regulator verifies your upload.
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900 flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold">No verified certificate on file</p>
+              <p className="text-amber-800">Dispatches and orders may be blocked until an administrator verifies your upload.</p>
+            </div>
           </div>
         )}
 
-        <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="px-4 py-3 text-left font-semibold text-gray-700">Type</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-700">Number</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-700">Expires</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-700">Status</th>
-                <th className="px-4 py-3 text-right font-semibold text-gray-700">File</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading && <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500">Loading...</td></tr>}
-              {!loading && certificates.length === 0 && (
-                <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500">No certificates uploaded yet.</td></tr>
-              )}
-              {!loading && certificates.map((cert) => (
-                <tr key={cert.id} className="border-b border-gray-100">
-                  <td className="px-4 py-3 text-gray-800">{cert.document_type_display || cert.document_type}</td>
-                  <td className="px-4 py-3 text-gray-700">{cert.certificate_number || '—'}</td>
-                  <td className="px-4 py-3 text-gray-700">{cert.expires_on}</td>
-                  <td className="px-4 py-3">
+        <div className="grid gap-3">
+          {loading && (
+            <div className="rounded-xl border border-gray-200 bg-white px-4 py-10 text-center text-sm text-gray-500">Loading certificates…</div>
+          )}
+          {!loading && certificates.length === 0 && (
+            <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-4 py-10 text-center text-sm text-gray-500">
+              No certificates uploaded yet. Use the button above to submit your first document.
+            </div>
+          )}
+          {!loading && certificates.map((cert) => (
+            <div key={cert.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-semibold text-gray-900">{cert.document_type_display || cert.document_type}</p>
                     <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${CERT_STATUS_STYLE[cert.status] || 'bg-gray-100 text-gray-700'}`}>
                       {(cert.status_display || cert.status || '').replace(/_/g, ' ')}
                     </span>
-                    {cert.review_note && <p className="mt-1 text-xs text-gray-500">{cert.review_note}</p>}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    {cert.document_url ? (
-                      <a href={cert.document_url} target="_blank" rel="noreferrer" className="text-xs font-medium text-green-700 hover:underline">
-                        View
-                      </a>
-                    ) : '—'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+                    <span>Expires {cert.expires_on}</span>
+                    {cert.certificate_number && <span>No. {cert.certificate_number}</span>}
+                  </div>
+                  {cert.review_note && <p className="mt-2 text-xs text-gray-600">{cert.review_note}</p>}
+                </div>
+                {(cert.has_document || cert.document_url) && (
+                  <CertificateDocumentButton certificateId={cert.id} label="View file" />
+                )}
+              </div>
+            </div>
+          ))}
         </div>
 
       {showUpload && (
@@ -1188,33 +1423,37 @@ export function ActorCompliancePanel() {
           <div className="w-full max-w-lg rounded-xl bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
             <div className="border-b border-gray-200 px-6 py-4">
               <h3 className="text-lg font-bold text-gray-900">Upload organisation certificate</h3>
+              <p className="text-sm text-gray-500 mt-1">PDF or image, max 5 MB. Sent to administrators for review.</p>
             </div>
             <div className="px-6 py-5 space-y-3">
-              <select
-                value={form.document_type}
-                onChange={(e) => setForm((prev) => ({ ...prev, document_type: e.target.value }))}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              >
-                {DOCUMENT_TYPES.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
+              <label className="block text-xs font-medium text-gray-600">
+                Document type
+                <select
+                  value={form.document_type}
+                  onChange={(e) => setForm((prev) => ({ ...prev, document_type: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                >
+                  {DOCUMENT_TYPES.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
               <input
                 type="text"
                 value={form.certificate_number}
                 onChange={(e) => setForm((prev) => ({ ...prev, certificate_number: e.target.value }))}
-                placeholder="Certificate number"
+                placeholder="Certificate number (optional)"
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
               />
               <input
                 type="text"
                 value={form.issuing_authority}
                 onChange={(e) => setForm((prev) => ({ ...prev, issuing_authority: e.target.value }))}
-                placeholder="Issuing authority"
+                placeholder="Issuing authority (optional)"
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
               />
               <div className="grid grid-cols-2 gap-3">
-                <label className="text-xs text-gray-500">
+                <label className="text-xs font-medium text-gray-600">
                   Issued on
                   <input
                     type="date"
@@ -1223,7 +1462,7 @@ export function ActorCompliancePanel() {
                     className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                   />
                 </label>
-                <label className="text-xs text-gray-500">
+                <label className="text-xs font-medium text-gray-600">
                   Expires on *
                   <input
                     type="date"
@@ -1240,12 +1479,18 @@ export function ActorCompliancePanel() {
                 placeholder="Notes (optional)"
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
               />
-              <input
-                type="file"
-                accept=".pdf,image/*"
-                onChange={(e) => setForm((prev) => ({ ...prev, document: e.target.files?.[0] || null }))}
-                className="w-full text-sm"
-              />
+              <label className="block rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-center cursor-pointer hover:border-green-400 hover:bg-green-50/50 transition-colors">
+                <Upload className="h-6 w-6 mx-auto text-gray-400 mb-2" />
+                <span className="text-sm font-medium text-gray-700">
+                  {form.document ? form.document.name : 'Choose PDF or image file'}
+                </span>
+                <input
+                  type="file"
+                  accept=".pdf,image/*"
+                  onChange={(e) => setForm((prev) => ({ ...prev, document: e.target.files?.[0] || null }))}
+                  className="sr-only"
+                />
+              </label>
             </div>
             <div className="flex gap-2 border-t border-gray-200 px-6 py-4">
               <button type="button" onClick={() => setShowUpload(false)} className="flex-1 rounded-lg border border-gray-300 py-2 text-sm text-gray-700 hover:bg-gray-50">Cancel</button>
@@ -1261,177 +1506,49 @@ export function ActorCompliancePanel() {
 }
 
 export function RegulatorCertificatesPanel() {
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('pending_review');
-  const [reviewModal, setReviewModal] = useState(null);
-  const [decision, setDecision] = useState('verified');
-  const [note, setNote] = useState('');
-  const [expiresOn, setExpiresOn] = useState('');
+  return (
+    <OrganisationCertificatesPanel
+      title="Organisation certificates"
+      description="View uploaded licences across the network. Verification is handled by administrators."
+      readOnlyHint="Read-only view — regulators can inspect documents but cannot approve or reject them."
+      defaultFilter="all"
+    />
+  );
+}
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const params = filter === 'due_soon' ? { due_soon: true } : filter === 'all' ? {} : { status: filter };
-      const data = await fetchOrganisationCertificates(params);
-      setRows(asList(data));
-    } catch (error) {
-      toast.error(getUserMessage(error, 'Failed to load certificates.'));
-    } finally {
-      setLoading(false);
-    }
-  };
+export function AdminCertificatesPanel() {
+  return (
+    <OrganisationCertificatesPanel
+      title="Certificate review queue"
+      description="Verify or reject organisation uploads. Approved certificates unlock supply-chain operations."
+      canReview
+      defaultFilter="pending_review"
+    />
+  );
+}
 
-  useEffect(() => {
-    load();
-  }, [filter]);
-
-  const submitReview = async () => {
-    if (!reviewModal) return;
-    if (decision === 'rejected' && !note.trim()) {
-      toast.error('Rejection reason is required.');
-      return;
-    }
-    try {
-      await reviewOrganisationCertificate(reviewModal.id, {
-        decision,
-        review_note: note.trim(),
-        ...(expiresOn ? { expires_on: expiresOn } : {}),
-      });
-      toast.success(decision === 'verified' ? 'Certificate verified.' : 'Certificate rejected.');
-      setReviewModal(null);
-      setNote('');
-      setExpiresOn('');
-      setDecision('verified');
-      await load();
-    } catch (error) {
-      toast.error(getUserMessage(error, 'Failed to save review.'));
-    }
-  };
+export function AdminComplianceHub() {
+  const [section, setSection] = useState('flags');
 
   return (
     <div className="space-y-5">
-      <div>
-        <h2 className="text-xl font-bold text-gray-900">Organisation certificates</h2>
-        <p className="text-sm text-gray-500">Cross-check uploaded licences and approve or reject them.</p>
-      </div>
-
       <div className="flex flex-wrap gap-2">
-        {[
-          { id: 'pending_review', label: 'Pending review' },
-          { id: 'verified', label: 'Verified' },
-          { id: 'due_soon', label: 'Due within 30 days' },
-          { id: 'rejected', label: 'Rejected' },
-          { id: 'expired', label: 'Expired' },
-          { id: 'all', label: 'All' },
-        ].map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => setFilter(item.id)}
-            className={`rounded-lg px-3 py-1.5 text-sm font-medium ${filter === item.id ? 'bg-green-700 text-white' : 'bg-gray-100 text-gray-700'}`}
-          >
-            {item.label}
-          </button>
-        ))}
+        <button
+          type="button"
+          onClick={() => setSection('flags')}
+          className={`rounded-lg px-4 py-2 text-sm font-semibold ${section === 'flags' ? 'bg-green-700 text-white' : 'bg-gray-100 text-gray-700'}`}
+        >
+          Compliance flags
+        </button>
+        <button
+          type="button"
+          onClick={() => setSection('certificates')}
+          className={`rounded-lg px-4 py-2 text-sm font-semibold ${section === 'certificates' ? 'bg-green-700 text-white' : 'bg-gray-100 text-gray-700'}`}
+        >
+          Certificates
+        </button>
       </div>
-
-      <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 border-b border-gray-200">
-            <tr>
-              <th className="px-4 py-3 text-left font-semibold text-gray-700">Organisation</th>
-              <th className="px-4 py-3 text-left font-semibold text-gray-700">Document</th>
-              <th className="px-4 py-3 text-left font-semibold text-gray-700">Expires</th>
-              <th className="px-4 py-3 text-left font-semibold text-gray-700">Status</th>
-              <th className="px-4 py-3 text-right font-semibold text-gray-700">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && <tr><td colSpan={5} className="px-4 py-10 text-center text-gray-500">Loading...</td></tr>}
-            {!loading && rows.length === 0 && <tr><td colSpan={5} className="px-4 py-10 text-center text-gray-500">No certificates in this view.</td></tr>}
-            {!loading && rows.map((cert) => (
-              <tr key={cert.id} className="border-b border-gray-100 hover:bg-gray-50">
-                <td className="px-4 py-3">
-                  <div className="font-medium text-gray-900">{cert.organisation?.name || '—'}</div>
-                  <div className="text-xs text-gray-500">{cert.organisation?.organisation_type || ''}</div>
-                </td>
-                <td className="px-4 py-3 text-gray-700">
-                  <div>{cert.document_type_display || cert.document_type}</div>
-                  <div className="text-xs text-gray-500">{cert.certificate_number || cert.issuing_authority || ''}</div>
-                </td>
-                <td className="px-4 py-3 text-gray-700">{cert.expires_on}</td>
-                <td className="px-4 py-3">
-                  <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${CERT_STATUS_STYLE[cert.status] || 'bg-gray-100 text-gray-700'}`}>
-                    {(cert.status_display || cert.status || '').replace(/_/g, ' ')}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-right space-x-2">
-                  {cert.document_url && (
-                    <a href={cert.document_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50">
-                      <FileText className="h-3.5 w-3.5" />
-                      Open
-                    </a>
-                  )}
-                  {(cert.status === 'pending_review' || cert.status === 'expired') && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setReviewModal(cert);
-                        setExpiresOn(cert.expires_on || '');
-                        setDecision('verified');
-                        setNote('');
-                      }}
-                      className="rounded-lg bg-green-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-800"
-                    >
-                      Review
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {reviewModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setReviewModal(null)}>
-          <div className="w-full max-w-lg rounded-xl bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
-            <div className="border-b border-gray-200 px-6 py-4">
-              <h3 className="text-lg font-bold text-gray-900">Review certificate #{reviewModal.id}</h3>
-              <p className="text-sm text-gray-600">{reviewModal.organisation?.name} · {reviewModal.document_type_display}</p>
-            </div>
-            <div className="px-6 py-5 space-y-3">
-              <select value={decision} onChange={(e) => setDecision(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
-                <option value="verified">Verify / approve</option>
-                <option value="rejected">Reject</option>
-              </select>
-              {decision === 'verified' && (
-                <label className="block text-xs text-gray-500">
-                  Confirm expiry date
-                  <input
-                    type="date"
-                    value={expiresOn}
-                    onChange={(e) => setExpiresOn(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                  />
-                </label>
-              )}
-              <textarea
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                rows={3}
-                placeholder={decision === 'rejected' ? 'Rejection reason (required)' : 'Review note (optional)'}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              />
-            </div>
-            <div className="flex gap-2 border-t border-gray-200 px-6 py-4">
-              <button type="button" onClick={() => setReviewModal(null)} className="flex-1 rounded-lg border border-gray-300 py-2 text-sm text-gray-700 hover:bg-gray-50">Cancel</button>
-              <button type="button" onClick={submitReview} className="flex-1 rounded-lg bg-green-700 py-2 text-sm font-semibold text-white hover:bg-green-800">Save decision</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {section === 'flags' ? <AdminCompliancePanel /> : <AdminCertificatesPanel />}
     </div>
   );
 }
@@ -1454,7 +1571,7 @@ export function RegulatorComplianceHub({ initialDraft = null, onDraftConsumed })
           onClick={() => setSection('certificates')}
           className={`rounded-lg px-4 py-2 text-sm font-semibold ${section === 'certificates' ? 'bg-green-700 text-white' : 'bg-gray-100 text-gray-700'}`}
         >
-          Certificates
+          Certificates (view only)
         </button>
       </div>
       {section === 'flags' ? (

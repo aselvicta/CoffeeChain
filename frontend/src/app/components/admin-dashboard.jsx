@@ -44,7 +44,7 @@ import { getRoleLabel, getRoleColor } from '../utils/role-labels';
 import { ReportsPanel } from './reports-panel';
 import { PasswordRequirements } from './password-requirements';
 import {
-  AdminCompliancePanel,
+  AdminComplianceHub,
   ComplianceStatusPill,
   ComplianceSummaryCard,
   RegulatorComplianceHub,
@@ -1957,7 +1957,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
                 onDraftConsumed={() => setComplianceDraft(null)}
               />
             ) : (
-              <AdminCompliancePanel key={`admin-compliance-${complianceVisit}`} />
+              <AdminComplianceHub key={`admin-compliance-${complianceVisit}`} />
             )
           )}
 

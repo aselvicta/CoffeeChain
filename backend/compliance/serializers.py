@@ -284,6 +284,9 @@ class OrganisationCertificateSerializer(serializers.ModelSerializer):
     uploaded_by_username = serializers.CharField(source="uploaded_by.username", read_only=True)
     reviewed_by_username = serializers.CharField(source="reviewed_by.username", read_only=True)
     document_url = serializers.SerializerMethodField()
+    document_filename = serializers.CharField(read_only=True)
+    document_size = serializers.IntegerField(read_only=True)
+    has_document = serializers.SerializerMethodField()
     document_type_display = serializers.CharField(source="get_document_type_display", read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
 
@@ -300,6 +303,9 @@ class OrganisationCertificateSerializer(serializers.ModelSerializer):
             "expires_on",
             "notes",
             "document_url",
+            "document_filename",
+            "document_size",
+            "has_document",
             "status",
             "status_display",
             "is_active",
@@ -319,17 +325,22 @@ class OrganisationCertificateSerializer(serializers.ModelSerializer):
 
         return serialize_certificate_organisation(obj)
 
+    def get_has_document(self, obj):
+        return bool(obj.document_data)
+
     def get_document_url(self, obj):
-        request = self.context.get("request")
-        if not obj.document:
+        if not obj.document_data:
             return None
-        url = obj.document.url
+        request = self.context.get("request")
+        path = f"/api/compliance/certificates/{obj.pk}/document/"
         if request:
-            return request.build_absolute_uri(url)
-        return url
+            return request.build_absolute_uri(path)
+        return path
 
 
 class OrganisationCertificateUploadSerializer(serializers.ModelSerializer):
+    document = serializers.FileField(write_only=True)
+
     class Meta:
         model = OrganisationCertificate
         fields = [
@@ -360,6 +371,15 @@ class OrganisationCertificateUploadSerializer(serializers.ModelSerializer):
         if not name.endswith(allowed):
             raise serializers.ValidationError("Upload a PDF or image file (png/jpg/webp).")
         return value
+
+    def create(self, validated_data):
+        upload = validated_data.pop("document")
+        content = upload.read()
+        validated_data["document_data"] = content
+        validated_data["document_filename"] = getattr(upload, "name", "") or "certificate"
+        validated_data["document_content_type"] = getattr(upload, "content_type", "") or "application/octet-stream"
+        validated_data["document_size"] = len(content)
+        return OrganisationCertificate.objects.create(**validated_data)
 
 
 class OrganisationCertificateReviewSerializer(serializers.Serializer):

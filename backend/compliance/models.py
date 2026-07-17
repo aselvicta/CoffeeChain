@@ -130,7 +130,7 @@ class AdminRecommendation(models.Model):
 
 
 class OrganisationCertificate(models.Model):
-    """Paper/licence document uploaded by an organisation for regulator verification."""
+    """Paper/licence document uploaded by an organisation for admin verification."""
 
     class DocumentType(models.TextChoices):
         BUSINESS_LICENSE = "business_license", "Business licence"
@@ -166,7 +166,10 @@ class OrganisationCertificate(models.Model):
     issued_on = models.DateField(null=True, blank=True)
     expires_on = models.DateField()
     notes = models.TextField(blank=True)
-    document = models.FileField(upload_to="organisation_certificates/")
+    document_data = models.BinaryField()
+    document_filename = models.CharField(max_length=255, blank=True)
+    document_content_type = models.CharField(max_length=120, blank=True)
+    document_size = models.PositiveIntegerField(default=0)
 
     status = models.CharField(
         max_length=20,

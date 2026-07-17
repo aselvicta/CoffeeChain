@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
@@ -364,7 +365,7 @@ class OrganisationCertificateViewSet(viewsets.GenericViewSet, mixins.ListModelMi
     def create(self, request, *args, **kwargs):
         if is_admin(request.user) or is_regulator(request.user):
             return Response(
-                {"detail": "Regulators and admins review certificates; organisations upload them."},
+                {"detail": "Administrators and regulators view certificates; organisations upload them."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
@@ -390,7 +391,7 @@ class OrganisationCertificateViewSet(viewsets.GenericViewSet, mixins.ListModelMi
         else:
             extras["branch"] = Branch.objects.get(pk=org_id)
 
-        cert = OrganisationCertificate.objects.create(**serializer.validated_data, **extras)
+        cert = serializer.save(**extras)
         AuditLog.objects.create(
             action="organisation_certificate_uploaded",
             user=request.user,
@@ -402,10 +403,24 @@ class OrganisationCertificateViewSet(viewsets.GenericViewSet, mixins.ListModelMi
             status=status.HTTP_201_CREATED,
         )
 
+    @action(detail=True, methods=["get"], url_path="document")
+    def document(self, request, pk=None):
+        cert = self.get_object()
+        if not cert.document_data:
+            return Response({"detail": "No document stored."}, status=status.HTTP_404_NOT_FOUND)
+
+        filename = cert.document_filename or "certificate"
+        response = HttpResponse(
+            bytes(cert.document_data),
+            content_type=cert.document_content_type or "application/octet-stream",
+        )
+        response["Content-Disposition"] = f'inline; filename="{filename}"'
+        return response
+
     @action(detail=True, methods=["post"])
     def review(self, request, pk=None):
-        if not is_regulator(request.user):
-            return Response({"detail": "Only regulators can verify certificates."}, status=status.HTTP_403_FORBIDDEN)
+        if not is_admin(request.user):
+            return Response({"detail": "Only administrators can verify certificates."}, status=status.HTTP_403_FORBIDDEN)
 
         cert = self.get_object()
         if cert.status not in {
