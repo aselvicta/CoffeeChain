@@ -20,12 +20,39 @@ from .models import AdminRecommendation, ComplianceFlag
 User = get_user_model()
 
 
-def set_flag_status(flag, status, *, save=True):
-    """Update flag status reliably (avoids custom save/update_fields quirks)."""
+def set_flag_status(flag, status, *, save=True, at=None):
+    """Update flag status and the matching lifecycle timestamp."""
+    now = at or timezone.now()
     flag.status = status
+
+    extra = {"updated_at": now}
+    if status == ComplianceFlag.Status.UNDER_REVIEW:
+        # First time entering review; keep original if reopened then reviewed again.
+        if not flag.reviewed_at:
+            flag.reviewed_at = now
+            extra["reviewed_at"] = now
+    elif status == ComplianceFlag.Status.ESCALATED:
+        if not flag.escalated_at:
+            flag.escalated_at = now
+            extra["escalated_at"] = now
+        # Escalation implies review has started.
+        if not flag.reviewed_at:
+            flag.reviewed_at = now
+            extra["reviewed_at"] = now
+    elif status == ComplianceFlag.Status.RESOLVED:
+        if not flag.resolved_at:
+            flag.resolved_at = now
+            extra["resolved_at"] = now
+    elif status == ComplianceFlag.Status.OPEN:
+        # Reopen clears resolution stamp so a later resolve gets a fresh time.
+        if flag.resolved_at is not None:
+            flag.resolved_at = None
+            extra["resolved_at"] = None
+
     if save:
-        ComplianceFlag.objects.filter(pk=flag.pk).update(status=status, updated_at=timezone.now())
-        flag.refresh_from_db(fields=["status", "updated_at"])
+        ComplianceFlag.objects.filter(pk=flag.pk).update(status=status, **extra)
+        refresh_fields = ["status", "updated_at", "reviewed_at", "escalated_at", "resolved_at"]
+        flag.refresh_from_db(fields=refresh_fields)
     return flag
 
 
@@ -49,13 +76,15 @@ def sync_flag_status_with_recommendation(flag):
         AdminRecommendation.AdminDecision.DISMISSED,
     ):
         if flag.status != ComplianceFlag.Status.RESOLVED:
-            set_flag_status(flag, ComplianceFlag.Status.RESOLVED)
+            resolved_at = recommendation.decided_at or timezone.now()
+            set_flag_status(flag, ComplianceFlag.Status.RESOLVED, at=resolved_at)
     elif recommendation.admin_decision == AdminRecommendation.AdminDecision.PENDING:
         if (
             recommendation.recommended_action != AdminRecommendation.RecommendedAction.NO_ACTION
             and flag.status != ComplianceFlag.Status.ESCALATED
         ):
-            set_flag_status(flag, ComplianceFlag.Status.ESCALATED)
+            escalated_at = recommendation.created_at or timezone.now()
+            set_flag_status(flag, ComplianceFlag.Status.ESCALATED, at=escalated_at)
 
     return flag
 

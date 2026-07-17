@@ -65,6 +65,10 @@ class AdminRecommendationSerializer(serializers.ModelSerializer):
             "evidence_ref": flag.evidence_ref,
             "status": flag.status,
             "flagged_organisation": serialize_flagged_organisation(flag),
+            "raised_at": flag.created_at,
+            "reviewed_at": flag.reviewed_at,
+            "escalated_at": flag.escalated_at,
+            "resolved_at": flag.resolved_at,
         }
 
 
@@ -73,6 +77,7 @@ class ComplianceFlagListSerializer(serializers.ModelSerializer):
     target_summary = serializers.SerializerMethodField()
     flagged_organisation = serializers.SerializerMethodField()
     recommendation_decision = serializers.SerializerMethodField()
+    raised_at = serializers.DateTimeField(source="created_at", read_only=True)
 
     class Meta:
         model = ComplianceFlag
@@ -87,6 +92,10 @@ class ComplianceFlagListSerializer(serializers.ModelSerializer):
             "raised_by",
             "raised_by_username",
             "recommendation_decision",
+            "raised_at",
+            "reviewed_at",
+            "escalated_at",
+            "resolved_at",
             "created_at",
             "updated_at",
         ]

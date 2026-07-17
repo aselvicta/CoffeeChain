@@ -73,11 +73,19 @@ class ComplianceFlagViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixi
                         return qs.none()
 
         # Heal escalated flags that admin already decided.
-        ComplianceFlag.objects.filter(
-            pk__in=qs.filter(recommendation__admin_decision__in=["actioned", "dismissed"])
+        stale = list(
+            qs.filter(recommendation__admin_decision__in=["actioned", "dismissed"])
             .exclude(status=ComplianceFlag.Status.RESOLVED)
-            .values_list("pk", flat=True)
-        ).update(status=ComplianceFlag.Status.RESOLVED, updated_at=timezone.now())
+            .values_list("pk", "recommendation__decided_at")
+        )
+        if stale:
+            now = timezone.now()
+            for pk, decided_at in stale:
+                ComplianceFlag.objects.filter(pk=pk).update(
+                    status=ComplianceFlag.Status.RESOLVED,
+                    resolved_at=decided_at or now,
+                    updated_at=now,
+                )
 
         return qs
 

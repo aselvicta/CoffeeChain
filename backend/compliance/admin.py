@@ -5,9 +5,20 @@ from .models import AdminRecommendation, ComplianceFlag, FlagResponse, Organisat
 
 @admin.register(ComplianceFlag)
 class ComplianceFlagAdmin(admin.ModelAdmin):
-    list_display = ("id", "target_type", "target_id", "status", "raised_by", "created_at")
+    list_display = (
+        "id",
+        "target_type",
+        "target_id",
+        "status",
+        "raised_by",
+        "created_at",
+        "reviewed_at",
+        "escalated_at",
+        "resolved_at",
+    )
     list_filter = ("status", "target_type")
     search_fields = ("reason", "description", "evidence_ref")
+    readonly_fields = ("created_at", "updated_at", "reviewed_at", "escalated_at", "resolved_at")
 
 
 @admin.register(FlagResponse)

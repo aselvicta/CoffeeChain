@@ -75,6 +75,47 @@ function effectiveFlagStatus(flag) {
   return flag?.status || 'open';
 }
 
+function formatDateTime(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return String(value).replace('T', ' ').slice(0, 16);
+  }
+  return date.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function FlagTimeline({ flag }) {
+  const raisedAt = flag.raised_at || flag.created_at;
+  const rows = [
+    { label: 'Raised', at: raisedAt },
+    { label: 'Reviewed', at: flag.reviewed_at },
+    { label: 'Escalated', at: flag.escalated_at },
+    { label: 'Resolved', at: flag.resolved_at },
+  ].filter((row) => row.at);
+
+  if (!rows.length) return null;
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Timeline</p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+        {rows.map((row) => (
+          <div key={row.label} className="flex items-baseline justify-between gap-3">
+            <span className="text-gray-500">{row.label}</span>
+            <span className="font-medium text-gray-900 text-right">{formatDateTime(row.at)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function FlagDetailModal({
   flag,
   onClose,
@@ -117,6 +158,10 @@ function FlagDetailModal({
               <FlagBadge status={isResolved ? 'resolved' : flag.status} />
             </div>
             <div>
+              <p className="text-gray-500">Raised</p>
+              <p className="font-medium text-gray-900">{formatDateTime(flag.raised_at || flag.created_at)}</p>
+            </div>
+            <div>
               <p className="text-gray-500">Reason</p>
               <p className="font-medium text-gray-900">{flag.reason}</p>
             </div>
@@ -125,6 +170,8 @@ function FlagDetailModal({
               <p className="font-medium text-gray-900">{flag.evidence_ref || '—'}</p>
             </div>
           </div>
+
+          <FlagTimeline flag={flag} />
 
           <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Description</p>
@@ -139,7 +186,7 @@ function FlagDetailModal({
                   <div key={response.id} className="rounded-lg border border-gray-200 p-3">
                     <div className="flex justify-between text-xs text-gray-500">
                       <span>{response.responded_by_username || 'Actor'}</span>
-                      <span>{response.created_at?.slice(0, 10) || ''}</span>
+                      <span>{formatDateTime(response.created_at)}</span>
                     </div>
                     <p className="mt-1 text-sm text-gray-800 whitespace-pre-wrap">{response.message}</p>
                   </div>
@@ -179,6 +226,10 @@ function FlagDetailModal({
               {flag.recommendation.justification && (
                 <p className="mt-2 text-gray-700 whitespace-pre-wrap">{flag.recommendation.justification}</p>
               )}
+              <p className="mt-2 text-xs text-gray-500">
+                Submitted {formatDateTime(flag.recommendation.created_at || flag.escalated_at)}
+                {flag.recommendation.decided_at ? ` · Decided ${formatDateTime(flag.recommendation.decided_at)}` : ''}
+              </p>
               {flag.recommendation.admin_decision_note && (
                 <p className="mt-2 text-gray-700">
                   <span className="font-medium">Admin note:</span> {flag.recommendation.admin_decision_note}
@@ -576,7 +627,7 @@ export function RegulatorCompliancePanel({ initialDraft = null, onDraftConsumed 
               <th className="px-4 py-3 text-left font-semibold text-gray-700">Organisation</th>
               <th className="px-4 py-3 text-left font-semibold text-gray-700">Reason</th>
               <th className="px-4 py-3 text-left font-semibold text-gray-700">Status</th>
-              <th className="px-4 py-3 text-left font-semibold text-gray-700">Date</th>
+              <th className="px-4 py-3 text-left font-semibold text-gray-700">Raised</th>
               <th className="px-4 py-3 text-right font-semibold text-gray-700">Actions</th>
             </tr>
           </thead>
@@ -600,7 +651,12 @@ export function RegulatorCompliancePanel({ initialDraft = null, onDraftConsumed 
                 <td className="px-4 py-3 text-gray-700">{flag.flagged_organisation?.name || '—'}</td>
                 <td className="px-4 py-3 text-gray-700">{flag.reason}</td>
                 <td className="px-4 py-3"><FlagBadge status={displayStatus} /></td>
-                <td className="px-4 py-3 text-gray-600">{flag.created_at?.slice(0, 10)}</td>
+                <td className="px-4 py-3 text-gray-600">
+                  <div>{formatDateTime(flag.raised_at || flag.created_at)}</div>
+                  {flag.resolved_at && <div className="text-xs text-emerald-700">Resolved {formatDateTime(flag.resolved_at)}</div>}
+                  {!flag.resolved_at && flag.escalated_at && <div className="text-xs text-red-700">Escalated {formatDateTime(flag.escalated_at)}</div>}
+                  {!flag.resolved_at && !flag.escalated_at && flag.reviewed_at && <div className="text-xs text-blue-700">Reviewed {formatDateTime(flag.reviewed_at)}</div>}
+                </td>
                 <td className="px-4 py-3 text-right">
                   <button
                     type="button"
@@ -855,7 +911,7 @@ export function AdminCompliancePanel() {
                 <th className="px-4 py-3 text-left font-semibold text-gray-700">Reason</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-700">Status</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-700">Raised by</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-700">Date</th>
+                <th className="px-4 py-3 text-left font-semibold text-gray-700">Raised</th>
                 <th className="px-4 py-3 text-right font-semibold text-gray-700">Actions</th>
               </tr>
             </thead>
@@ -871,7 +927,12 @@ export function AdminCompliancePanel() {
                   <td className="px-4 py-3 text-gray-700">{flag.reason}</td>
                   <td className="px-4 py-3"><FlagBadge status={effectiveFlagStatus(flag)} /></td>
                   <td className="px-4 py-3 text-gray-600">{flag.raised_by_username || '—'}</td>
-                  <td className="px-4 py-3 text-gray-600">{flag.created_at?.slice(0, 10)}</td>
+                  <td className="px-4 py-3 text-gray-600">
+                    <div>{formatDateTime(flag.raised_at || flag.created_at)}</div>
+                    {flag.resolved_at && <div className="text-xs text-emerald-700">Resolved {formatDateTime(flag.resolved_at)}</div>}
+                    {!flag.resolved_at && flag.escalated_at && <div className="text-xs text-red-700">Escalated {formatDateTime(flag.escalated_at)}</div>}
+                    {!flag.resolved_at && !flag.escalated_at && flag.reviewed_at && <div className="text-xs text-blue-700">Reviewed {formatDateTime(flag.reviewed_at)}</div>}
+                  </td>
                   <td className="px-4 py-3 text-right">
                     <button
                       type="button"
@@ -903,7 +964,7 @@ export function AdminCompliancePanel() {
                 <th className="px-4 py-3 text-left font-semibold text-gray-700">Flag</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-700">Recommended action</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-700">Justification</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-700">Date</th>
+                <th className="px-4 py-3 text-left font-semibold text-gray-700">Escalated</th>
                 <th className="px-4 py-3 text-right font-semibold text-gray-700">Decision</th>
               </tr>
             </thead>
@@ -928,7 +989,9 @@ export function AdminCompliancePanel() {
                   </td>
                   <td className="px-4 py-3 text-gray-700">{(row.recommended_action || '').replace(/_/g, ' ')}</td>
                   <td className="px-4 py-3 text-gray-700">{row.justification}</td>
-                  <td className="px-4 py-3 text-gray-600">{row.created_at?.slice(0, 10)}</td>
+                  <td className="px-4 py-3 text-gray-600">
+                    {formatDateTime(row.flag_summary?.escalated_at || row.created_at)}
+                  </td>
                   <td className="px-4 py-3 text-right">
                     <button
                       type="button"
@@ -1177,7 +1240,7 @@ export function ActorCompliancePanel({ roleLabel = 'actor' }) {
                 <th className="px-4 py-3 text-left font-semibold text-gray-700">Target</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-700">Reason</th>
                 <th className="px-4 py-3 text-left font-semibold text-gray-700">Status</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-700">Date</th>
+                <th className="px-4 py-3 text-left font-semibold text-gray-700">Raised</th>
                 <th className="px-4 py-3 text-right font-semibold text-gray-700">Action</th>
               </tr>
             </thead>
@@ -1189,7 +1252,12 @@ export function ActorCompliancePanel({ roleLabel = 'actor' }) {
                   <td className="px-4 py-3 text-gray-800">{flag.target_summary}</td>
                   <td className="px-4 py-3 text-gray-700">{flag.reason}</td>
                   <td className="px-4 py-3"><FlagBadge status={flag.status} /></td>
-                  <td className="px-4 py-3 text-gray-600">{flag.created_at?.slice(0, 10)}</td>
+                  <td className="px-4 py-3 text-gray-600">
+                    <div>{formatDateTime(flag.raised_at || flag.created_at)}</div>
+                    {flag.resolved_at && <div className="text-xs text-emerald-700">Resolved {formatDateTime(flag.resolved_at)}</div>}
+                    {!flag.resolved_at && flag.escalated_at && <div className="text-xs text-red-700">Escalated {formatDateTime(flag.escalated_at)}</div>}
+                    {!flag.resolved_at && !flag.escalated_at && flag.reviewed_at && <div className="text-xs text-blue-700">Reviewed {formatDateTime(flag.reviewed_at)}</div>}
+                  </td>
                   <td className="px-4 py-3 text-right">
                     <button
                       type="button"

@@ -30,6 +30,10 @@ class ComplianceFlag(models.Model):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    # Lifecycle timestamps (created_at = when the flag was raised)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    escalated_at = models.DateTimeField(null=True, blank=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
 
     flagged_supplier = models.ForeignKey(
         "supply_chain.Supplier",
