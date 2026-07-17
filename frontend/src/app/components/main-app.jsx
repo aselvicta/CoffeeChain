@@ -34,7 +34,7 @@ const DASHBOARD_CONFIG = {
   },
   warehouse_manager: {
     defaultTab: 'overview',
-    validTabs: ['overview', 'orders', 'pending', 'inventory', 'compliance', 'history', 'analytics'],
+    validTabs: ['overview', 'orders', 'pending', 'inventory', 'history', 'analytics'],
   },
 };
 

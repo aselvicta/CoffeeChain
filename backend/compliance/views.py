@@ -371,7 +371,7 @@ class OrganisationCertificateViewSet(viewsets.GenericViewSet, mixins.ListModelMi
         org_type, org_id, _ = get_user_organisation(request.user)
         if org_type not in {"supplier", "branch"}:
             return Response(
-                {"detail": "Only suppliers, retailers, cooperatives, or warehouse managers can upload certificates."},
+                {"detail": "Only suppliers, retailers, or cooperatives can upload certificates."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 

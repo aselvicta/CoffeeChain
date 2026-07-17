@@ -98,10 +98,7 @@ def get_user_organisation(user):
     if branch:
         return ("branch", branch.id, branch.name)
 
-    manager = WarehouseManager.objects.select_related("supplier").filter(user=user).first()
-    if manager and manager.supplier_id:
-        return ("supplier", manager.supplier_id, manager.supplier.name)
-
+    # Warehouse managers belong to a supplier org but manage compliance via the supplier account.
     return (None, None, "")
 
 
