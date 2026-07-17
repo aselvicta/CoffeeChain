@@ -14,10 +14,50 @@ from supply_chain.models import (
     WarehouseManager,
 )
 
-from .models import ComplianceFlag
+from .models import AdminRecommendation, ComplianceFlag
 
 
 User = get_user_model()
+
+
+def set_flag_status(flag, status, *, save=True):
+    """Update flag status reliably (avoids custom save/update_fields quirks)."""
+    flag.status = status
+    if save:
+        ComplianceFlag.objects.filter(pk=flag.pk).update(status=status, updated_at=timezone.now())
+        flag.refresh_from_db(fields=["status", "updated_at"])
+    return flag
+
+
+def sync_flag_status_with_recommendation(flag):
+    """
+    Keep flag.status aligned with its recommendation decision.
+    Heals cases where admin actioned/dismissed but UI still showed escalated.
+    """
+    try:
+        recommendation = flag.recommendation
+    except AdminRecommendation.DoesNotExist:
+        return flag
+    except AttributeError:
+        return flag
+
+    if recommendation is None:
+        return flag
+
+    if recommendation.admin_decision in (
+        AdminRecommendation.AdminDecision.ACTIONED,
+        AdminRecommendation.AdminDecision.DISMISSED,
+    ):
+        if flag.status != ComplianceFlag.Status.RESOLVED:
+            set_flag_status(flag, ComplianceFlag.Status.RESOLVED)
+    elif recommendation.admin_decision == AdminRecommendation.AdminDecision.PENDING:
+        if (
+            recommendation.recommended_action != AdminRecommendation.RecommendedAction.NO_ACTION
+            and flag.status != ComplianceFlag.Status.ESCALATED
+        ):
+            set_flag_status(flag, ComplianceFlag.Status.ESCALATED)
+
+    return flag
 
 
 def get_user_organisation(user):

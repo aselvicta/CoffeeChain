@@ -68,16 +68,20 @@ function FlagDetailModal({
   onClose,
   canRespond = false,
   canRecommend = false,
-  canMoveToReview = false,
+  canChangeStatus = false,
   onRespond,
   onRecommend,
-  onMoveToReview,
+  onStatusChange,
 }) {
   const [message, setMessage] = useState('');
   const [action, setAction] = useState('warn');
   const [justification, setJustification] = useState('');
 
   if (!flag) return null;
+
+  const decision = flag.recommendation?.admin_decision;
+  const isResolved = flag.status === 'resolved' || decision === 'actioned' || decision === 'dismissed';
+  const isPendingEscalation = flag.status === 'escalated' && (!decision || decision === 'pending');
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
@@ -98,7 +102,7 @@ function FlagDetailModal({
             </div>
             <div>
               <p className="text-gray-500">Status</p>
-              <FlagBadge status={flag.status} />
+              <FlagBadge status={isResolved ? 'resolved' : flag.status} />
             </div>
             <div>
               <p className="text-gray-500">Reason</p>
@@ -140,37 +144,70 @@ function FlagDetailModal({
             <span className="font-medium text-gray-900">under review</span>
             {' → '}
             <span className="font-medium text-gray-900">escalated</span>
-            {' (via Recommend Action) → '}
+            {' (recommend to admin) → '}
             <span className="font-medium text-gray-900">resolved</span>
-            {' (admin decision)'}
+            {' (admin approve/dismiss)'}
           </div>
 
           {flag.recommendation && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm">
-              <p className="font-semibold text-amber-900 mb-1">Recommendation to admin</p>
-              <p className="text-amber-900">
+            <div className={`rounded-lg border p-4 text-sm ${
+              decision === 'actioned'
+                ? 'border-emerald-200 bg-emerald-50'
+                : decision === 'dismissed'
+                  ? 'border-gray-200 bg-gray-50'
+                  : 'border-amber-200 bg-amber-50'
+            }`}
+            >
+              <p className="font-semibold text-gray-900 mb-1">Recommendation to admin</p>
+              <p className="text-gray-800">
                 {(flag.recommendation.recommended_action || '').replace(/_/g, ' ')}
                 {' · '}
-                Decision: {(flag.recommendation.admin_decision || 'pending').replace(/_/g, ' ')}
+                Decision: {(decision || 'pending').replace(/_/g, ' ')}
               </p>
               {flag.recommendation.justification && (
-                <p className="mt-2 text-amber-800 whitespace-pre-wrap">{flag.recommendation.justification}</p>
+                <p className="mt-2 text-gray-700 whitespace-pre-wrap">{flag.recommendation.justification}</p>
+              )}
+              {flag.recommendation.admin_decision_note && (
+                <p className="mt-2 text-gray-700">
+                  <span className="font-medium">Admin note:</span> {flag.recommendation.admin_decision_note}
+                </p>
               )}
             </div>
           )}
 
-          {canMoveToReview && flag.status === 'open' && (
-            <button
-              type="button"
-              onClick={() => onMoveToReview?.(flag)}
-              className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100"
-            >
-              <ShieldAlert className="h-4 w-4" />
-              Mark Under Review
-            </button>
+          {canChangeStatus && !isResolved && (
+            <div className="rounded-lg border border-gray-200 p-4 space-y-3">
+              <p className="text-sm font-semibold text-gray-900">Update status</p>
+              <div className="flex flex-wrap gap-2">
+                {flag.status === 'open' && (
+                  <button
+                    type="button"
+                    onClick={() => onStatusChange?.(flag, 'under_review')}
+                    className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100"
+                  >
+                    <ShieldAlert className="h-4 w-4" />
+                    Mark under review
+                  </button>
+                )}
+                {flag.status === 'under_review' && (
+                  <button
+                    type="button"
+                    onClick={() => onStatusChange?.(flag, 'open')}
+                    className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  >
+                    Reopen
+                  </button>
+                )}
+                {isPendingEscalation && (
+                  <span className="inline-flex items-center rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                    Waiting for admin approve/dismiss…
+                  </span>
+                )}
+              </div>
+            </div>
           )}
 
-          {canRespond && (
+          {canRespond && !isResolved && (
             <div className="rounded-lg border border-gray-200 p-4 space-y-2">
               <p className="text-sm font-semibold text-gray-900">Respond to this flag</p>
               <textarea
@@ -198,6 +235,7 @@ function FlagDetailModal({
           {canRecommend && !flag.recommendation && ['open', 'under_review'].includes(flag.status) && (
             <div className="rounded-lg border border-gray-200 p-4 space-y-2">
               <p className="text-sm font-semibold text-gray-900">Recommend Action to Admin</p>
+              <p className="text-xs text-gray-500">This escalates the flag and sends it to the admin decision queue.</p>
               <select
                 value={action}
                 onChange={(event) => setAction(event.target.value)}
@@ -226,7 +264,7 @@ function FlagDetailModal({
                 className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-3 py-2 text-sm font-medium text-white hover:bg-amber-700"
               >
                 <AlertTriangle className="h-4 w-4" />
-                Submit Recommendation
+                Escalate to admin
               </button>
             </div>
           )}
@@ -335,11 +373,31 @@ export function RegulatorCompliancePanel({ initialDraft = null, onDraftConsumed 
 
   const filteredFlags = useMemo(() => {
     return flags.filter((flag) => {
-      if (statusFilter !== 'all' && flag.status !== statusFilter) return false;
+      const effectiveStatus = (
+        flag.recommendation_decision === 'actioned'
+        || flag.recommendation_decision === 'dismissed'
+        || flag.recommendation?.admin_decision === 'actioned'
+        || flag.recommendation?.admin_decision === 'dismissed'
+      ) ? 'resolved' : flag.status;
+      if (statusFilter !== 'all' && effectiveStatus !== statusFilter) return false;
       if (orgTypeFilter !== 'all' && (flag.flagged_organisation?.organisation_type || '').toUpperCase() !== orgTypeFilter) return false;
       return true;
     });
   }, [flags, orgTypeFilter, statusFilter]);
+
+  const statusCounts = useMemo(() => {
+    const counts = { all: flags.length, open: 0, under_review: 0, resolved: 0, escalated: 0 };
+    flags.forEach((flag) => {
+      const effectiveStatus = (
+        flag.recommendation_decision === 'actioned'
+        || flag.recommendation_decision === 'dismissed'
+        || flag.recommendation?.admin_decision === 'actioned'
+        || flag.recommendation?.admin_decision === 'dismissed'
+      ) ? 'resolved' : flag.status;
+      if (counts[effectiveStatus] !== undefined) counts[effectiveStatus] += 1;
+    });
+    return counts;
+  }, [flags]);
 
   const orgOptions = form.flagged_organisation_type === 'supplier'
     ? suppliers.map((supplier) => ({ value: supplier.id, label: supplier.name }))
@@ -424,25 +482,23 @@ export function RegulatorCompliancePanel({ initialDraft = null, onDraftConsumed 
   const handleRecommend = async (flag, payload) => {
     try {
       await recommendComplianceAction(flag.id, payload);
-      toast.success('Recommendation sent to admin.');
+      toast.success('Escalated to admin for decision.');
       const detail = await fetchComplianceFlag(flag.id);
       setDetailFlag(detail);
-      syncFlagInList(detail);
-      await loadFlags();
-      applyFlagUpdate(detail, { alignFilter: true });
+      await refreshFlagsFromServer(detail);
+      setStatusFilter(detail.status || 'escalated');
     } catch (error) {
       toast.error(getUserMessage(error, 'Failed to submit recommendation.'));
     }
   };
 
-  const handleMoveToReview = async (flag) => {
+  const handleStatusChange = async (flag, nextStatus) => {
     try {
-      const updated = await updateComplianceFlag(flag.id, { status: 'under_review' });
-      toast.success('Flag moved to under review.');
+      const updated = await updateComplianceFlag(flag.id, { status: nextStatus });
+      toast.success(`Flag moved to ${String(nextStatus).replace(/_/g, ' ')}.`);
       setDetailFlag(updated);
-      syncFlagInList(updated);
-      await loadFlags();
-      applyFlagUpdate(updated, { alignFilter: true });
+      await refreshFlagsFromServer(updated);
+      setStatusFilter(updated.status || nextStatus);
     } catch (error) {
       toast.error(getUserMessage(error, 'Failed to update flag status.'));
     }
@@ -468,9 +524,7 @@ export function RegulatorCompliancePanel({ initialDraft = null, onDraftConsumed 
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 mr-1">Filter</span>
         {['all', 'open', 'under_review', 'resolved', 'escalated'].map((status) => {
-          const count = status === 'all'
-            ? flags.length
-            : flags.filter((flag) => flag.status === status).length;
+          const count = statusCounts[status] ?? 0;
           return (
             <button
               key={status}
@@ -521,12 +575,19 @@ export function RegulatorCompliancePanel({ initialDraft = null, onDraftConsumed 
             {!loading && filteredFlags.length === 0 && (
               <tr><td colSpan={6} className="px-4 py-10 text-center text-gray-500">No flags found.</td></tr>
             )}
-            {!loading && filteredFlags.map((flag) => (
+            {!loading && filteredFlags.map((flag) => {
+              const displayStatus = (
+                flag.recommendation_decision === 'actioned'
+                || flag.recommendation_decision === 'dismissed'
+                || flag.recommendation?.admin_decision === 'actioned'
+                || flag.recommendation?.admin_decision === 'dismissed'
+              ) ? 'resolved' : flag.status;
+              return (
               <tr key={flag.id} className="border-b border-gray-100 hover:bg-gray-50">
                 <td className="px-4 py-3 text-gray-800">{flag.target_summary}</td>
                 <td className="px-4 py-3 text-gray-700">{flag.flagged_organisation?.name || '—'}</td>
                 <td className="px-4 py-3 text-gray-700">{flag.reason}</td>
-                <td className="px-4 py-3"><FlagBadge status={flag.status} /></td>
+                <td className="px-4 py-3"><FlagBadge status={displayStatus} /></td>
                 <td className="px-4 py-3 text-gray-600">{flag.created_at?.slice(0, 10)}</td>
                 <td className="px-4 py-3 text-right">
                   <button
@@ -538,7 +599,8 @@ export function RegulatorCompliancePanel({ initialDraft = null, onDraftConsumed 
                   </button>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -638,9 +700,9 @@ export function RegulatorCompliancePanel({ initialDraft = null, onDraftConsumed 
           flag={detailFlag}
           onClose={() => setDetailFlag(null)}
           canRecommend
-          canMoveToReview
+          canChangeStatus
           onRecommend={handleRecommend}
-          onMoveToReview={handleMoveToReview}
+          onStatusChange={handleStatusChange}
         />
       )}
     </div>
@@ -673,11 +735,16 @@ export function AdminCompliancePanel() {
   const submitDecision = async () => {
     if (!decisionModal || !note.trim()) return;
     try {
-      await decideComplianceRecommendation(decisionModal.id, {
+      const result = await decideComplianceRecommendation(decisionModal.id, {
         admin_decision: decision,
         admin_decision_note: note.trim(),
       });
-      toast.success('Decision saved.');
+      const flagStatus = result?.flag_status || result?.flag_summary?.status || 'resolved';
+      toast.success(
+        decision === 'actioned'
+          ? `Approved — flag is now ${flagStatus}.`
+          : `Dismissed — flag is now ${flagStatus}.`
+      );
       setDecisionModal(null);
       setNote('');
       setDecision('actioned');
@@ -754,8 +821,8 @@ export function AdminCompliancePanel() {
                 onChange={(event) => setDecision(event.target.value)}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
               >
-                <option value="actioned">Approve & Action</option>
-                <option value="dismissed">Dismiss</option>
+                <option value="actioned">Approve & resolve flag</option>
+                <option value="dismissed">Dismiss & resolve flag</option>
               </select>
               <textarea
                 value={note}

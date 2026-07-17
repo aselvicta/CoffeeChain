@@ -72,6 +72,7 @@ class ComplianceFlagListSerializer(serializers.ModelSerializer):
     raised_by_username = serializers.CharField(source="raised_by.username", read_only=True)
     target_summary = serializers.SerializerMethodField()
     flagged_organisation = serializers.SerializerMethodField()
+    recommendation_decision = serializers.SerializerMethodField()
 
     class Meta:
         model = ComplianceFlag
@@ -85,6 +86,7 @@ class ComplianceFlagListSerializer(serializers.ModelSerializer):
             "flagged_organisation",
             "raised_by",
             "raised_by_username",
+            "recommendation_decision",
             "created_at",
             "updated_at",
         ]
@@ -95,6 +97,20 @@ class ComplianceFlagListSerializer(serializers.ModelSerializer):
 
     def get_flagged_organisation(self, obj):
         return serialize_flagged_organisation(obj)
+
+    def get_recommendation_decision(self, obj):
+        try:
+            return obj.recommendation.admin_decision
+        except Exception:
+            return None
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Present healed status to clients even if DB was briefly out of sync.
+        decision = data.get("recommendation_decision")
+        if decision in ("actioned", "dismissed"):
+            data["status"] = "resolved"
+        return data
 
 
 class ComplianceFlagDetailSerializer(ComplianceFlagListSerializer):

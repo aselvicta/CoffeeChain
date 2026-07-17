@@ -1543,6 +1543,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
   const [activeRoleTab, setActiveRoleTab] = useState('supplier');
   const [integrityHighlightId, setIntegrityHighlightId] = useState('');
   const [complianceDraft, setComplianceDraft] = useState(null);
+  const [complianceVisit, setComplianceVisit] = useState(0);
 
   const [suppliers, setSuppliers] = useState([]);
   const [retailers, setRetailers] = useState([]);
@@ -1576,6 +1577,9 @@ export function AdminDashboard({ userProfile, onLogout }) {
     const next = dashboardTabs.includes(tab) ? tab : 'overview';
     if (activeTab === 'compliance' && next !== 'compliance') {
       setComplianceDraft(null);
+    }
+    if (next === 'compliance') {
+      setComplianceVisit((value) => value + 1);
     }
     setActiveTab(next);
     navigate(buildDashboardPath(dashboardRole, next));
@@ -1944,11 +1948,12 @@ export function AdminDashboard({ userProfile, onLogout }) {
           {activeTab === 'compliance' && (
             readOnly ? (
               <RegulatorComplianceHub
+                key={`compliance-${complianceVisit}`}
                 initialDraft={complianceDraft}
                 onDraftConsumed={() => setComplianceDraft(null)}
               />
             ) : (
-              <AdminCompliancePanel />
+              <AdminCompliancePanel key={`admin-compliance-${complianceVisit}`} />
             )
           )}
 

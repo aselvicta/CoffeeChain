@@ -36,6 +36,8 @@ from .services import (
     notify_flag_created,
     notify_flag_response,
     notify_recommendation_submitted,
+    set_flag_status,
+    sync_flag_status_with_recommendation,
 )
 
 
@@ -53,21 +55,34 @@ class ComplianceFlagViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixi
         qs = self.queryset
         user = self.request.user
         if is_admin(user) or is_regulator(user):
-            return qs
+            pass
+        else:
+            supplier = Supplier.objects.filter(user=user).first()
+            if supplier:
+                qs = qs.filter(flagged_supplier=supplier)
+            else:
+                branch = Branch.objects.filter(user=user).first()
+                if branch:
+                    qs = qs.filter(flagged_branch=branch)
+                else:
+                    manager = user.warehouse_manager_profile if hasattr(user, "warehouse_manager_profile") else None
+                    if manager and manager.supplier_id:
+                        qs = qs.filter(flagged_supplier_id=manager.supplier_id)
+                    else:
+                        return qs.none()
 
-        supplier = Supplier.objects.filter(user=user).first()
-        if supplier:
-            return qs.filter(flagged_supplier=supplier)
+        # Heal escalated flags that admin already decided.
+        ComplianceFlag.objects.filter(
+            pk__in=qs.filter(recommendation__admin_decision__in=["actioned", "dismissed"])
+            .exclude(status=ComplianceFlag.Status.RESOLVED)
+            .values_list("pk", flat=True)
+        ).update(status=ComplianceFlag.Status.RESOLVED, updated_at=timezone.now())
 
-        branch = Branch.objects.filter(user=user).first()
-        if branch:
-            return qs.filter(flagged_branch=branch)
+        return qs
 
-        manager = user.warehouse_manager_profile if hasattr(user, "warehouse_manager_profile") else None
-        if manager and manager.supplier_id:
-            return qs.filter(flagged_supplier_id=manager.supplier_id)
-
-        return qs.none()
+    def get_object(self):
+        flag = super().get_object()
+        return sync_flag_status_with_recommendation(flag)
 
     def get_serializer_class(self):
         if self.action == "list":
@@ -116,11 +131,7 @@ class ComplianceFlagViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixi
         next_status = serializer.validated_data.get("status")
         allowed_transitions = {
             ComplianceFlag.Status.OPEN: {ComplianceFlag.Status.UNDER_REVIEW},
-            ComplianceFlag.Status.UNDER_REVIEW: {
-                ComplianceFlag.Status.OPEN,
-                ComplianceFlag.Status.ESCALATED,
-            },
-            ComplianceFlag.Status.ESCALATED: {ComplianceFlag.Status.UNDER_REVIEW},
+            ComplianceFlag.Status.UNDER_REVIEW: {ComplianceFlag.Status.OPEN},
         }
         if next_status and next_status != flag.status:
             allowed = allowed_transitions.get(flag.status, set())
@@ -134,9 +145,7 @@ class ComplianceFlagViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixi
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-
-        serializer.save()
-        flag.refresh_from_db()
+            set_flag_status(flag, next_status)
         AuditLog.objects.create(
             action="compliance_flag_status_updated",
             user=request.user,
@@ -189,8 +198,9 @@ class ComplianceFlagViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixi
         )
 
         if recommendation.recommended_action != AdminRecommendation.RecommendedAction.NO_ACTION:
-            flag.status = ComplianceFlag.Status.ESCALATED
-            flag.save(update_fields=["status", "updated_at"])
+            set_flag_status(flag, ComplianceFlag.Status.ESCALATED)
+        elif flag.status == ComplianceFlag.Status.OPEN:
+            set_flag_status(flag, ComplianceFlag.Status.UNDER_REVIEW)
 
         flag.refresh_from_db()
         notify_recommendation_submitted(recommendation)
@@ -263,14 +273,16 @@ class AdminRecommendationViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
             )
 
             flag = recommendation.flag
-            if recommendation.admin_decision == AdminRecommendation.AdminDecision.ACTIONED:
-                flag.status = ComplianceFlag.Status.RESOLVED
-                flag.save(update_fields=["status", "updated_at"])
-                if recommendation.recommended_action == AdminRecommendation.RecommendedAction.SUSPEND:
+            if recommendation.admin_decision in (
+                AdminRecommendation.AdminDecision.ACTIONED,
+                AdminRecommendation.AdminDecision.DISMISSED,
+            ):
+                set_flag_status(flag, ComplianceFlag.Status.RESOLVED)
+                if (
+                    recommendation.admin_decision == AdminRecommendation.AdminDecision.ACTIONED
+                    and recommendation.recommended_action == AdminRecommendation.RecommendedAction.SUSPEND
+                ):
                     apply_suspend_action_for_flag(flag, decided_by=request.user)
-            elif recommendation.admin_decision == AdminRecommendation.AdminDecision.DISMISSED:
-                flag.status = ComplianceFlag.Status.RESOLVED
-                flag.save(update_fields=["status", "updated_at"])
 
             flag.refresh_from_db()
             recommendation.refresh_from_db()
@@ -288,6 +300,8 @@ class AdminRecommendationViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
             )
 
         notify_admin_decision(recommendation)
+        # Ensure nested flag_summary reflects resolved status.
+        recommendation.flag.refresh_from_db()
         payload = AdminRecommendationSerializer(recommendation).data
         payload["flag_status"] = recommendation.flag.status
         return Response(payload)
