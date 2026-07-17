@@ -1630,7 +1630,11 @@ export function AdminDashboard({ userProfile, onLogout }) {
       );
       setAudit(auditData);
       setUsers(userData);
-      setPendingRecommendationCount(Array.isArray(recommendationData) ? recommendationData.length : 0);
+      setPendingRecommendationCount(
+        Array.isArray(recommendationData)
+          ? recommendationData.length
+          : (Array.isArray(recommendationData?.results) ? recommendationData.results.length : 0)
+      );
       await refreshNotifications();
     } catch (error) {
       setStatusMessage(getUserMessage(error));
@@ -1688,7 +1692,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
         registrations: 'Registration Requests',
         reports: 'Reports',
         integrity: 'Chain Integrity',
-        compliance: 'Regulatory Recommendations',
+        compliance: 'Compliance Flags & Decisions',
         profile: 'My Account',
       };
 

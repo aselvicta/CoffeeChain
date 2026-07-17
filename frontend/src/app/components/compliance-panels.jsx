@@ -63,6 +63,18 @@ function FlagBadge({ status }) {
   );
 }
 
+function asList(data) {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.results)) return data.results;
+  return [];
+}
+
+function effectiveFlagStatus(flag) {
+  const decision = flag?.recommendation_decision || flag?.recommendation?.admin_decision;
+  if (decision === 'actioned' || decision === 'dismissed') return 'resolved';
+  return flag?.status || 'open';
+}
+
 function FlagDetailModal({
   flag,
   onClose,
@@ -322,7 +334,7 @@ export function RegulatorCompliancePanel({ initialDraft = null, onDraftConsumed 
 
   const refreshFlagsFromServer = async (preferDetail = null) => {
     const flagData = await fetchComplianceFlags();
-    let list = Array.isArray(flagData) ? flagData : (flagData?.results || []);
+    let list = asList(flagData);
     if (preferDetail?.id) {
       const exists = list.some((row) => row.id === preferDetail.id);
       list = exists
@@ -460,7 +472,7 @@ export function RegulatorCompliancePanel({ initialDraft = null, onDraftConsumed 
     setSubmitting(true);
     try {
       const created = await createComplianceFlag(payload);
-      toast.success('Compliance flag raised.');
+      toast.success('Compliance flag raised. It is now visible on the admin Compliance page.');
       closeCreateModal();
       setStatusFilter('all');
       setOrgTypeFilter('all');
@@ -710,8 +722,11 @@ export function RegulatorCompliancePanel({ initialDraft = null, onDraftConsumed 
 }
 
 export function AdminCompliancePanel() {
+  const [flags, setFlags] = useState([]);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [detailFlag, setDetailFlag] = useState(null);
   const [decisionModal, setDecisionModal] = useState(null);
   const [decision, setDecision] = useState('actioned');
   const [note, setNote] = useState('');
@@ -719,10 +734,14 @@ export function AdminCompliancePanel() {
   const load = async () => {
     setLoading(true);
     try {
-      const data = await fetchComplianceRecommendations({ decision: 'pending' });
-      setRows(Array.isArray(data) ? data : []);
+      const [flagData, recommendationData] = await Promise.all([
+        fetchComplianceFlags(),
+        fetchComplianceRecommendations({ decision: 'pending' }),
+      ]);
+      setFlags(asList(flagData));
+      setRows(asList(recommendationData));
     } catch (error) {
-      toast.error(getUserMessage(error, 'Failed to load recommendations.'));
+      toast.error(getUserMessage(error, 'Failed to load compliance data.'));
     } finally {
       setLoading(false);
     }
@@ -731,6 +750,43 @@ export function AdminCompliancePanel() {
   useEffect(() => {
     load();
   }, []);
+
+  useEffect(() => {
+    const onFocus = () => {
+      load().catch(() => {});
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
+    };
+  }, []);
+
+  const filteredFlags = useMemo(() => {
+    return flags.filter((flag) => {
+      if (statusFilter === 'all') return true;
+      return effectiveFlagStatus(flag) === statusFilter;
+    });
+  }, [flags, statusFilter]);
+
+  const statusCounts = useMemo(() => {
+    const counts = { all: flags.length, open: 0, under_review: 0, escalated: 0, resolved: 0 };
+    flags.forEach((flag) => {
+      const status = effectiveFlagStatus(flag);
+      if (counts[status] !== undefined) counts[status] += 1;
+    });
+    return counts;
+  }, [flags]);
+
+  const openDetail = async (flagId) => {
+    try {
+      const detail = await fetchComplianceFlag(flagId);
+      setDetailFlag(detail);
+    } catch (error) {
+      toast.error(getUserMessage(error, 'Failed to load flag details.'));
+    }
+  };
 
   const submitDecision = async () => {
     if (!decisionModal || !note.trim()) return;
@@ -755,53 +811,146 @@ export function AdminCompliancePanel() {
   };
 
   return (
-    <div className="space-y-5">
-      <div>
-        <h2 className="text-xl font-bold text-gray-900">Pending Regulatory Recommendations</h2>
-        <p className="text-sm text-gray-500">Review regulator recommendations and record final administrative action.</p>
+    <div className="space-y-8">
+      <div className="space-y-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">Compliance flags</h2>
+            <p className="text-sm text-gray-500">
+              Flags raised by regulators appear here immediately. Escalate actions show in the decision queue below.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => load()}
+            className="sm:ml-auto rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+          >
+            Refresh
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 mr-1">Filter</span>
+          {['all', 'open', 'under_review', 'escalated', 'resolved'].map((status) => (
+            <button
+              key={status}
+              type="button"
+              onClick={() => setStatusFilter(status)}
+              className={`rounded-lg px-3 py-1.5 text-sm font-medium ${statusFilter === status ? 'bg-green-700 text-white' : 'bg-gray-100 text-gray-700'}`}
+            >
+              {status.replace(/_/g, ' ')}
+              <span className={`ml-1.5 text-xs ${statusFilter === status ? 'text-green-100' : 'text-gray-500'}`}>
+                ({statusCounts[status] ?? 0})
+              </span>
+            </button>
+          ))}
+        </div>
+
+        <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b border-gray-200">
+              <tr>
+                <th className="px-4 py-3 text-left font-semibold text-gray-700">Target</th>
+                <th className="px-4 py-3 text-left font-semibold text-gray-700">Organisation</th>
+                <th className="px-4 py-3 text-left font-semibold text-gray-700">Reason</th>
+                <th className="px-4 py-3 text-left font-semibold text-gray-700">Status</th>
+                <th className="px-4 py-3 text-left font-semibold text-gray-700">Raised by</th>
+                <th className="px-4 py-3 text-left font-semibold text-gray-700">Date</th>
+                <th className="px-4 py-3 text-right font-semibold text-gray-700">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && <tr><td colSpan={7} className="px-4 py-10 text-center text-gray-500">Loading flags...</td></tr>}
+              {!loading && filteredFlags.length === 0 && (
+                <tr><td colSpan={7} className="px-4 py-10 text-center text-gray-500">No compliance flags yet.</td></tr>
+              )}
+              {!loading && filteredFlags.map((flag) => (
+                <tr key={flag.id} className="border-b border-gray-100 hover:bg-gray-50">
+                  <td className="px-4 py-3 text-gray-800">{flag.target_summary}</td>
+                  <td className="px-4 py-3 text-gray-700">{flag.flagged_organisation?.name || '—'}</td>
+                  <td className="px-4 py-3 text-gray-700">{flag.reason}</td>
+                  <td className="px-4 py-3"><FlagBadge status={effectiveFlagStatus(flag)} /></td>
+                  <td className="px-4 py-3 text-gray-600">{flag.raised_by_username || '—'}</td>
+                  <td className="px-4 py-3 text-gray-600">{flag.created_at?.slice(0, 10)}</td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      type="button"
+                      onClick={() => openDetail(flag.id)}
+                      className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                    >
+                      View
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 border-b border-gray-200">
-            <tr>
-              <th className="px-4 py-3 text-left font-semibold text-gray-700">Flag</th>
-              <th className="px-4 py-3 text-left font-semibold text-gray-700">Recommended action</th>
-              <th className="px-4 py-3 text-left font-semibold text-gray-700">Justification</th>
-              <th className="px-4 py-3 text-left font-semibold text-gray-700">Date</th>
-              <th className="px-4 py-3 text-right font-semibold text-gray-700">Decision</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && <tr><td colSpan={5} className="px-4 py-10 text-center text-gray-500">Loading recommendations...</td></tr>}
-            {!loading && rows.length === 0 && <tr><td colSpan={5} className="px-4 py-10 text-center text-gray-500">No pending recommendations.</td></tr>}
-            {!loading && rows.map((row) => (
-              <tr key={row.id} className="border-b border-gray-100 hover:bg-gray-50">
-                <td className="px-4 py-3 text-gray-800">
-                  <div className="font-medium">Flag #{row.flag_summary?.id || row.flag}</div>
-                  <div className="text-xs text-gray-500 mt-0.5">{row.flag_summary?.target_summary || '—'}</div>
-                  <div className="text-xs text-gray-500">{row.flag_summary?.flagged_organisation?.name || ''}</div>
-                  {row.flag_summary?.evidence_ref && (
-                    <div className="text-xs text-amber-700 mt-0.5">Evidence: {row.flag_summary.evidence_ref}</div>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-gray-700">{row.recommended_action.replace(/_/g, ' ')}</td>
-                <td className="px-4 py-3 text-gray-700">{row.justification}</td>
-                <td className="px-4 py-3 text-gray-600">{row.created_at?.slice(0, 10)}</td>
-                <td className="px-4 py-3 text-right">
-                  <button
-                    type="button"
-                    onClick={() => setDecisionModal(row)}
-                    className="rounded-lg bg-green-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-800"
-                  >
-                    Decide
-                  </button>
-                </td>
+      <div className="space-y-5">
+        <div>
+          <h2 className="text-xl font-bold text-gray-900">Pending regulatory recommendations</h2>
+          <p className="text-sm text-gray-500">
+            Appears after a regulator escalates a flag with a recommended action. Approve or dismiss here.
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b border-gray-200">
+              <tr>
+                <th className="px-4 py-3 text-left font-semibold text-gray-700">Flag</th>
+                <th className="px-4 py-3 text-left font-semibold text-gray-700">Recommended action</th>
+                <th className="px-4 py-3 text-left font-semibold text-gray-700">Justification</th>
+                <th className="px-4 py-3 text-left font-semibold text-gray-700">Date</th>
+                <th className="px-4 py-3 text-right font-semibold text-gray-700">Decision</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {loading && <tr><td colSpan={5} className="px-4 py-10 text-center text-gray-500">Loading recommendations...</td></tr>}
+              {!loading && rows.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-4 py-10 text-center text-gray-500">
+                    No pending recommendations. Flags above still need a regulator to choose &quot;Escalate to admin&quot;.
+                  </td>
+                </tr>
+              )}
+              {!loading && rows.map((row) => (
+                <tr key={row.id} className="border-b border-gray-100 hover:bg-gray-50">
+                  <td className="px-4 py-3 text-gray-800">
+                    <div className="font-medium">Flag #{row.flag_summary?.id || row.flag}</div>
+                    <div className="text-xs text-gray-500 mt-0.5">{row.flag_summary?.target_summary || '—'}</div>
+                    <div className="text-xs text-gray-500">{row.flag_summary?.flagged_organisation?.name || ''}</div>
+                    {row.flag_summary?.evidence_ref && (
+                      <div className="text-xs text-amber-700 mt-0.5">Evidence: {row.flag_summary.evidence_ref}</div>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-gray-700">{(row.recommended_action || '').replace(/_/g, ' ')}</td>
+                  <td className="px-4 py-3 text-gray-700">{row.justification}</td>
+                  <td className="px-4 py-3 text-gray-600">{row.created_at?.slice(0, 10)}</td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      type="button"
+                      onClick={() => setDecisionModal(row)}
+                      className="rounded-lg bg-green-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-800"
+                    >
+                      Decide
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
+
+      {detailFlag && (
+        <FlagDetailModal
+          flag={detailFlag}
+          onClose={() => setDetailFlag(null)}
+        />
+      )}
 
       {decisionModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setDecisionModal(null)}>
@@ -867,8 +1016,8 @@ export function ActorCompliancePanel({ roleLabel = 'actor' }) {
         fetchComplianceFlags(),
         fetchOrganisationCertificates(),
       ]);
-      setFlags(Array.isArray(flagData) ? flagData : []);
-      setCertificates(Array.isArray(certData) ? certData : []);
+      setFlags(asList(flagData));
+      setCertificates(asList(certData));
     } catch (error) {
       toast.error(getUserMessage(error, 'Failed to load compliance data.'));
     } finally {
@@ -1157,7 +1306,7 @@ export function RegulatorCertificatesPanel() {
     try {
       const params = filter === 'due_soon' ? { due_soon: true } : filter === 'all' ? {} : { status: filter };
       const data = await fetchOrganisationCertificates(params);
-      setRows(Array.isArray(data) ? data : []);
+      setRows(asList(data));
     } catch (error) {
       toast.error(getUserMessage(error, 'Failed to load certificates.'));
     } finally {
