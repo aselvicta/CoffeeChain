@@ -52,7 +52,8 @@ class ComplianceFlagViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixi
     ).prefetch_related("responses")
 
     def get_queryset(self):
-        qs = self.queryset
+        # .all() clones so each request re-hits the DB (class queryset caches after first eval).
+        qs = self.queryset.all()
         user = self.request.user
         if is_admin(user) or is_regulator(user):
             pass
@@ -230,7 +231,8 @@ class AdminRecommendationViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
     serializer_class = AdminRecommendationSerializer
 
     def get_queryset(self):
-        qs = self.queryset
+        # .all() clones so each request re-hits the DB (class queryset caches after first eval).
+        qs = self.queryset.all()
         user = self.request.user
         if is_admin(user) or is_regulator(user):
             pass
@@ -349,7 +351,8 @@ class OrganisationCertificateViewSet(viewsets.GenericViewSet, mixins.ListModelMi
     )
 
     def get_queryset(self):
-        qs = self.queryset
+        # .all() clones so each request re-hits the DB (class queryset caches after first eval).
+        qs = self.queryset.all()
         user = self.request.user
         status_filter = (self.request.query_params.get("status") or "").strip().lower()
         due_soon = (self.request.query_params.get("due_soon") or "").strip().lower() in {"1", "true", "yes"}
