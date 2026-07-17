@@ -1921,7 +1921,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
           {activeTab === 'integrity' && (
             <IntegrityPanel
               highlightTransferId={integrityHighlightId}
-              onRaiseFlag={(item) => {
+              onRaiseFlag={readOnly ? (item) => {
                 const branchId = item.from_branch_id || item.to_branch_id;
                 const supplierId = item.from_supplier_id;
                 setComplianceDraft({
@@ -1937,7 +1937,7 @@ export function AdminDashboard({ userProfile, onLogout }) {
                 });
                 goToTab('compliance');
                 toast.message('Open Raise Flag to finish — transfer details are ready to submit.');
-              }}
+              } : undefined}
             />
           )}
 
