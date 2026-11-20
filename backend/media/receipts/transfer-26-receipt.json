@@ -1,0 +1,40 @@
+{
+  "transfer_id": 26,
+  "transfer_type": "BRANCH_TO_FARMER",
+  "batch": {
+    "id": 3,
+    "code": "SUP-2026-003",
+    "fertilizer_type": "Urea"
+  },
+  "quantity_bags": 30,
+  "farmer": {
+    "ministry_id": "MOA-KAG-031",
+    "name": "Victor Asel",
+    "phone_number": "0745979712",
+    "district": "Bukoba"
+  },
+  "cooperative": {
+    "id": 1,
+    "name": "Bukoba Agro Shop",
+    "district": "Bukoba",
+    "region": "Kagera"
+  },
+  "supplier": null,
+  "delivery_proof_file_cid": null,
+  "verified_at": "2026-07-08T08:26:37.360484+00:00",
+  "verified_by": "retailer1",
+  "otp_attempts": 0,
+  "data_hash": "9b725f297345f36de4aa347887934a42c5cf86e76a9e2439a95d08312f5c47cb",
+  "payload_signature": "SUP-2026-003|30|local-74aa9b4423fbc64f77fead8a8257c3c52ee1638b05e796|26|2026-07-08T08:26:37.360484+00:00",
+  "content_cid": "local-74aa9b4423fbc64f77fead8a8257c3c52ee1638b05e796",
+  "tx_hash": "0xe75791897c75fec37e55869ed05a503ba2e9832d7a6eadd197aef0edbb5720c6",
+  "network": "polygon-amoy",
+  "integrity": {
+    "payload_signature": "SUP-2026-003|30|local-74aa9b4423fbc64f77fead8a8257c3c52ee1638b05e796|26|2026-07-08T08:26:37.360484+00:00",
+    "data_hash": "9b725f297345f36de4aa347887934a42c5cf86e76a9e2439a95d08312f5c47cb",
+    "content_cid": "local-74aa9b4423fbc64f77fead8a8257c3c52ee1638b05e796",
+    "tx_hash": "0xe75791897c75fec37e55869ed05a503ba2e9832d7a6eadd197aef0edbb5720c6",
+    "network": "polygon-amoy",
+    "explorer_url": "https://amoy.polygonscan.com/tx/0xe75791897c75fec37e55869ed05a503ba2e9832d7a6eadd197aef0edbb5720c6"
+  }
+}
